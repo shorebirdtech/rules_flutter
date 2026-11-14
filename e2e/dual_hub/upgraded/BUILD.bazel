@@ -1,0 +1,31 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+
+# What these targets test is which package records reach a program's closure
+# through deps that nothing imports, so the unused-dependency check is off:
+# removing the deps, or importing them, would leave nothing to test.
+package(features = ["-dart_unused_deps"])
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "upgraded",
+)
+
+# `clock` is 1.1.2 in `//hub_a` and 1.1.3 in `//hub_b`, which is the higher and
+# so the one version of the build: each lock's version is a minimum.
+dart_library(
+    name = "upgraded",
+    srcs = ["lib/upgraded.dart"],
+    package = ":pubspec-metadata",
+    deps = [
+        "@hub_a//:clock",
+        "@hub_b//:clock",
+    ],
+)
+
+dart_binary(
+    name = "upgraded_bin",
+    main = "bin/main.dart",
+    visibility = ["//:__pkg__"],
+    deps = [":upgraded"],
+)

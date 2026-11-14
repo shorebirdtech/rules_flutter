@@ -20,10 +20,10 @@ flutter_entitlements_merge(
 )
 
 # The same for the team-signed build, with the team-prefixed group from the
-# git-ignored //device package.
+# per-developer //device package, reached through the `//:device_app_group` flag.
 flutter_entitlements_merge(
     name = "extension_entitlements_team",
-    additions = ["//device:AppGroup.entitlements"],
+    additions = ["//:device_app_group"],
     base = "Sandbox.entitlements",
     tags = ["manual"],
 )

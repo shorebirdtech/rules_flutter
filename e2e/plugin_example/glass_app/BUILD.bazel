@@ -1,10 +1,11 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_dart//dart:defs.bzl", "dart_test")
-load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@rules_flutter//flutter:android.bzl", "flutter_android_aar", "flutter_android_app")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_app", "flutter_ios_simulator_build_test")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
+load("//:ignored_package_test.bzl", "ignored_package_test")
 
 # Draws with //glass_plugin's shaders as a `Paint.shader` and as a
 # `BackdropFilter`, calls its native plugin, and shows one line saying which
@@ -16,10 +17,15 @@ _DEPS = [
     "@deps//:flutter",
 ]
 
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "glass_app",
+)
+
 flutter_application(
     name = "glass_flutter",
-    package_name = "glass_app",
     main = "lib/main.dart",
+    package = ":pubspec-metadata",
     deps = _DEPS,
 )
 
@@ -39,28 +45,24 @@ flutter_ios_app(
 
 flutter_android_app(
     name = "glass_android",
-    package_name = "com.example.glassapp",
     application = ":glass_flutter",
+    application_id = "com.example.glassapp",
     tags = ["manual"],
-    deps = ["//glass_plugin:glass_plugin_android"],
 )
 
 # skwasm: dart2wasm, the macro's renderer.
 flutter_web_app(
     name = "glass_web",
-    package_name = "glass_app",
+    application = ":glass_flutter",
     tags = ["manual"],
-    deps = _DEPS,
 )
 
 # CanvasKit: dart2js.
 flutter_web_bundle(
     name = "glass_web_canvaskit",
-    package_name = "glass_app",
+    application = ":glass_flutter",
     compiler = "dart2js",
-    main = "lib/main.dart",
     tags = ["manual"],
-    deps = _DEPS,
 )
 
 build_test(
@@ -90,7 +92,51 @@ flutter_ios_simulator_build_test(
 # permission it asks for.
 dart_test(
     name = "verify_glass_apk_test",
-    data = [":glass_android"],
+    data = [
+        ":glass_android",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_glass_apk_test.dart",
     tags = ["android"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# The glass plugin, a plugin written in the workspace, in a module for a
+# Gradle-built host app: its AAR is published under the `group` of its Android
+# `flutter_plugin_platform` (`//:verify_android_aar_test`).
+flutter_android_aar(
+    name = "glass_module_aar",
+    package_name = "com.example.glass_app.module",
+    abis = ["arm64-v8a"],
+    application = ":glass_flutter",
+    tags = ["manual"],
+    visibility = ["//:__pkg__"],
+)
+
+# The same with a plugin whose Android `flutter_plugin_platform` sets no
+# `group`: its AAR has no coordinates to publish under, which fails the build.
+flutter_application(
+    name = "no_group_flutter",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = [
+        "//glass_plugin:glass_plugin_no_group",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_android_aar(
+    name = "no_group_module_aar",
+    package_name = "com.example.glass_app.module",
+    abis = ["arm64-v8a"],
+    application = ":no_group_flutter",
+    tags = ["manual"],
+)
+
+ignored_package_test(
+    name = "no_group_aar_test",
+    message = "plugin `glass_plugin` has no Maven group to publish its AAR under. Set `group` on its Android `flutter_plugin_platform`",
+    target_under_test = ":no_group_module_aar",
 )

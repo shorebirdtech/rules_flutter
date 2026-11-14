@@ -24,6 +24,7 @@ import 'run_command.dart';
 import 'run_plan.dart';
 import 'session.dart';
 import 'session_host.dart';
+import 'tooling_daemon.dart';
 import 'toolchain_info.dart';
 import 'vm_service_client.dart';
 import 'vm_service_logs.dart';
@@ -61,9 +62,24 @@ class AttachCommand {
       defaultsTo: true,
       help: 'Launch DevTools for each connection.',
     )
+    ..addFlag(
+      'print-dtd',
+      defaultsTo: false,
+      negatable: false,
+      help:
+          'Print the address of the Dart Tooling Daemon the app is '
+          'registered with. A --machine client reads it from app.dtd.',
+    )
     // No --dart-define: the app reports the defines it was compiled with, and
     // the pipeline builds its dev config with those. A flag here could only
     // repeat them, or contradict the binary that is running.
+    ..addMultiOption(
+      'config',
+      help:
+          'Bazel config from the workspace .bazelrc, matching the ones the '
+          'run used; passed as --config=<name> to every bazel command. Like '
+          '--build-arg, it is not recorded in the app.',
+    )
     ..addMultiOption(
       'build-arg',
       // A bazel flag's value can hold a comma (`--copt=-Wl,-rpath`), and the
@@ -104,7 +120,10 @@ class AttachCommand {
   Future<void> execute() async {
     final debugUrls = _results['debug-url'] as List<String>;
     final target = _results['target'] as String;
-    final userBuildArgs = _results['build-arg'] as List<String>;
+    final userBuildArgs = userBazelFlags(
+      configs: _results['config'] as List<String>,
+      buildArgs: _results['build-arg'] as List<String>,
+    );
     final isMachine = _results['machine'] as bool;
     final devToolsEnabled = _results['devtools'] as bool;
     final httpChannelEnabled = _results['http-control-channel'] as bool;
@@ -225,7 +244,9 @@ class AttachCommand {
           'uri': uri.toString(),
         });
 
-        final vmClient = VmServiceClient();
+        // Attach always reloads (its session loop has no hot-off reason), so
+        // it always offers the services that reach that reload.
+        final vmClient = VmServiceClient(services: host.toolServices);
         try {
           await vmClient.connect(uri);
           // Registered on connect, not once the session is in `sessions`: this
@@ -341,6 +362,31 @@ class AttachCommand {
         buildFlags: ['-c', 'dbg', ...userBuildArgs],
       );
 
+      // Registered once the toolchain's `dart` is known, which is after the
+      // apps were connected: `flutter attach`'s DDS registers each app with
+      // the DTD it hosts, and this is that step.
+      final toolingDaemon = host.toolingDaemon = RunToolingDaemon(
+        start: () => ToolingDaemon.start(
+          dartExecutable: toolchain.dart,
+          workingDirectory: workspace,
+        ),
+        teardown: teardown,
+        protocol: protocol,
+        logger: logger,
+        printUri: _results['print-dtd'] as bool,
+      );
+      for (final session in sessions) {
+        final uri = session.appInstance.vmServiceUri!;
+        session.dtdUri = await toolingDaemon.register(
+          appId: session.appId,
+          vmServiceWsUri: uri.replace(
+            scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+            path: '${uri.path}ws',
+          ),
+          name: dtdAppName(device: session.device.name, target: target),
+        );
+      }
+
       // Assemble the reload pipeline exactly as `run` does on native, with no
       // launch context: attach did not start these processes, so there is
       // nothing of ours to relaunch and no transitioned configuration to
@@ -354,10 +400,9 @@ class AttachCommand {
       // `refreshGenerated` for codegen apps, and asset tracking.
       await NativePipelineAssembler(
         workspace: workspace,
-        toolchain: toolchain,
         target: target,
         configDevice: sessions.first.device,
-        userBuildArgs: userBuildArgs,
+        sessionBuildArgs: userBuildArgs,
         host: host,
         pipeline: pipeline,
         logger: logger,

@@ -1,0 +1,40 @@
+{
+  "assets": {
+    "assets/dir/a.txt": {
+      "variants": [
+        {
+          "asset": "assets/dir/a.txt"
+        }
+      ]
+    },
+    "assets/dir/b.txt": {
+      "variants": [
+        {
+          "asset": "assets/dir/b.txt"
+        }
+      ]
+    },
+    "assets/dir/sub/deep.txt": {
+      "variants": [
+        {
+          "asset": "assets/dir/sub/deep.txt"
+        }
+      ]
+    },
+    "assets/img/hero.png": {
+      "variants": [
+        {
+          "asset": "assets/img/hero.png"
+        },
+        {
+          "asset": "assets/img/2.0x/hero.png",
+          "dpr": 2.0
+        },
+        {
+          "asset": "assets/img/3.0x/hero.png",
+          "dpr": 3.0
+        }
+      ]
+    }
+  }
+}

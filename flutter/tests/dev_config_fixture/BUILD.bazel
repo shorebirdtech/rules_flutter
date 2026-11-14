@@ -1,4 +1,5 @@
 load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata")
 load("//flutter/tests:dev_config_test.bzl", "source_tree")
 
 # A package that arrives as one built directory. Its package config root is
@@ -8,9 +9,14 @@ source_tree(
     tags = ["manual"],
 )
 
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "prebuilt",
+)
+
 dart_library(
     name = "prebuilt",
-    package_name = "prebuilt",
+    package = ":pubspec-metadata",
     srcs_dir = ":tree",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],

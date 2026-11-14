@@ -46,6 +46,8 @@ void main() {
           'linux-arm64-profile/linux-arm64-flutter-gtk.zip',
           'windows-x64-profile/windows-x64-flutter.zip',
           'ios-profile/artifacts.zip',
+          'android-arm-profile/artifacts.zip',
+          'android-arm-profile/linux-x64.zip',
           'android-arm64-profile/artifacts.zip',
           'android-x64-profile/windows-x64.zip',
         ]),
@@ -56,6 +58,9 @@ void main() {
       expect(
         artifacts,
         containsAll([
+          'android-arm-release/artifacts.zip',
+          'android-arm/artifacts.zip',
+          'android-arm-release/darwin-x64.zip',
           'android-arm64-release/artifacts.zip',
           'android-x64/artifacts.zip',
           'android-arm64-release/darwin-x64.zip',

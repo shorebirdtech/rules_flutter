@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/native_patch_delivery.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
@@ -49,7 +50,7 @@ void main() {
       appDirectory: appDirectory.path,
       name: 'patch1.libmul.dylib',
     );
-    expect(path, '${appDirectory.path}/patch1.libmul.dylib');
+    expect(path, p.join(appDirectory.path, 'patch1.libmul.dylib'));
     expect(File(path).readAsStringSync(), 'p');
   });
 

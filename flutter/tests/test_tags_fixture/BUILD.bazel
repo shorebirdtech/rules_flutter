@@ -1,0 +1,50 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_test")
+
+# Four tests of one package, left `manual`; only the analysis tests build them.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "test_tags_fixture",
+)
+
+flutter_test(
+    name = "plain",
+    main = "main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
+)
+
+flutter_test(
+    name = "tagged",
+    exclude_tags = ["flaky"],
+    include_tags = [
+        "a",
+        "b || c",
+    ],
+    main = "main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
+)
+
+flutter_test(
+    name = "empty_entry",
+    include_tags = [""],
+    main = "main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
+)
+
+flutter_test(
+    name = "comma_entry",
+    include_tags = ["a,b"],
+    main = "main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__pkg__"],
+    deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
+)

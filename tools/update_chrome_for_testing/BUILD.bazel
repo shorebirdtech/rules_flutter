@@ -1,0 +1,15 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+
+dart_binary(
+    name = "update_chrome_for_testing",
+    srcs = ["chrome_for_testing.dart"],
+    main = "main.dart",
+    deps = ["@dev_tool_deps//:crypto"],
+)
+
+dart_test(
+    name = "chrome_for_testing_test",
+    srcs = ["chrome_for_testing.dart"],
+    main = "test/chrome_for_testing_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)

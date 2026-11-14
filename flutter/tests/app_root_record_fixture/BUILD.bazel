@@ -1,0 +1,53 @@
+# A `flutter_library` at the root of an app's own directory, with a code asset
+# and a licence, and an app at that root naming the same `dart_package_metadata`;
+# and an app over a library at that root naming none. See
+# `//flutter/tests:app_root_record_test.bzl`.
+
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+load("//flutter/tests:app_root_record_test.bzl", "app_record_probe")
+load("//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_code_asset")
+
+package(default_visibility = ["//flutter/tests:__pkg__"])
+
+stand_in_code_asset(
+    name = "system_asset",
+    asset_id = "package:app_root_record_fixture/system",
+    link_mode = "dynamic_loading_system",
+    uri = "libapp_root_record_fixture.so",
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "app_root_record_fixture",
+    code_assets = [":system_asset"],
+    language_version = "3.5",
+    license_file = "LICENSE",
+)
+
+flutter_library(
+    name = "root_library",
+    srcs = ["lib/root_record.dart"],
+    package = ":pubspec-metadata",
+)
+
+app_record_probe(
+    name = "app",
+    package = ":pubspec-metadata",
+    deps = [":root_library"],
+)
+
+# A library of the directory's package that names no declaration: named after
+# the directory, as the package is, but stating none of its facts.
+flutter_library(
+    name = "undeclared_library",
+    srcs = ["lib/root_record.dart"],
+    tags = ["manual"],
+)
+
+# Fails analysis: only the analysistest that expects it builds it.
+app_record_probe(
+    name = "app_over_undeclared_library",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = [":undeclared_library"],
+)

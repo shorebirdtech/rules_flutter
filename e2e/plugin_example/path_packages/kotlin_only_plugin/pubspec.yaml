@@ -1,0 +1,23 @@
+# A `path` package with no Bazel build: an Android plugin implementation that
+# is only Kotlin and a Gradle build, as a federated plugin's `<name>_android`
+# package often is. `flutter_pub.from_lock(build_from_pubspec = ...)` builds it
+# from this pubspec and its Gradle build, as a package from pub.dev is built.
+name: kotlin_only_plugin
+description: A Kotlin-only Android plugin, built from its pubspec.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.example.kotlin_only_plugin
+        pluginClass: KotlinOnlyPlugin

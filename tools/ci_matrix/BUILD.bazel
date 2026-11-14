@@ -1,0 +1,64 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+
+# Prints the matrix of the E2E jobs in .github/workflows/ci.yaml and checks
+# that tools/ci_matrix/e2e_matrix.dart accounts for every workspace under e2e/
+# on every operating system. The workflow's `plan` job runs the same file with
+# plain `dart run`.
+#   bazel run //tools/ci_matrix
+# `tools/vm/run_e2e.dart` imports the table by relative path, to run on a VM what
+# CI runs on that system.
+exports_files(
+    ["e2e_matrix.dart"],
+    visibility = ["//tools:__subpackages__"],
+)
+
+dart_binary(
+    name = "ci_matrix",
+    srcs = [
+        "e2e_matrix.dart",
+        "//tools/e2e_workspaces:e2e_workspaces.dart",
+    ],
+    main = "ci_matrix.dart",
+)
+
+dart_test(
+    name = "ci_matrix_test",
+    size = "small",
+    srcs = ["e2e_matrix.dart"],
+    main = "test/ci_matrix_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# Every non-local `uses:` in a workflow names a full commit SHA and the ref it
+# came from. See pinned_actions_test.dart.
+dart_test(
+    name = "pinned_actions_test",
+    size = "small",
+    data = ["//.github/workflows"],
+    env = {
+        "WORKFLOWS": "$(rlocationpaths //.github/workflows:workflows)",
+        "RUNFILES_SOURCE_REPO": "",
+    },
+    main = "test/pinned_actions_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+# The Windows E2E job's output base leaves aapt2 room. See
+# windows_paths_test.dart.
+dart_test(
+    name = "windows_paths_test",
+    size = "small",
+    data = ["//.github/workflows:ci.yaml"],
+    env = {
+        "CI_WORKFLOW": "$(rlocationpath //.github/workflows:ci.yaml)",
+        "RUNFILES_SOURCE_REPO": "",
+    },
+    main = "test/windows_paths_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)

@@ -101,6 +101,7 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 5)),
+      tags: 'macos',
     );
 
     test(
@@ -168,6 +169,7 @@ void main() {
         }
       },
       timeout: const Timeout(Duration(minutes: 6)),
+      tags: 'web',
     );
   });
 }

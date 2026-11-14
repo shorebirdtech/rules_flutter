@@ -1,0 +1,54 @@
+# A library another package also names `libcombined`, and one whose iOS
+# framework name is `combined`'s: no app can bundle either beside it.
+
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_code_asset")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+[
+    write_file(
+        name = "%s_%s" % (library, ext),
+        out = "%s.%s" % (library, ext),
+        content = [
+            library,
+            "",
+        ],
+        newline = "unix",
+    )
+    for library in [
+        "libcombined",
+        "combined",
+    ]
+    for ext in [
+        "dylib",
+        "so",
+    ]
+]
+
+[
+    alias(
+        name = library + "_lib",
+        actual = select({
+            "@platforms//os:ios": ":%s_dylib" % library,
+            "@platforms//os:macos": ":%s_dylib" % library,
+            "//conditions:default": ":%s_so" % library,
+        }),
+    )
+    for library in [
+        "libcombined",
+        "combined",
+    ]
+]
+
+stand_in_code_asset(
+    name = "b_same_file_name",
+    asset_id = "package:shared_b/b",
+    library = ":libcombined_lib",
+)
+
+stand_in_code_asset(
+    name = "b_same_framework_name",
+    asset_id = "package:shared_b/b",
+    library = ":combined_lib",
+)

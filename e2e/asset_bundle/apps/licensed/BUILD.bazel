@@ -1,0 +1,35 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+load("//tools:bundle.bzl", "bundled_app", "tree_of")
+
+# An application that states its own licence and the files its pubspec's
+# `flutter: licenses:` lists. The licence is a fact of the package, so the
+# applications that state one are a package of their own.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "licensed_app",
+    license_file = "licenses/LICENSE",
+)
+
+bundled_app(
+    name = "app_with_licences",
+    additional_licenses = ["licenses/THIRD_PARTY.txt"],
+    package = ":pubspec-metadata",
+)
+
+flutter_web_app(
+    name = "web_with_licences",
+    application = ":app_with_licences",
+    js_fallback = False,
+)
+
+tree_of(
+    name = "web_with_licences_bundle",
+    src = ":web_with_licences",
+    visibility = ["//visibility:public"],
+)
+
+exports_files([
+    "licenses/LICENSE",
+    "licenses/THIRD_PARTY.txt",
+])

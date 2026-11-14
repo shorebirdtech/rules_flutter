@@ -1,7 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:test/test.dart';
 
 // Import the library directly.
 import '../merge_plists.dart';
+import 'binary_plist_fixture.dart';
 
 /// `macos/Runner/DebugProfile.entitlements` exactly as `flutter create`
 /// emits it.
@@ -373,6 +376,65 @@ void main() {
         dropEmptyKeys: const {'CFBundleSomethingElse'},
       );
       expect(keysOf(merged), contains('CFBundleIconFile'));
+    });
+  });
+
+  group('binary plists', () {
+    // What the dev build does with a user's Info.plist saved in binary form.
+    String mergeBinary(Uint8List base, String addition) => mergePlists(
+      base: (path: 'Info.plist', xml: plistXml(base, 'Info.plist')),
+      additionSources: [(path: 'vm.plist', xml: addition)],
+      mode: MergeMode.supplement,
+    );
+
+    test('a binary base merges with an XML addition', () {
+      final merged = mergeBinary(fixtureBinary(), _vmServiceSupplement);
+      expect(
+        keysOf(merged),
+        containsAll(['CFBundleName', 'Modes', 'NSBonjourServices']),
+      );
+      expect(valueOf(merged, 'CFBundleName'), '<string>A&amp;B</string>');
+      expect(valueOf(merged, 'On').trim(), '<true/>');
+    });
+
+    test('substitutions replace variables in the base', () {
+      const base = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>Lang</key>
+	<string>\$(DEVELOPMENT_LANGUAGE)</string>
+</dict>
+</plist>
+''';
+      final merged = mergePlists(
+        base: (path: 'Info.plist', xml: base),
+        additionSources: const [],
+        mode: MergeMode.supplement,
+        substitutions: const {'\$(DEVELOPMENT_LANGUAGE)': 'en'},
+      );
+      expect(valueOf(merged, 'Lang'), '<string>en</string>');
+    });
+
+    test('the merged plist is XML', () {
+      final merged = mergeBinary(fixtureBinary(), _vmServiceSupplement);
+      expect(merged, startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
+    });
+
+    test('a malformed binary plist names the file', () {
+      final truncated = Uint8List.sublistView(fixtureBinary(), 0, 60);
+      expect(
+        () => plistXml(truncated, 'ios/Runner/Info.plist'),
+        throwsA(
+          isA<PlistFormatException>()
+              .having((e) => e.message, 'message', contains('Info.plist'))
+              .having(
+                (e) => e.message,
+                'message',
+                contains('malformed binary plist'),
+              ),
+        ),
+      );
     });
   });
 

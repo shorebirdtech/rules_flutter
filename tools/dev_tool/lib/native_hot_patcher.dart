@@ -17,10 +17,13 @@
 /// ## When to ask
 ///
 /// On every hot reload, cheaply. A patch build costs a bazel invocation, so it
-/// only happens when something says the library's code may have moved: one of
-/// the source files the builder declared has a new size or mtime, or the
-/// reload's own rebuild (a codegen app's) moved the library itself. A Dart-only
-/// edit stats a handful of files and costs nothing else.
+/// only happens when something says the library's code may have moved: the
+/// content of one of the source files the builder declared differs from what
+/// was last built, or the reload's own rebuild (a codegen app's) moved the
+/// library itself. A Dart-only edit hashes a handful of source files and costs
+/// nothing else. Content, not size and mtime: those say "unchanged" about a file
+/// rewritten to the same size inside one mtime tick, or by a tool that keeps the
+/// old mtime.
 ///
 /// ## Against what
 ///
@@ -76,12 +79,12 @@ class _Patchable {
   final NativePatchTool tool;
   final String libraryFileName;
   final String stateDirectory;
-  Map<String, String> sourceStamps;
+  Map<String, String> sourceDigests;
 
   _Patchable({
     required this.tool,
     required this.stateDirectory,
-    required this.sourceStamps,
+    required this.sourceDigests,
   }) : libraryFileName = p.basename(tool.manifest.library);
 }
 
@@ -260,7 +263,7 @@ class NativeHotPatcher {
         _Patchable(
           tool: tool,
           stateDirectory: state.path,
-          sourceStamps: await _stamps(manifest.sources),
+          sourceDigests: await _digests(manifest.sources),
         ),
       );
     }
@@ -344,12 +347,12 @@ class NativeHotPatcher {
   ///
   /// For a restart that kept the process: one that did not relaunch runs what
   /// the tree builds, so a moved source means this snapshot no longer describes
-  /// it, and the caller re-snapshots with [rebaseline]. A stat per source, so
-  /// asking costs a restart nothing when no native source was touched.
+  /// it, and the caller re-snapshots with [rebaseline]. A hash per source, so
+  /// asking costs a restart next to nothing when no native source was touched.
   Future<bool> sourcesMoved() async {
     for (final library in _libraries) {
-      final stamps = await _stamps(library.tool.manifest.sources);
-      if (!_sameStamps(stamps, library.sourceStamps)) return true;
+      final digests = await _digests(library.tool.manifest.sources);
+      if (!_sameDigests(digests, library.sourceDigests)) return true;
     }
     return false;
   }
@@ -363,8 +366,8 @@ class NativeHotPatcher {
   }) async {
     final moved = <_Patchable>[];
     for (final library in _libraries) {
-      final stamps = await _stamps(library.tool.manifest.sources);
-      if (!_sameStamps(stamps, library.sourceStamps) ||
+      final digests = await _digests(library.tool.manifest.sources);
+      if (!_sameDigests(digests, library.sourceDigests) ||
           movedLibraries.contains(library.libraryFileName)) {
         moved.add(library);
       }
@@ -373,9 +376,9 @@ class NativeHotPatcher {
 
     // Taken before the build: a source saved while bazel reads it is not in
     // what bazel builds, and recording it as delivered would lose that edit.
-    final stampsBefore = {
+    final digestsBefore = {
       for (final library in moved)
-        library: await _stamps(library.tool.manifest.sources),
+        library: await _digests(library.tool.manifest.sources),
     };
 
     final built = await build();
@@ -483,8 +486,9 @@ class NativeHotPatcher {
         ],
       );
     }
-    for (final MapEntry(key: library, value: stamps) in stampsBefore.entries) {
-      library.sourceStamps = stamps;
+    for (final MapEntry(key: library, value: digests)
+        in digestsBefore.entries) {
+      library.sourceDigests = digests;
     }
     _lastChanged = [
       for (final app in apps)
@@ -594,18 +598,19 @@ class NativeHotPatcher {
     }
   }
 
-  Future<Map<String, String>> _stamps(List<String> sources) async => {
+  Future<Map<String, String>> _digests(List<String> sources) async => {
     for (final source in sources)
-      source: await _stamp(p.join(workspace, source)),
+      source: await _digest(p.join(workspace, source)),
   };
 
-  static Future<String> _stamp(String path) async {
-    final stat = await File(path).stat();
-    if (stat.type == FileSystemEntityType.notFound) return 'missing';
-    return '${stat.size}:${stat.modified.microsecondsSinceEpoch}';
+  /// A source's content token. A deleted source answers a token of its own,
+  /// rather than throwing: deleting it is an edit like any other.
+  static Future<String> _digest(String path) async {
+    if (!File(path).existsSync()) return 'missing';
+    return (await nativeLibsFingerprintOfFiles([path]))[path]!;
   }
 
-  static bool _sameStamps(Map<String, String> a, Map<String, String> b) =>
+  static bool _sameDigests(Map<String, String> a, Map<String, String> b) =>
       a.length == b.length && a.entries.every((e) => b[e.key] == e.value);
 
   /// Delete this patcher's scratch directory.

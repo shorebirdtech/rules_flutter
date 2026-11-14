@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/app_instance.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/applied_versions.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/compiler.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_bazel_dev_tool/hot_reload/source_uri_resolver.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/reload_orchestrator.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/session_reloader.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
+import 'package:flutter_bazel_dev_tool/outcome_renderer.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -40,7 +42,7 @@ void main() {
       workspace = Workspace(
         resolver: SourceUriResolver(
           workspaceRoot: tmp.path,
-          sourcePackages: const [(name: 'app', libRoot: '')],
+          sourcePackages: const [(name: 'app', packageRoot: '')],
         ),
       );
       applied = AppliedVersions();
@@ -201,7 +203,7 @@ void main() {
         final ws = Workspace(
           resolver: SourceUriResolver(
             workspaceRoot: tmp.path,
-            sourcePackages: const [(name: 'app', libRoot: '')],
+            sourcePackages: const [(name: 'app', packageRoot: '')],
           ),
           generatedFiles: {genUri: genFile.path},
         );
@@ -578,10 +580,15 @@ void main() {
       },
     );
 
-    test('restart() invalidates only what changed since the baseline, as '
-        'flutter_tools does', () async {
+    // The compiler's `reset` makes its answer a whole program but recompiles
+    // only what it is told changed; told every file, it recompiles every
+    // first-party library on each restart. Told less than the gap, the
+    // restarted app runs old code for what was left out.
+    test('restart() invalidates exactly what changed since the baseline, and '
+        'the restarted app is current in every file', () async {
       writeFile('a.dart', 'a-v1');
       writeFile('b.dart', 'b-v1');
+      writeFile('c.dart', 'c-v1');
       seedApplied();
       final orchestrator = makeOrchestrator();
       writeFile('b.dart', 'b-v2 longer');
@@ -590,16 +597,70 @@ void main() {
         await orchestrator.restart(targets: [app]),
         isA<ReloadApplied>(),
       );
-      expect(
-        compiler.fullCompileCalls.single.invalidated.map(p.basename),
-        ['b.dart'],
-      );
-      // The restarted app runs the whole snapshot, a.dart included.
+      expect(compiler.fullCompileCalls.single.invalidated, {
+        uriFor('b.dart'),
+      });
       expect(
         await orchestrator.reload(targets: [app]),
         isA<ReloadNoChange>(),
+        reason: 'the restarted app runs the whole snapshot, a.dart included',
       );
     });
+
+    test(
+      'a restart the app refused keeps its gap for the next restart',
+      () async {
+        writeFile('a.dart', 'a-v1');
+        writeFile('b.dart', 'b-v1');
+        seedApplied();
+        final orchestrator = makeOrchestrator();
+        writeFile('b.dart', 'b-v2 longer');
+
+        app.nextOutcome = const ApplyFailed('device error');
+        await orchestrator.restart(targets: [app]);
+        expect(compiler.rollbackCount, 1);
+
+        app.nextOutcome = const Applied();
+        writeFile('a.dart', 'a-v2 longer');
+        expect(
+          await orchestrator.restart(targets: [app]),
+          isA<ReloadApplied>(),
+        );
+        expect(compiler.fullCompileCalls.last.invalidated, {
+          uriFor('a.dart'),
+          uriFor('b.dart'),
+        });
+      },
+    );
+
+    test(
+      'a restart after a reload that delivered the edit is never empty',
+      () async {
+        // The reload already gave the app every file disk has, so a per-file
+        // comparison finds nothing new. The restart still compiled the whole
+        // program and re-ran `main()` on it, losing the state a reload kept.
+        writeFile('main.dart', 'v1');
+        seedApplied();
+        final orchestrator = makeOrchestrator();
+        writeFile('main.dart', 'v2 longer');
+        expect(
+          await orchestrator.reload(targets: [app]),
+          isA<ReloadApplied>().having((o) => o.isEmpty, 'isEmpty', isFalse),
+        );
+
+        final restart = await orchestrator.restart(targets: [app]);
+        expect(
+          restart,
+          isA<ReloadApplied>().having((o) => o.isEmpty, 'isEmpty', isFalse),
+        );
+        expect(
+          toWire(
+            CommandReport(verb: 'Restart', outcome: restart),
+          )['runningCode'],
+          'updated',
+        );
+      },
+    );
 
     test(
       'reload() over an in-flight first reload still completes (Pool(1) external + bounded compiler)',

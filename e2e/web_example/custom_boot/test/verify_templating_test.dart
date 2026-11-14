@@ -9,40 +9,25 @@
 /// Runs as a Bazel dart_test with the bundles as data dependencies.
 library;
 
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log, so `print` is its output
-// channel rather than a stray debugging statement.
-// ignore_for_file: avoid_print
-
-import 'dart:io';
+import 'package:rules_flutter_e2e_testing/bundle_check.dart';
+import 'package:rules_flutter_e2e_testing/web_bundle.dart';
 
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
-  var failed = false;
-  void fail(String message) {
-    stderr.writeln('FAIL — $message');
-    failed = true;
-  }
-
-  String read(String path) {
-    final file = File(path);
-    if (!file.existsSync()) {
-      fail('expected file not found at $path');
-      return '';
-    }
-    return file.readAsStringSync();
-  }
-
-  final root = '$testSrcDir/$testWorkspace/custom_boot';
+  final check = BundleCheck();
+  final customBoot = WebBundle.fromRunfiles(
+    'custom_boot/custom_boot_web',
+    check,
+    label: 'custom_boot',
+  );
+  final inlineBoot = WebBundle.fromRunfiles(
+    'custom_boot/inline_boot_web',
+    check,
+    label: 'inline_boot',
+  );
+  final fail = check.fail;
 
   // -- Tier 1, both templates supplied ------------------------------------
-  final index = read('$root/custom_boot_web/index.html');
+  final index = customBoot.read('index.html') ?? '';
 
   if (!index.contains('content="https://api.example.com"')) {
     fail('web_defines did not reach index.html:\n$index');
@@ -60,7 +45,7 @@ void main() {
     fail(r'$FLUTTER_BASE_HREF was not substituted in index.html');
   }
 
-  final bootstrap = read('$root/custom_boot_web/flutter_bootstrap.js');
+  final bootstrap = customBoot.read('flutter_bootstrap.js') ?? '';
 
   // The override: the user's file is what ships.
   if (!bootstrap.contains('rules_flutter_custom_bootstrap_marker')) {
@@ -84,8 +69,8 @@ void main() {
   }
 
   // -- Tier 2, bootstrap inlined into the page -----------------------------
-  final inlineIndex = read('$root/inline_boot_web/index.html');
-  final inlineBootstrap = read('$root/inline_boot_web/flutter_bootstrap.js');
+  final inlineIndex = inlineBoot.read('index.html') ?? '';
+  final inlineBootstrap = inlineBoot.read('flutter_bootstrap.js') ?? '';
 
   if (inlineIndex.contains('{{flutter_bootstrap_js}}')) {
     fail('inline_boot/index.html still carries {{flutter_bootstrap_js}}');
@@ -103,8 +88,5 @@ void main() {
     );
   }
 
-  if (failed) {
-    exit(1);
-  }
-  print('All web templating checks passed.');
+  check.finish('All web templating checks passed.');
 }

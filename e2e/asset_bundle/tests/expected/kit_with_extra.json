@@ -1,0 +1,55 @@
+{
+  "assets": {
+    "assets/a.png": {
+      "variants": [
+        {
+          "asset": "assets/a.png"
+        },
+        {
+          "asset": "assets/2.0x/a.png",
+          "dpr": 2.0
+        },
+        {
+          "asset": "assets/3.0x/a.png",
+          "dpr": 3.0
+        }
+      ]
+    },
+    "assets/c.png": {
+      "variants": [
+        {
+          "asset": "assets/c.png"
+        },
+        {
+          "asset": "assets/1.5x/c.png",
+          "dpr": 1.5
+        }
+      ]
+    },
+    "assets/f.png": {
+      "variants": [
+        {
+          "asset": "assets/f.png"
+        },
+        {
+          "asset": "assets/2x/f.png",
+          "dpr": 2.0
+        }
+      ]
+    },
+    "assets/b.txt": {
+      "variants": [
+        {
+          "asset": "assets/b.txt"
+        }
+      ]
+    },
+    "assets/extra/x.txt": {
+      "variants": [
+        {
+          "asset": "assets/extra/x.txt"
+        }
+      ]
+    }
+  }
+}

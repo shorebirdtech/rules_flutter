@@ -1,5 +1,7 @@
 """Shared validation and sanitization helpers for Flutter rules."""
 
+load("//flutter/private:sdk_defines.bzl", "VERSION_DEFINE_KEYS")
+
 def validate_bundle_id(bundle_id):
     """Validate that a bundle_id is a well-formed reverse-DNS identifier.
 
@@ -173,11 +175,8 @@ def validate_web_compiler_renderer(compiler, renderer):
 def validate_web_wasm_only_attrs(compiler, set_attrs, what):
     """Refuse wasm-only settings on a target that runs no wasm compile.
 
-    `compiler = "dart2wasm"` runs both compilers — dart2wasm for the app and
-    dart2js for the browsers without WASM — so a dart2js-only setting is live
-    in both compiler modes. The reverse is not true: `compiler = "dart2js"`
-    runs no wasm compile at all, and a wasm-only setting there would be
-    accepted and reach nothing.
+    `compiler = "dart2js"` runs no wasm compile at all, so a wasm-only setting
+    there would be accepted and reach nothing.
 
     Args:
         compiler: The target's `compiler` attr value.
@@ -193,9 +192,139 @@ def validate_web_wasm_only_attrs(compiler, set_attrs, what):
             ", ".join(sorted(set_attrs)),
             "" if len(set_attrs) > 1 else "s",
         ) +
-        "runs none. Drop the setting, or switch to `compiler = \"dart2wasm\"` " +
-        "— which also builds a dart2js fallback, so the JS settings still apply.",
+        "runs none. Drop the setting, or switch to `compiler = \"dart2wasm\"`.",
     )
+
+def validate_web_js_only_attrs(compiler, js_fallback, set_attrs, what):
+    """Refuse dart2js-only settings on a target that runs no dart2js compile.
+
+    `compiler = "dart2wasm"` runs dart2js for the fallback build unless
+    `js_fallback = False` turns it off, and then a dart2js-only setting reaches
+    nothing: it would be accepted and silently ignored.
+
+    Args:
+        compiler: The target's `compiler` attr value.
+        js_fallback: The target's `js_fallback` attr value.
+        set_attrs: Names of dart2js-only attrs the target set away from their
+            defaults. Determined by the caller, which is where the values are.
+        what: Label named in the failure message.
+    """
+    if compiler == "dart2js" or js_fallback or not set_attrs:
+        return
+    fail(
+        "%s: %s only affect%s the dart2js compile, and `compiler = \"dart2wasm\"` " % (
+            what,
+            ", ".join(sorted(set_attrs)),
+            "" if len(set_attrs) > 1 else "s",
+        ) +
+        "with `js_fallback = False` runs none. Drop the setting, drop " +
+        "`js_fallback = False`, or switch to `compiler = \"dart2js\"`.",
+    )
+
+def validate_web_js_fallback(compiler, js_fallback, what):
+    """Refuse `js_fallback = False` where the whole build is JavaScript.
+
+    `js_fallback` defaults to True, so it can only be told apart from unset
+    when it is False. `compiler = "dart2js"` has no WASM build for a JS one to
+    back up, and asking for no JS build beside it contradicts it.
+
+    Args:
+        compiler: The target's `compiler` attr value.
+        js_fallback: The target's `js_fallback` attr value.
+        what: Label named in the failure message.
+    """
+    if compiler == "dart2js" and not js_fallback:
+        fail(
+            "%s: `js_fallback = False` asks for no JavaScript build beside the WASM " % what +
+            "one, and `compiler = \"dart2js\"` is JavaScript alone. Drop `js_fallback`, " +
+            "or switch to `compiler = \"dart2wasm\"`.",
+        )
+
+# The browser engines flutter.js knows, as its `BrowserEngine` type names them
+# (`flutter_js/src/types.d.ts`) and as its `wasmAllowList` is keyed. `blink` is
+# Chromium (Chrome, Edge), `gecko` Firefox, `webkit` Safari; `unknown` is what
+# an engine flutter.js cannot classify reports.
+WASM_BROWSER_ENGINES = ["blink", "gecko", "webkit", "unknown"]
+
+def validate_wasm_browsers(wasm_browsers, compiler, renderer, has_own_bootstrap, what):
+    """Validate the `wasm_browsers` allow-list against the target it is set on.
+
+    Args:
+        wasm_browsers: The target's `wasm_browsers` attr value.
+        compiler: The target's compiler ("dart2wasm" or "dart2js").
+        renderer: The renderer the target resolves to ("skwasm" or "canvaskit").
+        has_own_bootstrap: Whether the target supplies its own `bootstrap_js`.
+        what: Label named in the failure message.
+    """
+    if not wasm_browsers:
+        return
+    unknown = [b for b in wasm_browsers if b not in WASM_BROWSER_ENGINES]
+    if unknown:
+        fail("%s: wasm_browsers names %s, which flutter.js does not know. Its engines are %s." % (
+            what,
+            ", ".join([repr(b) for b in unknown]),
+            ", ".join(WASM_BROWSER_ENGINES),
+        ))
+    if compiler != "dart2wasm" or renderer != "skwasm":
+        fail(
+            "%s: wasm_browsers decides which browser engines may run the skwasm " % what +
+            "renderer, and this target (compiler = %r, renderer = %r) has none, " % (compiler, renderer) +
+            "so the setting would reach nothing. Drop it.",
+        )
+    if has_own_bootstrap:
+        fail(
+            "%s: wasm_browsers is written into the generated flutter_bootstrap.js, and this " % what +
+            "target supplies its own `bootstrap_js`, which calls `_flutter.loader.load` itself. " +
+            "Drop the attr and pass `config: {wasmAllowList: {...}}` there.",
+        )
+
+def wasm_allow_list_property(wasm_browsers):
+    """The `config` property of the `_flutter.loader.load` argument.
+
+    Every engine flutter.js knows is stated, so the allow-list is exactly the
+    engines named: one left out is refused, even where Flutter's own default
+    would have allowed it.
+
+    Args:
+        wasm_browsers: Engines allowed to run skwasm; empty for Flutter's default.
+
+    Returns:
+        A JS object property, or the empty string when nothing is set.
+    """
+    if not wasm_browsers:
+        return ""
+    allow_list = {engine: engine in wasm_browsers for engine in WASM_BROWSER_ENGINES}
+    return "config: {\n        wasmAllowList: %s\n      }" % json.encode(allow_list)
+
+# The renderer files flutter.js loads for each renderer, by path under the web
+# SDK's `canvaskit/`. A skwasm build loads `skwasm.*`, `skwasm_heavy.*` (a
+# browser without image codecs or Chromium's break iterators) and `wimp.*`
+# (`enableWimp`), single-threaded or not: there is no skwasm-to-CanvasKit
+# fallback in the loader. A CanvasKit build loads `canvaskit.*` and the
+# `chromium/` and `webparagraph/` variants beside it.
+_SKWASM_FILE_PREFIXES = ["skwasm", "wimp."]
+_CANVASKIT_FILE_PREFIXES = ["canvaskit.", "chromium/", "webparagraph/"]
+
+def renderer_file_needed(rel, renderers):
+    """Whether a file under the web SDK's `canvaskit/` serves any of `renderers`.
+
+    A file this does not recognise is kept: shipping an extra one costs bytes,
+    dropping a needed one is a blank page.
+
+    Args:
+        rel: Path relative to the `canvaskit/` directory.
+        renderers: Renderers the bundle's builds (and dev loop) render with.
+
+    Returns:
+        True when the file should be bundled.
+    """
+    for prefix in _SKWASM_FILE_PREFIXES:
+        if rel.startswith(prefix):
+            return "skwasm" in renderers
+    for prefix in _CANVASKIT_FILE_PREFIXES:
+        if rel.startswith(prefix):
+            return "canvaskit" in renderers
+    return True
 
 def validate_base_href(base_href, what):
     """Validate a web `<base href>` value.
@@ -243,11 +372,16 @@ def is_valid_web_compiler_renderer(compiler, renderer):
 
 # Define keys the ruleset sets itself: the dart.vm.* mode keys come from the
 # compilation mode (see flutter_compile_kernel and the web compile actions),
-# and flutter.dart_plugin_registrant names the generated registrant library
-# the engine invokes before main(). User-supplied values would silently
-# corrupt mode semantics or break plugin registration, so they are rejected
-# up front — matching flutter_tools' own --dart-define policy.
-RESERVED_DART_DEFINE_KEYS = ("dart.vm.profile", "dart.vm.product", "flutter.dart_plugin_registrant")
+# flutter.dart_plugin_registrant names the generated registrant library the
+# engine invokes before main(), and FLUTTER_APP_FLAVOR is what `appFlavor`
+# reads, set from the target's `flavor`, and FLUTTER_BUILD_NAME,
+# FLUTTER_BUILD_NUMBER and the FlutterVersion keys (`VERSION_DEFINE_KEYS`) are
+# what `appBuildName` and `FlutterVersion` read, set from the target's
+# `build_name` and `build_number` and the toolchain's release. User-supplied
+# values would silently corrupt mode semantics, break plugin registration or
+# disagree with the target, so they are rejected up front — matching
+# flutter_tools' own --dart-define policy.
+RESERVED_DART_DEFINE_KEYS = ("dart.vm.profile", "dart.vm.product", "flutter.dart_plugin_registrant", "FLUTTER_APP_FLAVOR") + VERSION_DEFINE_KEYS
 
 def validate_dart_defines(defines, what):
     """Validate a list of Dart environment defines (KEY=VALUE strings).
@@ -262,7 +396,11 @@ def validate_dart_defines(defines, what):
             fail(
                 ("Invalid Dart define %r in %s: defines must be non-empty " +
                  "and must not set the reserved keys %s (the build sets " +
-                 "these from the compilation mode)") % (define, what, ", ".join(RESERVED_DART_DEFINE_KEYS)),
+                 "these itself: the dart.vm.* keys from the compilation mode, " +
+                 "FLUTTER_APP_FLAVOR from `flavor`, FLUTTER_BUILD_NAME and " +
+                 "FLUTTER_BUILD_NUMBER from `build_name` and `build_number`, the " +
+                 "FlutterVersion ones from the Flutter release, and " +
+                 "flutter.dart_plugin_registrant for the plugin registrant)") % (define, what, ", ".join(RESERVED_DART_DEFINE_KEYS)),
             )
 
 def is_valid_dart_define(define):

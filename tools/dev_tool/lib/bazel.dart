@@ -4,8 +4,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'dev_tool_exception.dart';
+import 'launch_bundle_parts.dart';
 import 'logging.dart';
+import 'phase_log.dart';
 import 'runfiles_helper.dart';
+import 'web_bundle_facts.dart';
 
 final _logger = Logger('dev_tool.bazel');
 
@@ -65,10 +68,15 @@ class BazelBuildResult {
   /// own output, on success the stderr of the cquery that listed the outputs.
   final String stderr;
 
+  /// The files of each group of the bundle parts the build was asked for (see
+  /// [Bazel.build]'s `parts`), by group name; empty when it was asked for none.
+  final Map<String, List<String>> partsFiles;
+
   BazelBuildResult({
     required this.exitCode,
     required this.outputFiles,
     required this.stderr,
+    this.partsFiles = const {},
   });
 
   bool get success => exitCode == 0;
@@ -96,6 +104,10 @@ class BazelAspectOutputs {
   /// Every file in the requested group, absolute.
   final List<String> files;
 
+  /// The files of every group asked for, by group name; [files] is the first
+  /// one's. Empty for a result built without groups to name.
+  final Map<String, List<String>> filesByGroup;
+
   /// The directory the build ran actions in, which paths an aspect's manifests
   /// name are relative to. Null when the build failed.
   final String? executionRoot;
@@ -108,6 +120,7 @@ class BazelAspectOutputs {
     required this.files,
     required this.executionRoot,
     required this.stderr,
+    this.filesByGroup = const {},
   });
 
   bool get success => exitCode == 0;
@@ -132,9 +145,11 @@ BazelAspectOutputs aspectOutputsFromBuildEvents(
   String events, {
   required String aspect,
   required String outputGroup,
+  List<String> otherGroups = const [],
 }) {
   final sets = <String, Map<String, Object?>>{};
-  final roots = <String>[];
+  final groupNames = [outputGroup, ...otherGroups];
+  final roots = {for (final name in groupNames) name: <String>[]};
   String? executionRoot;
   for (final line in LineSplitter.split(events)) {
     if (line.trim().isEmpty) continue;
@@ -164,39 +179,57 @@ BazelAspectOutputs aspectOutputsFromBuildEvents(
             as List? ??
         const [];
     for (final group in groups.cast<Map<String, Object?>>()) {
-      if (group['name'] != outputGroup) continue;
+      final into = roots[group['name']];
+      if (into == null) continue;
       for (final set in (group['fileSets'] as List? ?? const [])) {
-        roots.add((set as Map<String, Object?>)['id'] as String);
+        into.add((set as Map<String, Object?>)['id'] as String);
       }
     }
   }
 
-  final relative = <String>{};
-  final seen = <String>{};
-  final pending = [...roots];
-  while (pending.isNotEmpty) {
-    final setId = pending.removeLast();
-    if (!seen.add(setId)) continue;
-    final set = sets[setId] ?? const {};
-    for (final file in (set['files'] as List? ?? const [])) {
-      final entry = file as Map<String, Object?>;
-      final prefix = (entry['pathPrefix'] as List? ?? const []).cast<String>();
-      relative.add([...prefix, entry['name'] as String].join('/'));
+  Set<String> closure(List<String> from) {
+    final relative = <String>{};
+    final seen = <String>{};
+    final pending = [...from];
+    while (pending.isNotEmpty) {
+      final setId = pending.removeLast();
+      if (!seen.add(setId)) continue;
+      final set = sets[setId] ?? const {};
+      for (final file in (set['files'] as List? ?? const [])) {
+        final entry = file as Map<String, Object?>;
+        final prefix = (entry['pathPrefix'] as List? ?? const [])
+            .cast<String>();
+        relative.add([...prefix, entry['name'] as String].join('/'));
+      }
+      for (final nested in (set['fileSets'] as List? ?? const [])) {
+        pending.add((nested as Map<String, Object?>)['id'] as String);
+      }
     }
-    for (final nested in (set['fileSets'] as List? ?? const [])) {
-      pending.add((nested as Map<String, Object?>)['id'] as String);
-    }
+    return relative;
   }
-  if (relative.isNotEmpty && executionRoot == null) {
+
+  final byGroup = {
+    for (final entry in roots.entries) entry.key: closure(entry.value),
+  };
+  if (byGroup.values.any((files) => files.isNotEmpty) &&
+      executionRoot == null) {
     throw DevToolException(
       'The build event stream of the $outputGroup build named '
-      '${relative.length} file(s) and no execution root (its `workspaceInfo` '
-      'event), so none of them can be found.',
+      '${byGroup.values.expand((f) => f).toSet().length} file(s) and no '
+      'execution root (its `workspaceInfo` event), so none of them can be '
+      'found.',
     );
   }
+  List<String> absolute(Set<String> relative) => [
+    for (final path in relative) '$executionRoot/$path',
+  ]..sort();
+  final filesByGroup = {
+    for (final entry in byGroup.entries) entry.key: absolute(entry.value),
+  };
   return BazelAspectOutputs(
     exitCode: 0,
-    files: [for (final path in relative) '$executionRoot/$path']..sort(),
+    files: filesByGroup[outputGroup]!,
+    filesByGroup: filesByGroup,
     executionRoot: executionRoot,
     stderr: '',
   );
@@ -219,7 +252,7 @@ class _TailedOutput extends SubprocessOutput {
   String get tail => lines.join('\n');
 }
 
-/// Maps `--dart-define KEY=VALUE` values to the rules_flutter build-setting
+/// Maps `--dart-define KEY=VALUE` values to the rules_dart build-setting
 /// flags every bazel invocation (build AND cquery) must carry so they all
 /// resolve in the same configuration.
 ///
@@ -227,8 +260,54 @@ class _TailedOutput extends SubprocessOutput {
 /// commas survive intact.
 List<String> dartDefineFlags(List<String> dartDefines) => [
   for (final define in dartDefines)
-    '--@rules_flutter//flutter:extra_dart_defines=$define',
+    '--@rules_dart//dart:extra_dart_defines=$define',
 ];
+
+/// The cquery [Bazel.cqueryExtraDartDefines] runs, but for the options.
+///
+/// `config(…, target)` keeps the answer to the top-level configuration, the one
+/// a build's own flags make. Starlark flags are keyed by their canonical label in
+/// `build_options`, which is the setting's own `str(target.label)`; one that is
+/// at its default is not there at all.
+const extraDartDefinesQuery = [
+  'cquery',
+  'config(@rules_dart//dart:extra_dart_defines, target)',
+  '--output=starlark',
+  '--starlark:expr=json.encode(build_options(target).get(str(target.label), []))',
+];
+
+/// The defines [extraDartDefinesQuery] printed: one JSON list of strings.
+List<String> extraDartDefinesFrom(String stdout) {
+  final lines = [
+    for (final line in LineSplitter.split(stdout))
+      if (line.trim().isNotEmpty) line.trim(),
+  ];
+  if (lines.length == 1) {
+    final decoded = jsonDecode(lines.single);
+    if (decoded is List && decoded.every((d) => d is String)) {
+      return decoded.cast<String>();
+    }
+  }
+  throw DevToolException(
+    'bazel cquery for the value of --@rules_dart//dart:extra_dart_defines '
+    'printed something other than one list of defines:\n$stdout',
+  );
+}
+
+/// Maps `--config` values to the `--config=<name>` flags every bazel
+/// invocation of a run must carry. Bazel reads the named config out of the
+/// workspace's own `.bazelrc` files; this tool never parses them.
+List<String> bazelConfigFlags(List<String> configs) => [
+  for (final config in configs) '--config=$config',
+];
+
+/// Every bazel flag the user typed for the build: their `--config`s, then
+/// their `--build-arg`s. The configs come first so an explicit `--build-arg`
+/// overrides what a config sets, as it would on a bazel command line.
+List<String> userBazelFlags({
+  required List<String> configs,
+  required List<String> buildArgs,
+}) => [...bazelConfigFlags(configs), ...buildArgs];
 
 /// Requests the build outputs this tool reads off disk.
 ///
@@ -242,7 +321,7 @@ List<String> dartDefineFlags(List<String> dartDefines) => [
 /// Web needs none of this: `flutter_web_application` declares its own dev
 /// outputs and the tool names that target directly.
 const _devFilesAspect = [
-  '--aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files',
+  '--aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files_aspect',
   '--output_groups=+flutter_dev_files',
 ];
 
@@ -251,16 +330,25 @@ const _devFilesAspect = [
 /// The aspect flags go last. `--output_groups=+name` is additive and a
 /// repeated aspect is applied once, so nothing here overrides what the caller
 /// passed as `--build-arg`.
+///
+/// [parts] adds the groups a restart reads of the bundle (see
+/// [LaunchBundleParts]), for the launch build, whose parts are the baseline a
+/// restart compares against.
 List<String> bazelBuildArgs(
   String target, {
   String? compilationMode,
   List<String> extraArgs = const [],
+  LaunchBundleParts? parts,
 }) => [
   'build',
   target,
   if (compilationMode != null) ...['-c', compilationMode],
   ...extraArgs,
   ..._devFilesAspect,
+  if (parts != null) ...[
+    '--aspects=${parts.aspect}',
+    '--output_groups=+${parts.assetsGroup},+${parts.nativeLibsGroup}',
+  ],
 ];
 
 /// Starts the `bazel` client for [args], in [workingDirectory].
@@ -481,12 +569,44 @@ class Bazel {
     required String workspace,
     String? compilationMode,
     List<String> extraArgs = const [],
+    LaunchBundleParts? parts,
   }) async {
-    final args = bazelBuildArgs(
-      target,
-      compilationMode: compilationMode,
-      extraArgs: extraArgs,
-    );
+    // The parts are an aspect's outputs, which no cquery lists, so they are
+    // read from the build's own event stream.
+    final events = parts == null
+        ? null
+        : await Directory.systemTemp.createTemp('flutter_bep_');
+    try {
+      return await _build(
+        target,
+        workspace: workspace,
+        compilationMode: compilationMode,
+        extraArgs: extraArgs,
+        parts: parts,
+        eventFile: events == null ? null : '${events.path}/events.json',
+      );
+    } finally {
+      await events?.delete(recursive: true);
+    }
+  }
+
+  Future<BazelBuildResult> _build(
+    String target, {
+    required String workspace,
+    required String? compilationMode,
+    required List<String> extraArgs,
+    required LaunchBundleParts? parts,
+    required String? eventFile,
+  }) async {
+    final args = [
+      ...bazelBuildArgs(
+        target,
+        compilationMode: compilationMode,
+        extraArgs: extraArgs,
+        parts: parts,
+      ),
+      if (eventFile != null) '--build_event_json_file=$eventFile',
+    ];
 
     // Diagnostics + bazel's own output go to STDERR, never stdout: in
     // `--machine` mode the dev tool's stdout is the JSON protocol channel, and
@@ -499,7 +619,13 @@ class Bazel {
       'workspace': workspace,
     });
 
-    final built = await _streamed(args, workspace);
+    final built = await _timed(
+      phase: 'bazel build',
+      target: target,
+      what: 'bazel build $target',
+      body: () => _streamed(args, workspace),
+      detail: (r) => ' (exit ${r.exitCode})',
+    );
     if (built.exitCode != 0) {
       return BazelBuildResult(
         exitCode: built.exitCode,
@@ -514,7 +640,13 @@ class Bazel {
       cqueryArgs.addAll(['-c', compilationMode]);
     }
     cqueryArgs.addAll(extraArgs);
-    final cqueryResult = await run(cqueryArgs, workingDirectory: workspace);
+    final cqueryResult = await _timed(
+      phase: 'bazel query',
+      target: target,
+      what: 'bazel query of $target outputs',
+      announce: true,
+      body: () => run(cqueryArgs, workingDirectory: workspace),
+    );
     final outputFiles = _absolutizeCqueryPaths(
       cqueryResult.stdout as String,
       workspace,
@@ -524,10 +656,19 @@ class Bazel {
       exitCode: built.exitCode,
       outputFiles: outputFiles,
       stderr: cqueryResult.stderr as String,
+      partsFiles: parts == null || eventFile == null
+          ? const {}
+          : aspectOutputsFromBuildEvents(
+              await File(eventFile).readAsString(),
+              aspect: parts.aspect,
+              outputGroup: parts.assetsGroup,
+              otherGroups: [parts.nativeLibsGroup],
+            ).filesByGroup,
     );
   }
 
-  /// Build one output group an [aspect] adds to [target], and return its files.
+  /// Build the output group an [aspect] adds to [target], and [otherGroups] it
+  /// fills too, and return their files.
   ///
   /// The files come from the build's own event stream, not from a cquery: a
   /// cquery lists a target's outputs and never an aspect's, and it re-runs
@@ -541,6 +682,7 @@ class Bazel {
     required String workspace,
     required String aspect,
     required String outputGroup,
+    List<String> otherGroups = const [],
     String? compilationMode,
     List<String> extraArgs = const [],
   }) async {
@@ -558,7 +700,7 @@ class Bazel {
         if (compilationMode != null) ...['-c', compilationMode],
         ...extraArgs,
         '--aspects=$aspect',
-        '--output_groups=$outputGroup',
+        '--output_groups=${[outputGroup, ...otherGroups].join(',')}',
         // The caller reads these files from disk, and a build without the
         // bytes keeps whatever it was not asked for in the remote cache. The
         // group is this build's only top-level output, so this downloads it
@@ -573,7 +715,13 @@ class Bazel {
         'args': args,
         'workspace': workspace,
       });
-      final built = await _streamed(args, workspace);
+      final built = await _timed(
+        phase: 'bazel build',
+        target: target,
+        what: 'bazel build $target ($outputGroup)',
+        body: () => _streamed(args, workspace),
+        detail: (r) => ' (exit ${r.exitCode})',
+      );
       if (built.exitCode != 0) {
         return BazelAspectOutputs(
           exitCode: built.exitCode,
@@ -586,9 +734,61 @@ class Bazel {
         await File(eventFile).readAsString(),
         aspect: aspect,
         outputGroup: outputGroup,
+        otherGroups: otherGroups,
       );
     } finally {
       await events.delete(recursive: true);
+    }
+  }
+
+  /// Run [body], a bazel invocation, and say how long it took.
+  ///
+  /// A reload that stalls inside bazel and one that stalls in the query after
+  /// it look the same without this: the build prints a line when it starts and
+  /// nothing when it ends. [announce] adds a line at the start, for an
+  /// invocation that does not print its own command. Observation only: the
+  /// result is [body]'s own, and a failure is rethrown unchanged.
+  Future<R> _timed<R>({
+    required String phase,
+    required String target,
+    required String what,
+    required Future<R> Function() body,
+    bool announce = false,
+    String Function(R result)? detail,
+  }) async {
+    final clock = Stopwatch()..start();
+    void say(String event, String text) => _logger.info({
+      'message': 'bazel_phase',
+      'text': text,
+      'phase': phase,
+      'event': event,
+      'target': target,
+      'ms': clock.elapsedMilliseconds,
+    });
+    if (announce) say('started', 'Running $what');
+    try {
+      final result = await body();
+      say(
+        'finished',
+        '$what finished in ${formatElapsed(clock.elapsed)}'
+            '${detail?.call(result) ?? ''}',
+      );
+      return result;
+    } on BazelCancelled {
+      // A deliberate stop is not a failure: the run is ending and asked bazel
+      // to end with it.
+      say(
+        'stopped',
+        '$what stopped after ${formatElapsed(clock.elapsed)}: '
+            'the run is shutting down',
+      );
+      rethrow;
+    } catch (e) {
+      say(
+        'failed',
+        '$what failed after ${formatElapsed(clock.elapsed)}: $e',
+      );
+      rethrow;
     }
   }
 
@@ -720,6 +920,89 @@ class Bazel {
       for (final line in LineSplitter.split(result.stdout as String))
         if (line.trim().isNotEmpty) line.trim(),
     ];
+  }
+
+  /// The value Bazel's options give `--@rules_dart//dart:extra_dart_defines`
+  /// in the configuration [compilationMode] and [extraArgs] make, with every
+  /// `.bazelrc` line applied: what a build in exactly those options compiles
+  /// with.
+  ///
+  /// A cquery in the options of the build after it, so asking keeps Bazel's
+  /// analysis cache.
+  Future<List<String>> cqueryExtraDartDefines({
+    required String workspace,
+    String? compilationMode,
+    List<String> extraArgs = const [],
+  }) async {
+    final args = [
+      ...extraDartDefinesQuery,
+      if (compilationMode != null) ...['-c', compilationMode],
+      ...extraArgs,
+    ];
+    final result = await run(args, workingDirectory: workspace);
+    if (result.exitCode != 0) {
+      throw BazelInvocationFailure(
+        command: args.join(' '),
+        diagnostics: (result.stderr as String).trim(),
+      );
+    }
+    return extraDartDefinesFrom(result.stdout as String);
+  }
+
+  /// What the web bundle [target] names says about itself, or null when
+  /// [target] is not, and does not alias, a single `flutter_web_bundle`. See
+  /// [WebBundleFacts].
+  ///
+  /// Asked in the configuration the run builds in ([compilationMode] and
+  /// [extraArgs]), so the answer is the one the build will act on.
+  Future<WebBundleFacts?> cqueryWebBundleFacts(
+    String target, {
+    required String workspace,
+    String? compilationMode,
+    List<String> extraArgs = const [],
+  }) async {
+    final args = [
+      ...webBundleFactsQuery(target),
+      if (compilationMode != null) ...['-c', compilationMode],
+      ...extraArgs,
+    ];
+    final result = await run(args, workingDirectory: workspace);
+    if (result.exitCode != 0) {
+      throw DevToolException(
+        'bazel could not read how $target is configured, which decides the '
+        'web dev loop it runs under:\n'
+        '  bazel ${args.join(' ')}\n'
+        '${(result.stderr as String).trim()}',
+      );
+    }
+    try {
+      return parseWebBundleFacts(result.stdout as String);
+    } on FormatException catch (e) {
+      throw DevToolException(
+        'bazel cquery answered something unreadable about $target: '
+        '${e.message}',
+      );
+    }
+  }
+
+  /// The labels of the web bundles built over [target], for naming them to a
+  /// run that was handed the application instead. Empty when there are none or
+  /// the query fails: the run is already failing, and its message says how to
+  /// ask by hand.
+  Future<List<String>> queryWebBundlesOver(
+    String target, {
+    required String workspace,
+  }) async {
+    final labelArgs = ['query', target, '--output=label', '--noshow_progress'];
+    final labelResult = await run(labelArgs, workingDirectory: workspace);
+    if (labelResult.exitCode != 0) return const [];
+    final label = (labelResult.stdout as String).trim();
+    final result = await run(
+      webBundlesOverQuery(label),
+      workingDirectory: workspace,
+    );
+    if (result.exitCode != 0) return const [];
+    return parseWebBundlesOver(result.stdout as String);
   }
 
   /// Locate the Bazel workspace root.

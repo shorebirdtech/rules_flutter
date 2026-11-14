@@ -55,7 +55,10 @@ class NativeCompilerConfig implements CompilerConfig {
   /// Dart environment defines (KEY=VALUE) emitted as `-D` launch flags.
   /// The frontend_server is persistent, so launch-time defines apply to
   /// every subsequent recompile — keeping String.fromEnvironment stable
-  /// across hot reload/restart. Sourced from the dev config's dartDefines.
+  /// across hot reload/restart. Sourced from the dev config's dartDefines: the
+  /// user's defines, the flavor's `FLUTTER_APP_FLAVOR`, and the ones that
+  /// describe the app and the SDK (`FLUTTER_BUILD_NAME`, `FLUTTER_VERSION`,
+  /// ...).
   final List<String> dartDefines;
 
   /// `file://` URI of the generated plugin registrant, or empty when the
@@ -72,6 +75,11 @@ class NativeCompilerConfig implements CompilerConfig {
   /// and the comment there records why the two need not agree.
   final String dartPluginRegistrantUri;
 
+  /// Whether the app was built with `--track-widget-creation`, which the
+  /// compiler then applies to every library it recompiles (see
+  /// `BuildInfo.trackWidgetCreation`).
+  final bool trackWidgetCreation;
+
   @override
   final List<String> enableExperiments;
 
@@ -81,6 +89,7 @@ class NativeCompilerConfig implements CompilerConfig {
     this.fileSystemScheme = '',
     this.dartDefines = const [],
     this.dartPluginRegistrantUri = '',
+    this.trackWidgetCreation = false,
     this.enableExperiments = const [],
   });
 
@@ -93,6 +102,7 @@ class NativeCompilerConfig implements CompilerConfig {
   @override
   List<String> get extraFlags => [
     '--enable-asserts',
+    if (trackWidgetCreation) '--track-widget-creation',
     ...experimentFlags,
     for (final define in dartDefines) '-D$define',
     if (dartPluginRegistrantUri.isNotEmpty) ...[

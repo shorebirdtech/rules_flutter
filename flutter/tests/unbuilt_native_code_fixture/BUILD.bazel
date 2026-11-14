@@ -1,0 +1,38 @@
+"""An application with a plugin whose macOS and Linux native code its own build makes.
+
+`rusty/` stands in for a cargokit plugin: its macOS and Linux libraries are
+`flutter_unbuilt_plugin_library` targets, so the macOS build of `app` fails and
+its iOS build does not.
+"""
+
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("//flutter:macos.bzl", "flutter_apple_plugins_aggregator")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "app",
+)
+
+flutter_application(
+    name = "app",
+    main = "main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = ["//flutter/tests/unbuilt_native_code_fixture/rusty"],
+)
+
+flutter_apple_plugins_aggregator(
+    name = "macos_plugins",
+    application = ":app",
+    platform = "macos",
+    tags = ["manual"],
+)
+
+flutter_apple_plugins_aggregator(
+    name = "ios_plugins",
+    application = ":app",
+    platform = "ios",
+    tags = ["manual"],
+)

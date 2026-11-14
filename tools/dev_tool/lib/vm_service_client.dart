@@ -14,6 +14,7 @@ import 'hot_reload/asset_bundle.dart' show touchesFonts;
 import 'hot_reload/flutter_error_report.dart';
 import 'logging.dart';
 import 'running_code.dart';
+import 'tool_services.dart';
 
 final _logger = Logger('dev_tool.vm_service');
 
@@ -121,6 +122,12 @@ class ServiceExtensionUnavailable implements Exception {
 /// `package:vm_service` exposes the wire codes only as literals.
 const int _rpcMethodNotFound = -32601;
 
+/// The extension event the rules_flutter agent posts for an error nothing in
+/// the app caught (`_reportUncaughtErrors` in
+/// `flutter/private/agent_extensions/agent.dart`), shaped like a
+/// `Flutter.Error` payload.
+const String _uncaughtErrorEvent = 'rules_flutter.UncaughtError';
+
 /// How often [VmServiceClient.waitForFirstFrame] re-asks
 /// `ext.flutter.didSendFirstFrameEvent`.
 ///
@@ -158,6 +165,12 @@ class VmServiceClient {
   /// Emptied whenever the main isolate changes — an extension belongs to the
   /// isolate that registered it.
   final Set<String> _extensionRpcs = {};
+
+  /// Fires when a main isolate becomes known, for [waitForFirstFrame]: the
+  /// engine announces the VM service before the root isolate runs, so a client
+  /// can be connected with no isolate to ask yet.
+  final StreamController<String> _mainIsolateSet =
+      StreamController<String>.broadcast();
 
   /// Newly-registered extension names, for [waitForServiceExtension].
   ///
@@ -377,8 +390,32 @@ class VmServiceClient {
   /// connection worked, and by a teardown this end chose.
   int _flaps = 0;
 
+  /// What this client registers on every connection it makes, for the app's
+  /// other VM service clients to call. Null registers nothing: a run that
+  /// cannot reload offers no reload, as `flutter_tools`' cold runner does not.
+  final ToolServices? services;
+
+  /// The connection `flutterVersion` is registered on, so it is registered
+  /// once per connection however it got there.
+  VmService? _versionRegisteredOn;
+
+  /// Register `flutterVersion` on the current connection, now that
+  /// [ToolServices.flutterVersion] is known — a native run learns it from the
+  /// dev config after this client connected. Connections made from now on
+  /// register it themselves. Does nothing without [services] or a connection.
+  Future<void> registerFlutterVersion() async {
+    final svc = _service;
+    final tools = services;
+    if (svc == null || tools == null || identical(_versionRegisteredOn, svc)) {
+      return;
+    }
+    _versionRegisteredOn = svc;
+    await tools.registerFlutterVersionOn(svc);
+  }
+
   VmServiceClient({
     VmServiceConnector? connector,
+    this.services,
     this.connectTimeout = const Duration(seconds: 30),
     this.disconnectTimeout = const Duration(seconds: 5),
     this.flapWindow = const Duration(seconds: 5),
@@ -442,16 +479,14 @@ class VmServiceClient {
     }
     _service = svc;
 
-    // Find the main isolate.
-    final vm = await _service!.getVM();
-    String? found;
-    for (final isolateRef in vm.isolates ?? <IsolateRef>[]) {
-      if (isolateRef.name == 'main') {
-        found = isolateRef.id;
-        break;
-      }
-    }
-    _setMainIsolate(found ?? _mainIsolateId ?? vm.isolates?.firstOrNull?.id);
+    // Listening before anything is read or asked. The VM announces its service
+    // before the root isolate runs, so an isolate can start at any point of
+    // this handshake; one that starts after the last read and before a
+    // subscription is lost for good, and everything that needs the isolate then
+    // answers "none". With the listener and both streams in place first, an
+    // isolate is either already in the list read below or arrives as an event.
+    await _isolateEvents?.cancel();
+    _isolateEvents = _service!.onIsolateEvent.listen(_onIsolateEvent);
 
     // Register the Extension stream so Flutter.Error / Flutter.Frame
     // events flow; the per-reload verdict listener is attached in
@@ -463,10 +498,24 @@ class VmServiceClient {
     // driven by DwdsReloadStrategy over this same connection, and a user
     // reloading the browser page rotates the isolate with no command at all.
     await _ensureStream(EventStreams.kIsolate);
-    await _isolateEvents?.cancel();
-    _isolateEvents = _service!.onIsolateEvent.listen(_onIsolateEvent);
+
+    // Find the main isolate. An isolate adopted from an event while the streams
+    // were being subscribed stays the target unless a `main` is listed.
+    final vm = await _service!.getVM();
+    String? found;
+    for (final isolateRef in vm.isolates ?? <IsolateRef>[]) {
+      if (isolateRef.name == 'main') {
+        found = isolateRef.id;
+        break;
+      }
+    }
+    _setMainIsolate(found ?? _mainIsolateId ?? vm.isolates?.firstOrNull?.id);
 
     if (createDevFS) await _createDevFS();
+
+    // On every connection, re-dials included: a registration belongs to the
+    // connection that made it, and DDS drops it when that connection closes.
+    if (await services?.registerOn(svc) ?? false) _versionRegisteredOn = svc;
 
     // Registered only now, after the handshake. Watching from the moment the
     // socket comes up would leave a watcher behind for a dial that died
@@ -701,6 +750,7 @@ class VmServiceClient {
     if (id == _mainIsolateId) return;
     _mainIsolateId = id;
     _extensionRpcs.clear();
+    if (id != null && !_mainIsolateSet.isClosed) _mainIsolateSet.add(id);
   }
 
   /// Record [rpc] as registered and wake anything waiting for it.
@@ -880,6 +930,11 @@ class VmServiceClient {
   /// The verdict comes from awaiting the stream directly, so it never
   /// depends on cross-future microtask ordering.
   ///
+  /// An error nothing in the app caught ends it the same way as
+  /// `Flutter.Error`: the agent posts it as [_uncaughtErrorEvent]. That is the
+  /// only word a restart whose `main()` throws before `runApp` sends — the
+  /// framework that posts `Flutter.Error` is not up yet, and no frame follows.
+  ///
   /// A third ending covers an app that will draw no frame at all. A
   /// backgrounded app — on macOS, a window hidden or covered after it was on
   /// screen — stops rendering, and a restarted one inherits that; waiting
@@ -938,7 +993,8 @@ class VmServiceClient {
         // Subscribe before deliver() so no event between reloadSources and the
         // rebuilt frame can be missed.
         final sub = _service!.onExtensionEvent.listen((e) {
-          if (e.extensionKind == 'Flutter.Error') {
+          if (e.extensionKind == 'Flutter.Error' ||
+              e.extensionKind == _uncaughtErrorEvent) {
             capturedError ??= _flutterError(e);
             if (applied) settle();
           } else if (e.extensionKind == 'Flutter.Frame' && applied) {
@@ -1564,9 +1620,15 @@ class VmServiceClient {
     final Isolate isolate;
     try {
       isolate = await _callService((s) => s.getIsolate(_mainIsolateId!));
-    } catch (_) {
+    } catch (e) {
       // Not answerable, so not an answer. Let the caller's own call fail with
-      // whatever the real problem is rather than inventing a pause.
+      // whatever the real problem is rather than inventing a pause. Recorded,
+      // because that call may fail with a different message than this one.
+      _logger.fine({
+        'message': 'paused_reason_unreadable',
+        'text': 'Could not read whether the app is paused: $e',
+        'error': '$e',
+      });
       return null;
     }
     return switch (isolate.pauseEvent?.kind) {
@@ -1614,6 +1676,7 @@ class VmServiceClient {
     }
     final deadline = DateTime.now().add(timeout);
     var everRead = false;
+    Object? lastFailure;
     while (true) {
       try {
         final isolate = await _callService(
@@ -1623,12 +1686,24 @@ class VmServiceClient {
         if (isolate.pauseEvent?.kind == EventKind.kPauseStart) {
           return StartPausedState.pausedAtStart;
         }
-      } catch (_) {
+      } catch (e) {
         // A connection still settling; the deadline below is the bound, and
         // `everRead` is what keeps a poll that only ever failed from being
-        // reported as an isolate seen running.
+        // reported as an isolate seen running. The latest failure is kept for
+        // the record when the poll ends without a pause.
+        lastFailure = e;
       }
       if (!DateTime.now().isBefore(deadline)) {
+        if (lastFailure != null) {
+          _logger.fine({
+            'message': 'start_pause_unreadable',
+            'text':
+                'Reading whether the app paused at start failed until the '
+                'deadline${everRead ? ' (it was read at least once)' : ''}; '
+                'the last failure: $lastFailure',
+            'error': '$lastFailure',
+          });
+        }
         return everRead ? StartPausedState.running : StartPausedState.unknown;
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -1658,11 +1733,19 @@ class VmServiceClient {
   /// is one call that never returns, and a loop built on it cannot honour its
   /// own deadline.
   ///
+  /// If the app has no root isolate yet (the VM service is announced before it
+  /// runs), the wait goes on for one within the same [timeout]: that is an app
+  /// still starting, not one that never rendered.
+  ///
   /// Built and sent, not rasterized. `didSendFirstFrameRasterizedEvent` is the
   /// neighbouring flag and the wrong question: it reports the *engine* putting
   /// pixels on a display, so it stays false indefinitely on a device that is
   /// not showing them. An app whose framework is up is drivable whether or not
   /// anyone is looking at it, and this is the flag that says so.
+  ///
+  /// A null [timeout] is no deadline: the wait ends on the frame or on [until].
+  /// Every [slowEvery] without either, it calls [onSlow] with the latest
+  /// failure of the query (null if it has not failed).
   ///
   /// [until], when given, ends the wait early with false: the caller has
   /// stopped needing an answer, and the budget above may be minutes. A run
@@ -1670,12 +1753,13 @@ class VmServiceClient {
   /// keeps the process alive long after the thing it was waiting for stopped
   /// mattering.
   Future<bool> waitForFirstFrame({
-    Duration timeout = const Duration(seconds: 15),
+    Duration? timeout = const Duration(seconds: 15),
+    Duration? slowEvery,
+    void Function(Object? cause)? onSlow,
     Future<void>? until,
   }) async {
     final service = _service;
-    final isolateId = _mainIsolateId;
-    if (service == null || isolateId == null) return false;
+    if (service == null) return false;
 
     final rendered = Completer<bool>();
     void answer(bool value) {
@@ -1712,9 +1796,14 @@ class VmServiceClient {
     // wait returns, and would then write `queryFailure` that nothing will ever
     // read again.
     var settled = false;
+    final finished = Completer<void>();
 
     Future<void> pollForFirstFrame() async {
       while (!settled && !rendered.isCompleted) {
+        // The root isolate may not exist yet, or may have been replaced since
+        // the last ask; the query goes to whichever is the target now.
+        final isolateId = await _waitForMainIsolate(finished.future);
+        if (isolateId == null) return;
         try {
           final resp = await _callService(
             (s) => s.callServiceExtension(
@@ -1752,23 +1841,57 @@ class VmServiceClient {
 
     final abandon = until?.then((_) => answer(false));
 
+    // With no deadline, the wait says it is still going, once per [slowEvery],
+    // along with whatever the query has failed with: the event may yet arrive,
+    // but a person watching the wait is owed the reason it is taking long.
+    final slow = slowEvery == null || onSlow == null
+        ? null
+        : Timer.periodic(slowEvery, (_) => onSlow(queryFailure));
+
     try {
-      final painted = await rendered.future.timeout(
-        timeout,
-        onTimeout: () => false,
-      );
+      final painted = timeout == null
+          ? await rendered.future
+          : await rendered.future.timeout(timeout, onTimeout: () => false);
       final failure = queryFailure;
       if (!painted && failure != null) throw failure;
       return painted;
     } finally {
+      slow?.cancel();
       // Settled explicitly, because `timeout` completes the future it returns
       // and leaves this one pending for good. The poll loop reads it to know
       // it is finished, so without this it re-arms its timer forever and the
       // process never exits.
       settled = true;
+      if (!finished.isCompleted) finished.complete();
       answer(false);
       await frames.cancel();
       abandon?.ignore();
+    }
+  }
+
+  /// The main isolate's id, waiting for one to exist if none does yet.
+  ///
+  /// Returns null when [stop] completes first. The wait has no clock of its
+  /// own: "no isolate yet" is an app that is still starting, not one that
+  /// failed, and the caller's deadline or teardown is what ends it.
+  Future<String?> _waitForMainIsolate(Future<void> stop) async {
+    final known = _mainIsolateId;
+    if (known != null) return known;
+    final arrived = Completer<String?>();
+    final sub = _mainIsolateSet.stream.listen((id) {
+      if (!arrived.isCompleted) arrived.complete(id);
+    });
+    unawaited(
+      stop.then((_) {
+        if (!arrived.isCompleted) arrived.complete(null);
+      }),
+    );
+    try {
+      // Re-read after subscribing: an isolate set between the check above and
+      // the listener would otherwise be missed.
+      return _mainIsolateId ?? await arrived.future;
+    } finally {
+      await sub.cancel();
     }
   }
 
@@ -2137,11 +2260,20 @@ class VmServiceClient {
   /// otherwise publish itself into a client that has been shut down. That
   /// socket is never closed by anyone, and an open socket is what keeps the
   /// process alive after the run has ended.
-  Future<void> disconnect() async {
+  ///
+  /// With [leaveDevFS] the app is not asked to delete its devFS. The caller is
+  /// about to stop the app and has this machine's filesystem in common with it,
+  /// so the directory is [removeAbandonedDevFS]'s to delete once the process
+  /// has exited. Asking the running app does not work on Windows: the engine
+  /// keeps files of the devFS open (its asset bundle is read from there), and
+  /// Windows refuses to delete an open file — `Access is denied` — which left
+  /// the directory behind, since nothing removes it when the app exits.
+  Future<void> disconnect({bool leaveDevFS = false}) async {
     _hungUp = true;
     _connectAttempt++;
     _forgetFlaps();
-    if (_devFSBaseUri != null && _service != null) {
+    if (leaveDevFS) _abandonDevFS();
+    if (!leaveDevFS && _devFSBaseUri != null && _service != null) {
       try {
         await _service!
             .callServiceExtension('_deleteDevFS', args: {'fsName': _devFSName})
@@ -2216,9 +2348,66 @@ class VmServiceClient {
   /// A consumer that asks afterwards gets a [StateError] naming this, the way
   /// one asking after the app was reported [gone] does; `VmServiceAppInstance`
   /// already renders that as a failed apply rather than letting it escape.
-  Future<void> retire() async {
+  ///
+  /// [leaveDevFS] is passed on to [disconnect].
+  Future<void> retire({bool leaveDevFS = false}) async {
     _retired = true;
-    await disconnect();
+    await disconnect(leaveDevFS: leaveDevFS);
+  }
+
+  /// The directory holding a devFS that [disconnect] was told to leave, until
+  /// [removeAbandonedDevFS] has deleted it.
+  Directory? _abandonedDevFS;
+
+  /// Remember where the current devFS lives so it can be deleted later.
+  ///
+  /// The VM creates it as `<temp>/<fsName><random>/<fsName>/` and its own
+  /// delete removes only the inner directory, so the outer one is what goes.
+  /// A path that does not have that shape is not removed: this deletes a
+  /// directory tree, and it must be one the VM made.
+  void _abandonDevFS() {
+    final base = _devFSBaseUri;
+    if (base == null) return;
+    final inner = Directory.fromUri(base);
+    final outer = inner.parent;
+    final innerName = p.basename(inner.path);
+    if (innerName != _devFSName ||
+        !p.basename(outer.path).startsWith(_devFSName)) {
+      _logger.warning({
+        'message': 'devfs_unexpected_layout',
+        'text':
+            'The devFS at ${inner.path} is not inside a directory named '
+            '$_devFSName<random>, which is how the VM creates one, so it is '
+            'not deleted.',
+        'path': inner.path,
+      });
+      return;
+    }
+    _abandonedDevFS = outer;
+  }
+
+  /// Delete the devFS [disconnect] left, now that the app is gone.
+  ///
+  /// Call after the app process has exited: until then it can hold files of
+  /// the devFS open and the delete is refused. A failure is logged with the
+  /// path and the cause, because the directory then stays on this machine.
+  Future<void> removeAbandonedDevFS() async {
+    final dir = _abandonedDevFS;
+    if (dir == null) return;
+    _abandonedDevFS = null;
+    try {
+      if (dir.existsSync()) await dir.delete(recursive: true);
+    } on FileSystemException catch (e, stack) {
+      _logger.warning({
+        'message': 'devfs_cleanup_failed',
+        'text':
+            'Deleting the devFS directory ${dir.path} failed after the app '
+            'exited: $e. The directory is left on this machine.',
+        'path': dir.path,
+        'error': '$e',
+        'stack': '$stack',
+      });
+    }
   }
 
   /// Aggressively close the connection without trying to clean up devFS.

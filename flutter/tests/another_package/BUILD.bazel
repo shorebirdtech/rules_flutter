@@ -1,0 +1,8 @@
+load("//flutter:defs.bzl", "dart_package_metadata")
+
+# A package other than `//flutter/tests`'s, for a test naming the wrong one.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "another_package",
+    visibility = ["//flutter/tests:__pkg__"],
+)

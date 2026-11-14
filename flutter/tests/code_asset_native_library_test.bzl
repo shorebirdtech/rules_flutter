@@ -17,6 +17,10 @@ load(":action_content.bzl", "written_json")
 _FIXTURE = "//flutter/tests/code_asset_fixture:"
 _DBG = {"//command_line_option:compilation_mode": "dbg"}
 
+# What `cc_shared_library` names `bridge` on each OS. Windows takes no `lib`
+# prefix, as Dart's own `OS.windows.dylibFileName` does not.
+_BRIDGE_NAMES = ["libbridge.dylib", "libbridge.so", "bridge.dll"]
+
 def _basenames(paths):
     return sorted([p.rsplit("/", 1)[-1] for p in paths])
 
@@ -26,18 +30,13 @@ def _dev_config_impl(ctx):
     if config == None:
         return analysistest.end(env)
 
-    # One library, under the application's own name for it: the bundled copy is
-    # what the dev tool compares, and the keys of every per-library map are its
-    # path. Under a directory of the application's own, so neither the
-    # library's rule nor a second application in the package writes it too.
+    # One library, by the path its build wrote it at: what the dev tool
+    # compares, and the key of every per-library map.
     libs = config["nativeLibs"]
     asserts.equals(env, 1, len(libs), "expected one bundled library, got %s" % libs)
     if len(libs) != 1:
         return analysistest.end(env)
     lib = libs[0]
-    label = analysistest.target_under_test(env).label
-    own = "/%s/%s_code_assets/" % (label.package, label.name)
-    asserts.true(env, own in lib, "expected the library under %s, got %s" % (own, lib))
     asserts.equals(env, ctx.attr.contract, _basenames(config["nativeLibContracts"][lib]))
     asserts.equals(env, ctx.attr.sources, _basenames(config["nativeLibSources"][lib]))
     return analysistest.end(env)
@@ -55,7 +54,7 @@ def _hot_patch_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
     files = getattr(target[OutputGroupInfo], HOT_PATCH_OUTPUT_GROUP).to_list()
-    asserts.equals(env, ctx.attr.expected, sorted([f.basename for f in files]))
+    asserts.equals(env, sorted(ctx.attr.expected), sorted([f.basename for f in files]))
     return analysistest.end(env)
 
 _hot_patch_test = analysistest.make(
@@ -76,10 +75,10 @@ def _forwards_impl(ctx):
     # identity rather than by extension.
     asserts.equals(
         env,
-        [asset.dynamic_library],
+        [asset.file],
         target[FlutterNativeLibraryInfo].libraries.to_list(),
     )
-    asserts.equals(env, [asset.dynamic_library], target[DefaultInfo].files.to_list())
+    asserts.equals(env, [asset.file], target[DefaultInfo].files.to_list())
     return analysistest.end(env)
 
 _forwards_test = analysistest.make(_forwards_impl)
@@ -98,7 +97,7 @@ def _test_host_impl(ctx):
     found = [
         f
         for f in target[DefaultInfo].default_runfiles.files.to_list()
-        if f.basename.startswith("libbridge.")
+        if f.basename in _BRIDGE_NAMES
     ]
     asserts.equals(env, 1, len(found), "the wrapped library in the test's runfiles: %s" % found)
     if found:
@@ -158,7 +157,7 @@ def code_asset_native_library_test_suite(name):
             target_under_test = _FIXTURE + "app_" + owner,
             expected = ["bridge.hot_patch.json"] + select({
                 "@platforms//os:macos": ["libbridge.dylib"],
-                "@platforms//os:windows": ["libbridge.dll"],
+                "@platforms//os:windows": ["bridge.dll"],
                 "//conditions:default": ["libbridge.so"],
             }),
         )

@@ -13,7 +13,7 @@
 /// the user's question — can I run bazel again now? — and it is asked with
 /// `--noblock_for_lock`, which answers at once rather than waiting behind a
 /// build that is still going.
-@Tags(['e2e'])
+@Tags(['e2e', 'macos'])
 library;
 
 import 'dart:async';

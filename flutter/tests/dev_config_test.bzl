@@ -9,21 +9,32 @@ sources are all generated.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("//flutter:web.bzl", "flutter_web_bundle")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 
 _MAX_NODES = 100000
 
 def _source_tree_impl(ctx):
     tree = ctx.actions.declare_directory(ctx.label.name)
-    ctx.actions.run_shell(
+    source = ctx.actions.declare_file(ctx.label.name + "_prebuilt.dart")
+    ctx.actions.write(source, "const prebuilt = 1;\n")
+    ctx.actions.run(
+        executable = ctx.executable._assemble,
+        arguments = ["--output", tree.path, "--add", "lib/prebuilt.dart", source.path],
+        inputs = [source],
         outputs = [tree],
-        command = "mkdir -p {0}/lib && echo 'const prebuilt = 1;' > {0}/lib/prebuilt.dart".format(tree.path),
     )
     return [DefaultInfo(files = depset([tree]))]
 
 source_tree = rule(
     implementation = _source_tree_impl,
+    attrs = {
+        "_assemble": attr.label(
+            default = "//flutter/private/tools:assemble_directory",
+            executable = True,
+            cfg = "exec",
+        ),
+    },
     doc = "A built directory holding a Dart package's `lib/`.",
 )
 
@@ -130,16 +141,21 @@ def dev_config_test_suite(name):
     """
     flutter_application(
         name = "_dc_native",
-        package_name = "dc_fixture",
+        package = ":pubspec-metadata",
         main = "lib/web_fixture_main.dart",
         deps = ["//flutter/tests/dev_config_fixture:prebuilt"],
         tags = ["manual"],
     )
+    flutter_application(
+        name = "_dc_web_app",
+        main = "lib/web_fixture_main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+        deps = ["//flutter/tests/dev_config_fixture:prebuilt"],
+    )
     flutter_web_bundle(
         name = "_dc_web",
-        package_name = "dc_fixture",
-        main = "lib/web_fixture_main.dart",
-        deps = ["//flutter/tests/dev_config_fixture:prebuilt"],
+        application = ":_dc_web_app",
         tags = ["manual"],
     )
     _declared_test(name = name + "_native", target_under_test = ":_dc_native")

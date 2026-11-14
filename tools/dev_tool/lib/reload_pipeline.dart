@@ -36,6 +36,7 @@ import 'hot_reload/workspace.dart';
 import 'command_report.dart';
 import 'logging.dart';
 import 'outcome_renderer.dart';
+import 'phase_log.dart';
 import 'reload_strategy.dart';
 import 'session.dart';
 import 'session_host.dart';
@@ -284,7 +285,14 @@ class ReloadPipeline {
   /// the reader already knows which command they sent. It is passed anyway so
   /// the report is well-formed rather than carrying a placeholder — if the
   /// refusal arm ever grows a composed sentence, the word it needs is there.
-  Future<Map<String, dynamic>?> _awaitReady(String verb) async {
+  Future<Map<String, dynamic>?> _awaitReady(String verb) {
+    // Said only when there is something to wait for: a pipeline that is ready
+    // answers at once, and a line per command for that is noise.
+    if (ready.isReady) return _checkReady(verb);
+    return phase('pipeline setup', () => _checkReady(verb));
+  }
+
+  Future<Map<String, dynamic>?> _checkReady(String verb) async {
     await ready.whenReady.timeout(
       const Duration(seconds: 90),
       onTimeout: () {},
@@ -395,7 +403,7 @@ class ReloadPipeline {
     // tracker's own baseline. Off the filesystem's clock, not the wall
     // clock's: see [fileClockNow].
     final rebuiltBefore = await fileClockNow();
-    if (!await rebuild()) {
+    if (!await phase('asset build', rebuild)) {
       return const AssetOutcome(
         rebuildFailed: 'Asset rebuild (bazel) failed; see build output above.',
       );
@@ -417,13 +425,16 @@ class ReloadPipeline {
           : AssetOutcome(changed: changed);
     }
 
-    final outcome = await applyTo.applyAssets(
-      changed,
-      targets,
-      shaders: {
-        for (final path in changed)
-          if (tracker.bundle.isShader(path)) path,
-      },
+    final outcome = await phase(
+      'asset delivery',
+      () => applyTo.applyAssets(
+        changed,
+        targets,
+        shaders: {
+          for (final path in changed)
+            if (tracker.bundle.isShader(path)) path,
+        },
+      ),
     );
     return AssetOutcome(changed: changed, delivery: outcome);
   }
@@ -441,7 +452,9 @@ class ReloadPipeline {
     List<String> addressed,
   ) async {
     final refresh = refreshGenerated;
-    if (refresh == null || await refresh()) return null;
+    if (refresh == null || await phase('generated sources build', refresh)) {
+      return null;
+    }
     return toWire(
       CommandReport(
         verb: verb,
@@ -538,13 +551,16 @@ class ReloadPipeline {
 
     if (patcher == null) return (refusal: null, verdict: verdict, patch: null);
 
-    final outcome = await patcher(
-      movedLibraries: switch (verdict) {
-        NativeCodeStale(:final libs) || NativeBindingsMoved(:final libs) => {
-          for (final l in libs) p.basename(l),
+    final outcome = await phase(
+      'native patch',
+      () => patcher(
+        movedLibraries: switch (verdict) {
+          NativeCodeStale(:final libs) || NativeBindingsMoved(:final libs) => {
+            for (final l in libs) p.basename(l),
+          },
+          _ => const <String>{},
         },
-        _ => const <String>{},
-      },
+      ),
     );
     final report = CommandReport(
       verb: verb,
@@ -653,8 +669,52 @@ class ReloadPipeline {
   Map<String, dynamic> _refuse(String verb, String reason) =>
       toWire(CommandReport(verb: verb, unavailable: reason));
 
-  /// Restart the app: a full recompile and a fresh `main()`.
-  Future<Map<String, dynamic>> restart(Map<String, dynamic> params) async {
+  /// The phase log of the command in flight, or null between commands.
+  ///
+  /// A field rather than a parameter because the phases are spread over helpers
+  /// four calls deep, and exact for the reason [command] is: commands are
+  /// serialized, so only one is ever running.
+  PhaseLog? _phases;
+  var _phaseLogs = 0;
+
+  /// Run [body] as the phase [name] of the command in flight, saying how long
+  /// it took. Silent outside a command; never delays [body].
+  Future<T> phase<T>(String name, Future<T> Function() body) =>
+      _phases?.run(name, body) ?? body();
+
+  /// Run [handler] with its phases said in the log — and, for a `--machine`
+  /// client, as one `app.progress` item that ends with the command.
+  Future<Map<String, dynamic>> logged(
+    String verb,
+    Future<Map<String, dynamic>> Function(Map<String, dynamic>) handler,
+    Map<String, dynamic> params,
+  ) async {
+    final progressId = 'phase_${_phaseLogs++}';
+    final appId = params['appId'] as String?;
+    final phases = PhaseLog(
+      verb,
+      mirror: (text, {required finished}) => host.protocol.appProgress(
+        appId,
+        text,
+        progressId: progressId,
+        finished: finished,
+      ),
+    );
+    final outer = _phases;
+    _phases = phases;
+    try {
+      return await handler(params);
+    } finally {
+      _phases = outer;
+      phases.finish();
+    }
+  }
+
+  /// Restart the app: the whole program and a fresh `main()`.
+  Future<Map<String, dynamic>> restart(Map<String, dynamic> params) =>
+      logged('Restart', _restart, params);
+
+  Future<Map<String, dynamic>> _restart(Map<String, dynamic> params) async {
     command++;
     final notReady = await _awaitReady('Restart');
     if (notReady != null) return notReady;
@@ -702,7 +762,7 @@ class ReloadPipeline {
       // unloaded old machine code would crash, not hot-reload.
       final relaunch = relaunchIfNativeLibsChanged;
       if (relaunch != null) {
-        switch (await relaunch()) {
+        switch (await phase('native libs relaunch check', relaunch)) {
           // The rebuild that had to happen before anything could be compiled,
           // and it did not. Reported the way the codegen rebuild's failure is,
           // and for the same reason: not `unavailable`, which says this run
@@ -762,7 +822,7 @@ class ReloadPipeline {
       if (relaunch == null &&
           refreshGenerated == null &&
           rebuildLibs != null &&
-          !await rebuildLibs()) {
+          !await phase('native libs build', rebuildLibs)) {
         return toWire(
           CommandReport(
             verb: 'Restart',
@@ -782,7 +842,7 @@ class ReloadPipeline {
         CommandReport(
           verb: 'Restart',
           appIds: addressed,
-          outcome: await orch.restart(targets: targets),
+          outcome: await orch.restart(targets: targets, phases: _phases),
           assets: assets,
           nativeLibs: native?.verdict,
           nativeRemedy: _nativeRemedy,
@@ -837,20 +897,23 @@ class ReloadPipeline {
     // for the same reason.
     final preCompile = workspaceView?.snapshot();
     // What the restart's `reset` + `recompile` is told changed. This decides
-    // what is compiled: the reset does not re-read the tree, it only makes the
-    // answer a whole program, so this is the same list an incremental compile
-    // would give it. Derived from the same snapshot the success path commits,
-    // so the two cannot disagree about which version of a file this restart is
-    // about.
+    // what is recompiled: the reset does not re-read the tree, it only makes
+    // the answer a whole program, so this is the same list an incremental
+    // compile would get. Derived from the same snapshot the success path
+    // commits, so the two cannot disagree about which version of a file this
+    // restart is about.
     final invalidated = preCompile == null
         ? const <String>[]
         : appliedVersions.findChangedFrom(preCompile).toList();
-    final result = await recompileAndRestart(
-      frontendServer: fs,
-      entrypoint: entrypoint,
-      invalidatedFiles: invalidated,
-      sessions: targets,
-      reloadStrategy: applyTo,
+    final result = await phase(
+      'compile and apply',
+      () => recompileAndRestart(
+        frontendServer: fs,
+        entrypoint: entrypoint,
+        invalidatedFiles: invalidated,
+        sessions: targets,
+        reloadStrategy: applyTo,
+      ),
     );
     if (result.success && preCompile != null) {
       // After a restart, every file the compile read is live.
@@ -889,7 +952,10 @@ class ReloadPipeline {
   }
 
   /// Hot reload: recompile what changed and inject it into the live isolate.
-  Future<Map<String, dynamic>> hotReload(Map<String, dynamic> params) async {
+  Future<Map<String, dynamic>> hotReload(Map<String, dynamic> params) =>
+      logged('Hot reload', _hotReload, params);
+
+  Future<Map<String, dynamic>> _hotReload(Map<String, dynamic> params) async {
     command++;
     final notReady = await _awaitReady('Hot reload');
     if (notReady != null) return notReady;
@@ -942,7 +1008,11 @@ class ReloadPipeline {
         patch: true,
       );
       if (native.refusal case final refusal?) return refusal;
-      final outcome = await orch.reload(declared: declared, targets: targets);
+      final outcome = await orch.reload(
+        declared: declared,
+        targets: targets,
+        phases: _phases,
+      );
       if (native.patch is NativePatched && outcome is ReloadNoChange) {
         await reassembleNativePatched?.call();
       }
@@ -1004,7 +1074,7 @@ class ReloadPipeline {
             'compiles the whole program and loads it.\n$webBaselineFailure',
         'reason': webBaselineFailure,
       });
-      return restart(params);
+      return _restart(params);
     }
 
     // Codegen apps: rebuild generated sources via bazel before snapshotting, so
@@ -1054,12 +1124,15 @@ class ReloadPipeline {
       );
     }
 
-    final result = await recompileAndReload(
-      frontendServer: fs,
-      entrypoint: entrypoint,
-      invalidatedFiles: invalidated.toList(),
-      sessions: targets,
-      reloadStrategy: applyTo,
+    final result = await phase(
+      'compile and apply',
+      () => recompileAndReload(
+        frontendServer: fs,
+        entrypoint: entrypoint,
+        invalidatedFiles: invalidated.toList(),
+        sessions: targets,
+        reloadStrategy: applyTo,
+      ),
     );
     if (result.success) {
       appliedVersions.markApplied(snap, files: invalidated);

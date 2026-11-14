@@ -67,14 +67,14 @@ void main() {
     // defaults and fails much later, somewhere else.
     expect(
       () => requireNoPositionalArgs('run', [
-        '--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE',
+        '--@rules_dart//dart:extra_dart_defines=KEY=VALUE',
       ]),
       throwsA(
         isA<DevToolException>().having(
           (e) => '$e',
           'message',
           allOf(
-            contains('--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE'),
+            contains('--@rules_dart//dart:extra_dart_defines=KEY=VALUE'),
             // Both spellings that would have worked, because which one a reader
             // needs depends on what they were trying to pass.
             contains('--build-arg'),

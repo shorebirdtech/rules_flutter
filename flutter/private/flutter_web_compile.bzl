@@ -155,9 +155,9 @@ def resolve_web_optimization_level(level, mode_default):
 def web_experiment_flags(enable_experiments):
     """The `--enable-experiment` flags for a list of experiment names.
 
-    Both `dart compile js` and `dart compile wasm` take these bare, and so
-    does the frontend_server the icon tree-shake kernel goes through — the
-    same shape upstream produces by folding `--enable-experiment=<name>` into
+    `dart compile js` (the real compile and the icon scan's `--cfe-only` one)
+    and `dart compile wasm` all take these bare — the same shape upstream
+    produces by folding `--enable-experiment=<name>` into
     `extraFrontEndOptions`, which every web compile splices in unwrapped.
 
     Args:
@@ -168,10 +168,23 @@ def web_experiment_flags(enable_experiments):
     """
     return ["--enable-experiment=" + e for e in enable_experiments]
 
+def web_renderer_defines(renderer):
+    """The `-D` defines (without the `-D`) that select a web renderer.
+
+    Args:
+        renderer: "skwasm" or "canvaskit".
+
+    Returns:
+        A list of `NAME=value` strings.
+    """
+    if renderer == "skwasm":
+        return ["FLUTTER_WEB_USE_SKIA=false", "FLUTTER_WEB_USE_SKWASM=true"]
+    return ["FLUTTER_WEB_USE_SKIA=true", "FLUTTER_WEB_USE_SKWASM=false"]
+
 # The memory reservation covers a small app; a larger program needs more. An
 # optimizing dart2wasm (`-O1` and up) hands the module to Binaryen's
 # wasm-opt, which optimizes on several threads, so it reserves
-# `//flutter:wasm_opt_cores` CPUs. wasm-opt starts a thread per core unless
+# `//flutter:wasm_opt_cpus` CPUs. wasm-opt starts a thread per core unless
 # BINARYEN_CORES caps it, so the action caps it at what it reserves.
 # Everything else stays within about one core.
 def _web_compiler_resources(_os, _inputs):
@@ -180,16 +193,10 @@ def _web_compiler_resources(_os, _inputs):
 def _main_dart_js(output_dir):
     return output_dir.path + "/main.dart.js"
 
-def _libraries_spec(platform_dill):
-    # libraries.json is one level above the kernel/ directory holding the
-    # dill; the web SDK's includes the Dart SDK's via a relative path.
-    return platform_dill.dirname + "/../libraries.json"
-
 def flutter_dart2wasm_action(
         ctx,
         dart,
-        flutter_sdk_files,
-        web_sdk_files,
+        sdk_files,
         dart2wasm_platform_dill,
         main_dart,
         srcs,
@@ -197,21 +204,24 @@ def flutter_dart2wasm_action(
         output_wasm,
         output_mjs,
         mode,
-        optimizing_cores,
+        optimizing_cpus,
         output_source_map = None,
         strip_wasm = True,
         optimization_level = "auto",
         minify = "auto",
         enable_experiments = [],
         defines = [],
-        renderer = "skwasm"):
+        renderer = "skwasm",
+        recorded_uses = None):
     """Compiles Dart source to WebAssembly using dart2wasm.
 
     Args:
         ctx: Rule context.
         dart: The `dart` executable File.
-        flutter_sdk_files: SDK files needed to run dart.
-        web_sdk_files: Flutter web SDK files.
+        sdk_files: The `DartSdkFilesInfo` of the Flutter-bundled Dart SDK; the
+            action takes the set for its compiler (`dart2wasm`). The platform kernel of
+            the Flutter web SDK is an argument below, and the rest of the web
+            SDK is for the bundle, not the compile.
         dart2wasm_platform_dill: The dart2wasm_platform.dill File.
         main_dart: The main .dart source File.
         srcs: All transitive source Files needed for compilation.
@@ -221,8 +231,8 @@ def flutter_dart2wasm_action(
         mode: A `web_build_mode` value; selects the mode defines and, in
             debug, enables asserts (upstream `WasmCompilerConfig` does the
             same for debug builds).
-        optimizing_cores: The cores an optimizing compile reserves and its
-            wasm-opt may use; `//flutter:wasm_opt_cores`.
+        optimizing_cpus: The CPUs an optimizing compile reserves and its
+            wasm-opt may use; `//flutter:wasm_opt_cpus`.
         output_source_map: Output .wasm.map File, or None to disable source
             maps. dart2wasm writes the map at `<output_wasm>.map`, so the
             declared File must sit exactly there.
@@ -236,9 +246,12 @@ def flutter_dart2wasm_action(
         enable_experiments: Dart language experiments to enable.
         defines: Dart -D defines.
         renderer: Web renderer ("skwasm" or "canvaskit").
+        recorded_uses: Optional File the compiler writes the `@RecordUse`
+            uses to (`--recorded-uses`), as `flutter build web --wasm` has it
+            write them for the link hooks.
     """
-    if optimizing_cores < 1:
-        fail("--@rules_flutter//flutter:wasm_opt_cores must be at least 1, got %d" % optimizing_cores)
+    if optimizing_cpus < 1:
+        fail("--@rules_flutter//flutter:wasm_opt_cpus must be at least 1, got %d" % optimizing_cpus)
     if output_source_map != None and output_source_map.path != output_wasm.path + ".map":
         fail("output_source_map must be declared at <output_wasm>.map " +
              "(dart2wasm writes it there): got %s for %s" %
@@ -286,36 +299,38 @@ def flutter_dart2wasm_action(
         # meant to measure.
         for uri in ("dart:ui", "package:flutter"):
             args.add("--extra-compiler-option=--delete-tostring-package-uri=" + uri)
-    if renderer == "skwasm":
-        args.add("-DFLUTTER_WEB_USE_SKIA=false")
-        args.add("-DFLUTTER_WEB_USE_SKWASM=true")
-    else:
-        args.add("-DFLUTTER_WEB_USE_SKIA=true")
-        args.add("-DFLUTTER_WEB_USE_SKWASM=false")
+    for d in web_renderer_defines(renderer):
+        args.add("-D" + d)
     for d in defines:
         args.add("-D" + d)
+    if recorded_uses != None:
+        args.add(recorded_uses, format = "--recorded-uses=%s")
 
     args.add("-o", output_wasm)
     args.add(main_dart)
 
     home = sdk_action(**(
-        {"BINARYEN_CORES": str(optimizing_cores)} if level > 0 else {}
+        {"BINARYEN_CORES": str(optimizing_cpus)} if level > 0 else {}
     ))
     ctx.actions.run(
         executable = dart,
         arguments = [args],
         inputs = depset(
             direct = [main_dart, package_config, dart2wasm_platform_dill] + srcs,
-            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+            transitive = [sdk_files.dart2wasm],
         ),
-        outputs = [output_wasm, output_mjs] + ([output_source_map] if output_source_map != None else []),
+        outputs = [output_wasm, output_mjs] + [
+            f
+            for f in [output_source_map, recorded_uses]
+            if f != None
+        ],
         mnemonic = "FlutterDart2Wasm",
         exec_group = PORTABLE,
         # A `cpu:<n>` requirement sets the cores Bazel reserves, overriding
         # the resource set's, and unlike the resource set it can come from a
         # flag.
         execution_requirements = home["execution_requirements"] | (
-            {"cpu:%d" % optimizing_cores: ""} if level > 0 else {}
+            {"cpu:%d" % optimizing_cpus: ""} if level > 0 else {}
         ),
         resource_set = _web_compiler_resources,
         progress_message = "Compiling Flutter to WASM %s" % ctx.label,
@@ -325,8 +340,7 @@ def flutter_dart2wasm_action(
 def flutter_dart2js_action(
         ctx,
         dart,
-        flutter_sdk_files,
-        web_sdk_files,
+        sdk_files,
         dart2js_platform_dill,
         main_dart,
         srcs,
@@ -341,7 +355,8 @@ def flutter_dart2js_action(
         dump_info = False,
         source_maps = False,
         defines = [],
-        renderer = "canvaskit"):
+        renderer = "canvaskit",
+        write_resources = False):
     """Compiles Dart source to JavaScript using dart2js.
 
     Output is a tree artifact (directory) because dart2js may produce
@@ -353,8 +368,10 @@ def flutter_dart2js_action(
     Args:
         ctx: Rule context.
         dart: The `dart` executable File.
-        flutter_sdk_files: SDK files needed to run dart.
-        web_sdk_files: Flutter web SDK files.
+        sdk_files: The `DartSdkFilesInfo` of the Flutter-bundled Dart SDK; the
+            action takes the set for its compiler (`dart2js`). The platform kernel of
+            the Flutter web SDK is an argument below, and the rest of the web
+            SDK is for the bundle, not the compile.
         dart2js_platform_dill: The dart2js_platform.dill File.
         main_dart: The main .dart source File.
         srcs: All transitive source Files needed for compilation.
@@ -379,12 +396,20 @@ def flutter_dart2js_action(
         source_maps: Whether to generate source maps.
         defines: Dart -D defines.
         renderer: Web renderer ("canvaskit" or "skwasm").
+        write_resources: Whether dart2js writes the `@RecordUse` uses it
+            records (`--write-resources`), as `flutter build web` has it write
+            them for the link hooks. dart2js puts them at
+            `main.dart.js.resources.json` in `output_dir`, with no way to name
+            another path.
     """
     args = ctx.actions.args()
     args.add("compile")
     args.add("js")
 
-    args.add_all([dart2js_platform_dill], map_each = _libraries_spec, format_each = "--libraries-spec=%s")
+    # The web SDK's precompiled platform: its folder holds `dart2js_platform.dill`.
+    # Without it dart2js recompiles the engine's `web-sdk/lib` sources on every
+    # build; `flutter build web` passes the same folder.
+    args.add(dart2js_platform_dill.dirname, format = "--platform-binaries=%s")
 
     # Package config.
     args.add(package_config, format = "--packages=%s")
@@ -413,11 +438,12 @@ def flutter_dart2js_action(
         args.add("-D" + d)
     if mode == "debug":
         args.add("--enable-asserts")
-    if renderer == "canvaskit":
-        args.add("-DFLUTTER_WEB_USE_SKIA=true")
-        args.add("-DFLUTTER_WEB_USE_SKWASM=false")
+    for d in web_renderer_defines(renderer):
+        args.add("-D" + d)
     for d in defines:
         args.add("-D" + d)
+    if write_resources:
+        args.add("--write-resources")
 
     # Output into the directory — dart2js writes main.dart.js + *.part.js here.
     args.add_all("-o", [output_dir], map_each = _main_dart_js, expand_directories = False)
@@ -428,12 +454,95 @@ def flutter_dart2js_action(
         arguments = [args],
         inputs = depset(
             direct = [main_dart, package_config, dart2js_platform_dill] + srcs,
-            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+            transitive = [sdk_files.dart2js],
         ),
         outputs = [output_dir],
         mnemonic = "FlutterDart2JS",
         exec_group = PORTABLE,
         resource_set = _web_compiler_resources,
         progress_message = "Compiling Flutter to JavaScript %s" % ctx.label,
+        **sdk_action()
+    )
+
+def flutter_web_icon_kernel_action(
+        ctx,
+        dart,
+        sdk_files,
+        front_end,
+        platform_dill,
+        main_dart,
+        srcs,
+        package_config,
+        output,
+        mode,
+        enable_experiments = [],
+        defines = [],
+        renderer = "canvaskit"):
+    """Compiles the app to a kernel for the icon tree shaker to scan.
+
+    Icon tree shaking finds the icons an app uses by reading a kernel of the
+    program that ships, so this compiles the same entrypoint the web compilers
+    do, with a web front end against the web SDK's platform. A kernel built
+    against the Dart VM's platform cannot import `dart:js_interop`,
+    `package:web` or `dart:ui_web`, and takes the VM side of every
+    `dart.library.js_interop` conditional import, so it would miss the icons
+    only the web build uses.
+
+    With `front_end = "dart2js"` this is `dart compile js --cfe-only`, which is
+    what `flutter build web` scans. A bundle with no dart2js compile cannot use
+    it: JavaScript cannot represent every integer literal a WASM-only app may
+    hold (`0x7FFFFFFFFFFFFFFF`), and the front end refuses them. That bundle's
+    kernel comes from dart2wasm's own front end (`--phases=cfe`).
+
+    Args:
+        ctx: Rule context.
+        dart: The `dart` executable File.
+        sdk_files: The `DartSdkFilesInfo` of the Flutter-bundled Dart SDK; the
+            action takes the set for its compiler (`dart2js` for the `dart2js` front end, `dart2wasm` for the other). The platform kernel of
+            the Flutter web SDK is an argument below, and the rest of the web
+            SDK is for the bundle, not the compile.
+        front_end: "dart2js" or "dart2wasm".
+        platform_dill: The web SDK platform File of `front_end`
+            (`dart2js_platform.dill` or `dart2wasm_platform.dill`).
+        main_dart: The entrypoint File (the wrapper the compilers get).
+        srcs: All source Files the entrypoint reads.
+        package_config: The package_config.json File.
+        output: The kernel `.dill` File to write.
+        mode: A `web_build_mode` value; selects the mode defines.
+        enable_experiments: Dart language experiments to enable.
+        defines: Dart -D defines.
+        renderer: The primary compiler's web renderer.
+    """
+    args = ctx.actions.args()
+    if front_end == "dart2js":
+        args.add_all(["compile", "js", "--cfe-only"])
+        args.add(platform_dill.dirname, format = "--platform-binaries=%s")
+    elif front_end == "dart2wasm":
+        args.add_all(["compile", "wasm", "--phases=cfe"])
+        args.add(platform_dill, format = "--extra-compiler-option=--platform=%s")
+    else:
+        fail("flutter_web_icon_kernel_action: front_end must be \"dart2js\" or \"dart2wasm\", got %r" % front_end)
+    args.add(package_config, format = "--packages=%s")
+    args.add_all(web_experiment_flags(enable_experiments))
+    for d in web_mode_defines(mode):
+        args.add("-D" + d)
+    for d in web_renderer_defines(renderer):
+        args.add("-D" + d)
+    for d in defines:
+        args.add("-D" + d)
+    args.add_all(["-o", output, main_dart])
+
+    ctx.actions.run(
+        executable = dart,
+        arguments = [args],
+        inputs = depset(
+            direct = [main_dart, package_config, platform_dill] + srcs,
+            transitive = [getattr(sdk_files, front_end)],
+        ),
+        outputs = [output],
+        mnemonic = "FlutterWebIconKernel",
+        exec_group = PORTABLE,
+        resource_set = _web_compiler_resources,
+        progress_message = "Compiling web kernel for icon scan %s" % ctx.label,
         **sdk_action()
     )

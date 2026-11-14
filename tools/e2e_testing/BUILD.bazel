@@ -1,0 +1,119 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_package_metadata", "dart_test")
+
+# The target platform of a Linux machine, for the tests of what a build there
+# skips.
+platform(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "rules_flutter_e2e_testing",
+)
+
+# The checks the e2e workspaces' `verify_*_test`s share, as a library:
+# checking that a built bundle holds the files and symbols it should, unpacking
+# an archive, launching an app and waiting for it to report. Each workspace is
+# its own Bazel project and cannot share files by relative path, so a test
+# there lists `@rules_flutter//tools/e2e_testing` in `deps` and imports
+# `package:rules_flutter_e2e_testing/...`.
+#
+# It is for this repository's tests, and public only so the e2e workspaces can
+# name it. It stays in the release archive: `//tools/dev_tool`'s test targets
+# (`:e2e`, `:loose_sources`) depend on it, and with the package missing a
+# consumer's `@rules_flutter//...` fails to analyse.
+dart_library(
+    name = "e2e_testing",
+    srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tools/macos_gui_session",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+# The tests that import `package:path`.
+_PATH_TESTS = [
+    "test/host_leaks_test.dart",
+    "test/web_bundle_test.dart",
+]
+
+[
+    dart_test(
+        name = test[len("test/"):-len(".dart")],
+        size = "small",
+        main = test,
+        deps = [
+            ":e2e_testing",
+            "@dev_tool_deps//:test",
+        ] + (["@dev_tool_deps//:path"] if test in _PATH_TESTS else []),
+    )
+    for test in glob(
+        ["test/*_test.dart"],
+        exclude = ["test/apple_release_test.dart"],
+    )
+]
+
+# Builds Mach-O binaries with Xcode's tools.
+dart_test(
+    name = "apple_release_test",
+    size = "small",
+    main = "test/apple_release_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        ":e2e_testing",
+        "@dev_tool_deps//:test",
+    ],
+)
+
+# The executable of `compile_fail_test` (compile_fail_test.bzl).
+dart_binary(
+    name = "compile_fail_runner",
+    testonly = True,
+    compile_mode = "exe",
+    main = "compile_fail_runner.dart",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":e2e_testing",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+# Records an action's command line for `compile_fail_test`.
+dart_binary(
+    name = "compile_fail_command",
+    compile_mode = "exe",
+    main = "compile_fail_command.dart",
+    visibility = ["//visibility:public"],
+)
+
+# Runs a test on another machine over ssh, given as `--run_under`: the GUI
+# tests build here and open their windows on the host named by
+# `--test_env=RULES_FLUTTER_TEST_HOST=<ssh destination>`. docs/TESTING.md,
+# "Running GUI tests on another Mac".
+dart_binary(
+    name = "ssh_test_runner",
+    testonly = True,
+    compile_mode = "exe",
+    main = "ssh_test_runner.dart",
+    visibility = ["//visibility:public"],
+    deps = [":e2e_testing"],
+)
+
+# Chrome on another Mac for a web run of the dev tool here, given as
+# `CHROME_EXECUTABLE` with `RULES_FLUTTER_CHROME_HOST=<ssh destination>`.
+# docs/TESTING.md, "Running GUI tests on another Mac".
+dart_binary(
+    name = "ssh_chrome",
+    testonly = True,
+    compile_mode = "exe",
+    main = "ssh_chrome.dart",
+    visibility = ["//visibility:public"],
+    deps = [":e2e_testing"],
+)

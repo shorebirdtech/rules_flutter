@@ -14,8 +14,12 @@ import 'package:http_multi_server/http_multi_server.dart';
 import 'command_failure.dart';
 import 'command_runner.dart';
 import 'device.dart';
+import 'logging.dart';
 import 'machine_protocol.dart';
+import 'screen.dart';
 import 'session.dart';
+
+final _logger = Logger('dev_tool.http_control_channel');
 
 /// HTTP server that exposes the dev tool's command dispatch and screenshot
 /// endpoints to external clients.
@@ -179,6 +183,9 @@ class HttpControlChannel {
         } else {
           await _handleNativeScreenshot(request, match.appId);
         }
+      } else if (request.method == 'GET' &&
+          _sessionScreensMatch(path) != null) {
+        await _handleScreens(request, _sessionScreensMatch(path)!);
       } else if (request.method == 'GET' && _sessionLogsMatch(path) != null) {
         await _handleLogs(request, _sessionLogsMatch(path)!);
       } else {
@@ -252,9 +259,17 @@ class HttpControlChannel {
       request.response.statusCode = _statusFor(e.kind);
       request.response.headers.contentType = ContentType.json;
       request.response.write(json.encode({'error': e.message}));
-    } catch (e) {
+    } catch (e, stack) {
       // Not a refusal — the tool broke. 500 is the honest answer, and the
-      // exception's own text is all there is to say.
+      // exception's own text is all there is to say. Said in the run's log as
+      // well, because the person watching the terminal never sees the response.
+      _logger.warning({
+        'message': 'command_failed_internally',
+        'text': 'The command $method broke the tool and was answered 500: $e',
+        'method': method,
+        'error': '$e',
+        'stack': '$stack',
+      });
       request.response.statusCode = HttpStatus.internalServerError;
       request.response.headers.contentType = ContentType.json;
       request.response.write(json.encode({'error': e.toString()}));
@@ -364,7 +379,7 @@ class HttpControlChannel {
   /// worth having, so the capture goes ahead and the answer says so:
   /// `X-Settled: yes` when it went idle first, `no` when the wait ran out or
   /// the app is backgrounded, `skipped` when `?settle=false` was asked for or
-  /// this run has no VM service to ask through (`--wasm`, `--profile`).
+  /// this run's app cannot be asked (a profile or release web bundle).
   /// `X-Settle-Detail` carries the reason for anything but `yes`, encoded by
   /// [_headerValue].
   Future<({String state, String? detail})> _settleBeforeCapture(
@@ -382,10 +397,11 @@ class HttpControlChannel {
       return (state: 'skipped', detail: 'the caller asked not to wait');
     }
     // Whether this app can be asked anything at all. Two ways it cannot: the
-    // run offers no `app.*` surface (a wasm or static web bundle has no VM
-    // service behind it, and no flag changes that), or a native session has no
-    // client — native owns one from the moment the session exists, so null
-    // there is permanent.
+    // run offers no `app.*` surface (a profile or release web bundle compiles
+    // the agent extensions out, and no flag changes that), or a native session
+    // has no channel — native owns a VM client from the moment the session
+    // exists, so null there is permanent. A debug wasm or static bundle is
+    // askable over its browser channel, like any web run.
     //
     // Deliberately not `vmClient == null` on its own, which is what this read.
     // On web that field is null for the first seconds of *every* run: DWDS
@@ -398,13 +414,11 @@ class HttpControlChannel {
     // command does, so asking it is what tells "not yet" from "never".
     final askable =
         _commandRunner.knows('app.settle') &&
-        (session.device is WebDevice || session.vmClient != null);
+        (session.device is WebDevice || session.extensionChannel != null);
     if (!askable) {
       return (
         state: 'skipped',
-        detail:
-            'this run has no VM service, so the app cannot be asked whether '
-            'it is idle',
+        detail: 'this run offers no way to ask the app whether it is idle',
       );
     }
     try {
@@ -479,7 +493,13 @@ class HttpControlChannel {
     // that support multi-window selection (currently macOS, exact title
     // match). Devices that ignore it composite or capture however they do
     // by default.
+    //
+    // `?screen=<id or name>` is a different axis: which display of a device
+    // with several. A window is something an app opens; a screen is something
+    // a device has, and `/screens` lists them. Without it the screen the app
+    // is on is captured, and a device that cannot say which is an error.
     final window = request.uri.queryParameters['window'];
+    final screen = request.uri.queryParameters['screen'];
 
     final settle = await _settleBeforeCapture(session, request);
 
@@ -496,6 +516,7 @@ class HttpControlChannel {
         session.appInstance,
         tmpFile.path,
         window: window,
+        screen: screen,
       );
       final bytes = await tmpFile.readAsBytes();
       request.response.statusCode = HttpStatus.ok;
@@ -503,9 +524,56 @@ class HttpControlChannel {
       _reportSettle(request, settle);
       request.response.add(bytes);
       await request.response.close();
+    } on ScreenSelectionException catch (e) {
+      await _screenSelectionRefusal(request, e);
     } finally {
       if (tmpFile.existsSync()) tmpFile.deleteSync();
     }
+  }
+
+  /// 422, not 500: the request was well formed and the tool is fine, but the
+  /// device's screens do not say which one is meant. The body carries the
+  /// screens so a caller can name one without a second request.
+  Future<void> _screenSelectionRefusal(
+    HttpRequest request,
+    ScreenSelectionException e,
+  ) async {
+    request.response.statusCode = HttpStatus.unprocessableEntity;
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(
+      json.encode({
+        'error': e.message,
+        'screens': [for (final screen in e.screens) screen.toJson()],
+      }),
+    );
+    await request.response.close();
+  }
+
+  /// `GET /sessions/{appId}/screens` — the screens the device has now.
+  ///
+  /// Each is `{id, name, type, width, height, active, primary}`; `id` or
+  /// `name` is what `screenshot/native?screen=` takes. `active` is `true` for
+  /// the screen the app is on, `false` for one it is not, and `null` where the
+  /// device does not say. Read per request, never cached: a simulator's ids
+  /// change on every boot and its active screen follows its posture.
+  Future<void> _handleScreens(HttpRequest request, String appId) async {
+    final session = _findSession(appId);
+    if (session == null) {
+      request.response.statusCode = HttpStatus.notFound;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(json.encode({'error': 'Unknown appId: $appId'}));
+      await request.response.close();
+      return;
+    }
+    final screens = await session.device.screens();
+    request.response.statusCode = HttpStatus.ok;
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(
+      json.encode({
+        'screens': [for (final screen in screens) screen.toJson()],
+      }),
+    );
+    await request.response.close();
   }
 
   /// Default page size for `/logs`, and the cap on a caller-supplied `limit`
@@ -619,6 +687,13 @@ class HttpControlChannel {
       appId: Uri.decodeComponent(match.group(1)!),
       type: match.group(2)!,
     );
+  }
+
+  /// Parse `/sessions/{appId}/screens` from a path, returning the appId.
+  String? _sessionScreensMatch(String path) {
+    final match = RegExp(r'^/sessions/([^/]+)/screens$').firstMatch(path);
+    if (match == null) return null;
+    return Uri.decodeComponent(match.group(1)!);
   }
 
   /// Parse `/sessions/{appId}/logs` from a path, returning the appId.

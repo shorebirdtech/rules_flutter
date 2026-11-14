@@ -1,0 +1,27 @@
+{
+  "assets": {
+    "assets/all.txt": {
+      "variants": [
+        {
+          "asset": "assets/all.txt"
+        }
+      ]
+    },
+    "assets/free.txt": {
+      "variants": [
+        {
+          "asset": "assets/free.txt"
+        }
+      ],
+      "flavors": ["free"]
+    },
+    "assets/paid/a.txt": {
+      "variants": [
+        {
+          "asset": "assets/paid/a.txt"
+        }
+      ],
+      "flavors": ["paid", "premium"]
+    }
+  }
+}

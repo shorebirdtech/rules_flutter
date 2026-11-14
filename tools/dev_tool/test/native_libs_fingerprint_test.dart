@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter_bazel_dev_tool/native_libs_fingerprint.dart';
 import 'package:test/test.dart';
 
+import 'zip_fixture.dart';
+
 void main() {
   late Directory tmp;
 
@@ -32,17 +34,12 @@ void main() {
 
   Future<String> zipBundle(Directory app) async {
     final zipPath = '${app.path}.zip';
-    final r = await Process.run(
-      'zip',
-      [
-        '-q',
-        '-r',
-        zipPath,
-        app.uri.pathSegments.lastWhere((s) => s.isNotEmpty),
-      ],
-      workingDirectory: app.parent.path,
+    zipTree(
+      zipPath: zipPath,
+      base: app.parent.path,
+      include: [app.uri.pathSegments.lastWhere((s) => s.isNotEmpty)],
+      deflate: true,
     );
-    expect(r.exitCode, 0, reason: r.stderr.toString());
     return zipPath;
   }
 
@@ -134,13 +131,12 @@ void main() {
 
     Future<String> zipIpa(Directory root) async {
       final ipa = '${root.path}.ipa';
-      final r = await Process.run('zip', [
-        '-q',
-        '-r',
-        ipa,
-        'Payload',
-      ], workingDirectory: root.path);
-      expect(r.exitCode, 0, reason: r.stderr.toString());
+      zipTree(
+        zipPath: ipa,
+        base: root.path,
+        include: ['Payload'],
+        deflate: true,
+      );
       return ipa;
     }
 
@@ -192,13 +188,7 @@ void main() {
       File('${abi.path}/libapp.so').writeAsBytesSync([3, 4]);
       File('${abi.path}/libflutter.so').writeAsBytesSync([5, 6]);
       final apk = '${tmp.path}/app.apk';
-      final r = await Process.run('zip', [
-        '-q',
-        '-r',
-        apk,
-        'lib',
-      ], workingDirectory: root.path);
-      expect(r.exitCode, 0, reason: r.stderr.toString());
+      zipTree(zipPath: apk, base: root.path, include: ['lib']);
       expect((await nativeLibsFingerprint(apk)).keys, [
         'lib/arm64-v8a/libadd.so',
       ]);
@@ -233,58 +223,6 @@ void main() {
       '${app.path}/Contents/Frameworks/App.framework/App',
     ).writeAsBytesSync([1]);
     expect(await nativeLibsFingerprint(app.path), isEmpty);
-  });
-
-  group('nativeLibsCoverBundle', () {
-    const dylib = 'Contents/Frameworks/libsqlite3.dylib';
-    const framework = 'Contents/Frameworks/vendored.framework/vendored';
-
-    test('holds when the group built every bundled library', () {
-      expect(
-        nativeLibsCoverBundle(['bazel-out/bin/libsqlite3.dylib'], [dylib]),
-        isTrue,
-      );
-    });
-
-    // Judging this bundle by the group alone would never see the framework
-    // move, and a restart would run the old machine code.
-    test('fails when the bundle has code the group does not hold', () {
-      expect(
-        nativeLibsCoverBundle(
-          ['bazel-out/bin/libsqlite3.dylib'],
-          [dylib, framework],
-        ),
-        isFalse,
-      );
-    });
-
-    test('fails on an empty group', () {
-      expect(nativeLibsCoverBundle(const [], [dylib]), isFalse);
-    });
-  });
-
-  group('nativeLibsWrittenBy', () {
-    late Directory dir;
-    late File lib;
-    final built = DateTime(2026, 11, 3, 12);
-
-    setUp(() {
-      dir = Directory.systemTemp.createTempSync('written_by');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      lib = File('${dir.path}/libnative.dylib')..writeAsStringSync('code');
-    });
-
-    test('holds for a file the launch build could have bundled', () {
-      lib.setLastModifiedSync(built);
-      expect(nativeLibsWrittenBy([lib.path], built), isTrue);
-    });
-
-    // Saved after the launch build, then compiled by the group build: the
-    // running process never loaded this file, so it can't be the baseline.
-    test('fails for a file written after the launch build', () {
-      lib.setLastModifiedSync(built.add(const Duration(seconds: 1)));
-      expect(nativeLibsWrittenBy([lib.path], built), isFalse);
-    });
   });
 
   group('declared build outputs', () {
@@ -336,5 +274,120 @@ void main() {
         );
       },
     );
+  });
+
+  group('nativeLibsFingerprintOfBuiltFiles', () {
+    // What an Android restart reads in place of the APK: the files the build
+    // gives the packaging to take its native libraries from. They sit in an
+    // output tree, one directory per configuration.
+    File built(String config, String relative, List<int> bytes) =>
+        File('${tmp.path}/bazel-out/$config/bin/$relative')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(bytes);
+
+    test('keys each file by where it sits in its configuration', () async {
+      final fp = await nativeLibsFingerprintOfBuiltFiles([
+        built('k8', 'libdartjni.so', [1, 2, 3]).path,
+        built('k8', 'external/lib+/libmul.so', [4]).path,
+      ]);
+      expect(fp.keys, ['libdartjni.so', 'external/lib+/libmul.so']);
+    });
+
+    // `android_binary` links every `cc_library` it lists into a library of its
+    // own and packages every AAR's `jni/` libraries, so what can change the
+    // APK's native code is archives, objects and extracted libraries too.
+    test(
+      'takes the archives, objects and libraries the packaging links',
+      () async {
+        final fp = await nativeLibsFingerprintOfBuiltFiles([
+          built('k8', 'libextra_native.lo', [1]).path,
+          built('k8', 'libplain.a', [2]).path,
+          built('k8', '_objs/plain/plain.pic.o', [3]).path,
+          built('k8', 'external/aar+/jni/arm64-v8a/libaar.so', [4]).path,
+        ]);
+        expect(fp.keys, [
+          'libextra_native.lo',
+          'libplain.a',
+          '_objs/plain/plain.pic.o',
+          'external/aar+/jni/arm64-v8a/libaar.so',
+        ]);
+      },
+    );
+
+    test('leaves out the engine and the Dart snapshot', () async {
+      final fp = await nativeLibsFingerprintOfBuiltFiles([
+        built('k8', 'libdartjni.so', [1]).path,
+        built('k8', 'libapp.so', [2]).path,
+        built('k8', 'external/engine/libflutter.so', [3]).path,
+      ]);
+      expect(fp.keys, ['libdartjni.so']);
+    });
+
+    // A macOS restart reads the linker inputs below the bundle, which include
+    // the engine framework's binary: about 100 MB, hashed on every restart,
+    // for a file only an engine bump moves.
+    test('leaves out the Apple engine framework binaries', () async {
+      final fp = await nativeLibsFingerprintOfBuiltFiles([
+        built('mac', 'libadd.dylib', [1]).path,
+        built(
+          'mac',
+          '_solib_darwin_arm64/_engine/FlutterMacOS.framework/FlutterMacOS',
+          [2],
+        ).path,
+        built('ios', '_solib/_engine/Flutter.framework/Flutter', [3]).path,
+        built('mac', 'vendor/FlutterMacOS', [4]).path,
+        built(
+          'ios',
+          '_solib_/_U_S_S_C_U_Uapp_Uengine___Udebug_SFlutter.xcframework_'
+              'Sios-arm64_Ux86_U64-simulator_SFlutter.framework/Flutter',
+          [5],
+        ).path,
+      ]);
+      expect(fp.keys, ['libadd.dylib', 'vendor/FlutterMacOS']);
+    });
+
+    test(
+      'skips what is not a file: a tree artifact the build listed',
+      () async {
+        Directory('${tmp.path}/bazel-out/k8/bin/flutter_assets').createSync(
+          recursive: true,
+        );
+        final fp = await nativeLibsFingerprintOfBuiltFiles([
+          '${tmp.path}/bazel-out/k8/bin/flutter_assets',
+          built('k8', 'libdartjni.so', [1]).path,
+        ]);
+        expect(fp.keys, ['libdartjni.so']);
+      },
+    );
+
+    // A launch target reaches one library in more than one configuration (the
+    // APK's own and the one its dependencies are split into), and which copy
+    // the build lists first is not something to depend on.
+    test('does not depend on the order of a library built twice', () async {
+      final a = built('config_a', 'libdartjni.so', [1, 2, 3]);
+      final b = built('config_b', 'libdartjni.so', [1, 2, 4]);
+      final one = await nativeLibsFingerprintOfBuiltFiles([a.path, b.path]);
+      final other = await nativeLibsFingerprintOfBuiltFiles([b.path, a.path]);
+      expect(one, other);
+
+      b.writeAsBytesSync([1, 2, 5]);
+      expect(
+        await nativeLibsFingerprintOfBuiltFiles([a.path, b.path]),
+        isNot(one),
+        reason: 'either copy changing is a change',
+      );
+    });
+
+    test('moves with a file\'s bytes and not with its configuration', () async {
+      final before = await nativeLibsFingerprintOfBuiltFiles([
+        built('one', 'libextra.a', [1, 2, 3]).path,
+      ]);
+      final elsewhere = built('two', 'libextra.a', [1, 2, 3]);
+      expect(await nativeLibsFingerprintOfBuiltFiles([elsewhere.path]), before);
+
+      elsewhere.writeAsBytesSync([1, 2, 4]);
+      final after = await nativeLibsFingerprintOfBuiltFiles([elsewhere.path]);
+      expect(changedLibs(before, after), ['libextra.a']);
+    });
   });
 }

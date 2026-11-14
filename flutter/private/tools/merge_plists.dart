@@ -35,6 +35,15 @@
 /// Only an empty value is dropped, so a plist that actually names an icon file
 /// keeps it and the conflict is still reported.
 ///
+/// `--substitute <from>=<to>` replaces every occurrence of `from` in the base's
+/// XML before it is read: how the Xcode variables a scaffold Info.plist leaves
+/// for the build (`$(DEVELOPMENT_LANGUAGE)`) are filled in. It works on the
+/// plist's XML form, so a plist saved in binary form is substituted too, where
+/// a text substitution of the file itself would corrupt it.
+///
+/// A plist given as `--base` or `--addition` may be XML or binary; the output
+/// is always XML, which Xcode, `plutil` and rules_apple's plisttool read.
+///
 /// Only the root `<dict>`'s own keys participate. Values are compared and
 /// carried as verbatim XML, so nested structures pass through untouched and
 /// this tool never has to understand them.
@@ -43,11 +52,16 @@
 ///
 /// Usage:
 ///   dart merge_plists.dart --mode <mode> [--base <path>] \
-///       [--addition <path> ...] [--drop-empty <key> ...] --output <path>
+///       [--addition <path> ...] [--drop-empty <key> ...] \
+///       [--substitute <from>=<to> ...] --output <path>
 ///
 /// `--base` may be omitted, in which case the additions merge into an empty
 /// plist (iOS apps legitimately ship no `Runner.entitlements`).
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'plist_binary.dart';
 
 /// How a key present in both the base and an addition is resolved.
 enum MergeMode {
@@ -204,6 +218,18 @@ class _Scanner {
     final content = text.substring(pos, next);
     pos = next;
     return content;
+  }
+}
+
+/// The XML text of the plist whose bytes are [bytes]: the bytes themselves for
+/// an XML plist, their conversion for a binary one. [path] names the plist in
+/// an error.
+String plistXml(Uint8List bytes, String path) {
+  if (!isBinaryPlist(bytes)) return utf8.decode(bytes);
+  try {
+    return binaryPlistToXml(bytes);
+  } on FormatException catch (e) {
+    _reject(path, e.message);
   }
 }
 
@@ -406,10 +432,17 @@ String mergePlists({
   required List<({String path, String xml})> additionSources,
   required MergeMode mode,
   Set<String> dropEmptyKeys = const {},
+  Map<String, String> substitutions = const {},
 }) {
+  var baseXml = base?.xml;
+  if (baseXml != null) {
+    substitutions.forEach((from, to) {
+      baseXml = baseXml!.replaceAll(from, to);
+    });
+  }
   final parsedBase = base == null
       ? <PlistEntry>[]
-      : parsePlist(base.xml, base.path);
+      : parsePlist(baseXml!, base.path);
   // Dropped before the merge, not after: an addition legitimately declares
   // the key this removes, and removing it afterwards would take that with it.
   final baseEntries = [
@@ -438,6 +471,7 @@ void main(List<String> args) {
   String? modeName;
   final additionPaths = <String>[];
   final dropEmptyKeys = <String>{};
+  final substitutions = <String, String>{};
 
   for (var i = 0; i < args.length; i++) {
     if (args[i] == '--base' && i + 1 < args.length) {
@@ -446,6 +480,12 @@ void main(List<String> args) {
       additionPaths.add(args[++i]);
     } else if (args[i] == '--drop-empty' && i + 1 < args.length) {
       dropEmptyKeys.add(args[++i]);
+    } else if (args[i] == '--substitute' &&
+        i + 1 < args.length &&
+        args[i + 1].contains('=')) {
+      final pair = args[++i];
+      final split = pair.indexOf('=');
+      substitutions[pair.substring(0, split)] = pair.substring(split + 1);
     } else if (args[i] == '--output' && i + 1 < args.length) {
       outputPath = args[++i];
     } else if (args[i] == '--mode' && i + 1 < args.length) {
@@ -465,12 +505,15 @@ void main(List<String> args) {
   // it is the one the macOS Info.plist needs. Asking for neither is not.
   if (mode == null ||
       outputPath == null ||
-      (additionPaths.isEmpty && dropEmptyKeys.isEmpty)) {
+      (additionPaths.isEmpty &&
+          dropEmptyKeys.isEmpty &&
+          substitutions.isEmpty)) {
     stderr.writeln(
       'Usage: dart merge_plists.dart --mode <strict-add|supplement> '
       '[--base <path>] [--addition <path> ...] [--drop-empty <key> ...] '
+      '[--substitute <from>=<to> ...] '
       '--output <path>\n'
-      'At least one of --addition or --drop-empty is required.',
+      'At least one of --addition, --drop-empty or --substitute is required.',
     );
     exit(1);
   }
@@ -480,13 +523,17 @@ void main(List<String> args) {
     merged = mergePlists(
       base: basePath == null
           ? null
-          : (path: basePath, xml: File(basePath).readAsStringSync()),
+          : (
+              path: basePath,
+              xml: plistXml(File(basePath).readAsBytesSync(), basePath),
+            ),
       additionSources: [
         for (final path in additionPaths)
-          (path: path, xml: File(path).readAsStringSync()),
+          (path: path, xml: plistXml(File(path).readAsBytesSync(), path)),
       ],
       mode: mode,
       dropEmptyKeys: dropEmptyKeys,
+      substitutions: substitutions,
     );
   } on PlistFormatException catch (e) {
     stderr.writeln(e.message);

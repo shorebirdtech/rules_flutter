@@ -20,13 +20,17 @@ Output bundle structure:
         icudtl.dat
 """
 
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
 load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
 load("//flutter/private:common.bzl", "compute_desktop_bundle_copies")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir", "linux_multiarch_triple")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_desktop_plugin_info.bzl", "plugin_link_flags")
+load("//flutter/private:mobile_engine_check.bzl", "check_desktop_engine")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
+load("//flutter/private:plugin_registrant.bzl", "registrant_include_dirs")
 
 # GTK3 include subdirectories within the Chromium sysroot.
 _GTK3_INCLUDE_SUBDIRS = [
@@ -140,18 +144,21 @@ def _c_string_literal(value):
     escaped = value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
     return "\"" + escaped + "\""
 
-def linux_runner_defines(gtk_app_id, window_title):
-    """The local defines the built-in Linux runner reads.
+def linux_runner_defines(application_id, window_title):
+    """The local defines a Linux runner reads.
+
+    `APPLICATION_ID` is what `flutter create`'s runner reads (its CMake defines
+    it from the project's application id), and the built-in runner reads it too.
 
     Args:
-      gtk_app_id: GTK application identifier.
+      application_id: The application identifier GTK names the app by.
       window_title: Title of the runner's window.
 
     Returns:
       A list of `NAME=value` strings for `cc_common.compile(local_defines=...)`.
     """
     return [
-        "GTK_APP_ID=" + _c_string_literal(gtk_app_id),
+        "APPLICATION_ID=" + _c_string_literal(application_id),
         "WINDOW_TITLE=" + _c_string_literal(window_title),
     ]
 
@@ -181,8 +188,10 @@ def _flutter_linux_runner_lib_impl(ctx):
     plugin_srcs = []
     plugin_hdrs = []
     plugin_include_dirs = []
+    plugin_entries = []
     if ctx.attr.application:
-        for entry in ctx.attr.application[FlutterApplicationInfo].linux_plugin_libraries.to_list():
+        plugin_entries = ctx.attr.application[FlutterApplicationInfo].linux_plugin_libraries.to_list()
+        for entry in plugin_entries:
             plugin_srcs.extend(entry.srcs.to_list())
             plugin_hdrs.extend(entry.hdrs.to_list())
             plugin_include_dirs.extend(entry.include_dirs.to_list())
@@ -192,7 +201,7 @@ def _flutter_linux_runner_lib_impl(ctx):
         runner_srcs = runner_srcs,
         runner_hdrs = runner_hdrs,
         engine_files = engine_files,
-        defines = linux_runner_defines(ctx.attr.gtk_app_id, ctx.attr.window_title),
+        defines = linux_runner_defines(ctx.attr.application_id, ctx.attr.window_title),
         registrant_srcs = registrant_srcs,
         registrant_hdrs = registrant_hdrs,
         linux_sysroot = flutter_sdk_info.linux_sysroot,
@@ -200,6 +209,7 @@ def _flutter_linux_runner_lib_impl(ctx):
         plugin_srcs = plugin_srcs,
         plugin_hdrs = plugin_hdrs,
         plugin_include_dirs = plugin_include_dirs,
+        plugin_linkopts = plugin_link_flags(plugin_entries, "Linux"),
     )
 
     return [DefaultInfo(
@@ -207,7 +217,7 @@ def _flutter_linux_runner_lib_impl(ctx):
         executable = runner_binary,
     )]
 
-def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], target_arch = "", plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = []):
+def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], target_arch = "", plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = [], plugin_linkopts = []):
     """Compile the C++ GTK Linux runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -230,6 +240,8 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
         plugin_include_dirs: Plugin-relative include directories
             (resolved against each plugin's package root via
             additional `-I` flags).
+        plugin_linkopts: Linker flags for the system libraries the plugins'
+            sources need (e.g. `-lm`).
 
     Returns:
         The compiled runner executable File.
@@ -260,7 +272,7 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
 
     system_include_dirs = []
     sysroot_link_flags = []
-    sysroot_files = linux_sysroot.files.to_list()
+    sysroot_files = linux_sysroot[DefaultInfo].files.to_list()
 
     # Determine sysroot root path from the first file.
     sysroot_root = ""
@@ -292,6 +304,13 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     system_include_dirs.append(sysroot_root + "/usr/lib/" + triple + "/glib-2.0/include")
     system_include_dirs.append(sysroot_root + "/usr/lib/" + triple + "/dbus-1.0/include")
 
+    # `<gdk/gdkx.h>` includes `<X11/Xlib.h>`, which sits directly under the
+    # sysroot's `usr/include`. That directory goes last (`-idirafter`) so the
+    # cc toolchain's own C library headers keep precedence over the sysroot's;
+    # the filegroup stages only the library headers it lists, so in a sandboxed
+    # or remote compile nothing else under `usr/include` is visible.
+    sysroot_include_flags = ["-idirafter", sysroot_root + "/usr/include"]
+
     # GTK3 libraries, selected as files from the sysroot filegroup and handed to
     # the linker as explicit inputs (see _GTK3_LIB_FILES for why not `-L`/`-l`).
     gtk3 = gtk3_sysroot_link_inputs(sysroot_files, sysroot_root + "/usr/lib/" + triple)
@@ -302,25 +321,15 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     # #include directives resolve.  Also add their directories to the include
     # path so runner code can do #include "flutter/generated_plugin_registrant.h".
     all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
-    extra_compile = []
-    registrant_include_dirs = {}
-    for h in registrant_hdrs:
-        d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
-            extra_compile.append("-I" + d)
-
-        # For flutter create registrant files at linux/flutter/generated_plugin_registrant.h,
-        # also add the grandparent dir so #include "flutter/generated_plugin_registrant.h" resolves.
-        if "/flutter/" in h.path:
-            grandparent = d[:d.rfind("/")]
-            if grandparent and grandparent not in registrant_include_dirs:
-                registrant_include_dirs[grandparent] = True
-                extra_compile.append("-I" + grandparent)
+    extra_compile = list(sysroot_include_flags)
+    seen_dirs = {}
+    for d in registrant_include_dirs([h.path for h in registrant_hdrs]):
+        seen_dirs[d] = True
+        extra_compile.append("-I" + d)
     for h in runner_hdrs:
         d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
+        if d not in seen_dirs:
+            seen_dirs[d] = True
             extra_compile.append("-I" + d)
 
     # Plugin header parent dirs and plugin-relative include directories.
@@ -329,8 +338,8 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     plugin_pkg_roots = {}
     for h in plugin_hdrs:
         d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
+        if d not in seen_dirs:
+            seen_dirs[d] = True
             extra_compile.append("-I" + d)
     for f in plugin_srcs:
         path = f.path
@@ -345,8 +354,8 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
     for include_dir in plugin_include_dirs:
         for pkg_root in plugin_pkg_roots.keys():
             full = pkg_root + "/" + include_dir
-            if full not in registrant_include_dirs:
-                registrant_include_dirs[full] = True
+            if full not in seen_dirs:
+                seen_dirs[full] = True
                 extra_compile.append("-I" + full)
 
     return compile_and_link_runner(
@@ -358,7 +367,7 @@ def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot
         engine_header_files = all_header_files,
         engine_include_dir = header_dir,
         extra_compile_flags = extra_compile,
-        extra_link_flags = sysroot_link_flags + ["-Wl,-rpath,$ORIGIN/lib"],
+        extra_link_flags = sysroot_link_flags + ["-Wl,-rpath,$ORIGIN/lib"] + plugin_linkopts,
         extra_defines = defines,
         additional_srcs = additional_srcs + plugin_srcs,
         system_include_dirs = system_include_dirs,
@@ -385,9 +394,11 @@ flutter_linux_runner_lib = rule(
             doc = "Custom runner C++ header files.",
             allow_files = [".h", ".hpp"],
         ),
-        "gtk_app_id": attr.string(
-            doc = "GTK application identifier (e.g. 'com.example.myapp').",
-            default = "com.example.flutter",
+        "application_id": attr.string(
+            doc = "The application identifier GTK names the app by (e.g. 'com.example.myapp'): " +
+                  "the `APPLICATION_ID` define of the runner. The desktop identifies the app by it, " +
+                  "so each app has its own.",
+            mandatory = True,
         ),
         "window_title": attr.string(
             doc = "Title of the built-in runner's window. A runner from `srcs` " +
@@ -422,8 +433,11 @@ def _flutter_linux_bundle_impl(ctx):
     app_info = ctx.attr.application[FlutterApplicationInfo]
     flutter_assets = app_info.flutter_assets
     icu_data = app_info.icu_data
+
+    # The `native_deps` libraries always ship; the code assets are placed by
+    # the bundle tool, which reads which of them ship (`code_asset_os`).
     native_libs = list(app_info.native_libs)
-    native_libs.extend(app_info.bundled_code_assets.to_list())
+    code_assets = program_assets_action_args(ctx.actions, app_info.program_assets, data = False)
     is_debug = app_info.is_debug
 
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
@@ -440,12 +454,12 @@ def _flutter_linux_bundle_impl(ctx):
             "To build a Linux bundle from a non-Linux host, use: " +
             "--platforms=@rules_flutter//flutter/platforms:linux_x64",
         )
-    engine_files = flutter_sdk_info.engine_library.files.to_list()
+    engine_files = flutter_sdk_info.engine_library[DefaultInfo].files.to_list()
 
     # Build the bundle config JSON for the Dart bundler tool. Both
-    # `native_libs` (the legacy FFI cc_library outputs) and
-    # `bundled_code_assets` (Native Assets dynamic_loading_bundle dylibs)
-    # land at `lib/<basename>` next to `libapp.so`.
+    # `native_libs` (the legacy FFI cc_library outputs) and the code assets
+    # that ship (Native Assets dynamic_loading_bundle libraries) land at
+    # `lib/<basename>` next to `libapp.so`.
     # Every path in the bundle config is a `file_ref`, which Bazel fills in
     # when it writes the config, path-mapped where the action is.
     refs = []
@@ -463,6 +477,14 @@ def _flutter_linux_bundle_impl(ctx):
         extra_inputs.append(app_info.kernel_dill)
     elif app_info.aot_output:
         extra_inputs.append(app_info.aot_output)
+
+    # The engine must hold the app's CPU, and an app of a custom SDK keeps the
+    # record of the checked pieces it was built from.
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+    check_desktop_engine(ctx.label, sdk_record, flutter_sdk_info.target_arch or flutter_sdk_info.host_tools.host_arch)
+    if sdk_record.record:
+        copies.append({"src": file_ref(refs, sdk_record.record), "dst": "data/flutter_assets/flutter_sdk.json"})
+        extra_inputs.append(sdk_record.record)
 
     # Get the runner executable from the runner target.
     runner_files = ctx.attr.runner[DefaultInfo].files.to_list()
@@ -484,9 +506,10 @@ def _flutter_linux_bundle_impl(ctx):
         "copy_dirs": [
             {"src": file_ref(refs, flutter_assets), "dst": "data/flutter_assets"},
         ],
+        "code_asset_os": "linux",
     }
 
-    inputs = [ctx.file._bundle_tool, flutter_assets, icu_data, runner_binary] + extra_inputs + native_libs + engine_files
+    inputs = [ctx.file._bundle_tool, flutter_assets, icu_data, runner_binary] + ctx.files._bundle_tool_imports + extra_inputs + native_libs + engine_files
 
     args = ctx.actions.args()
     args.add(ctx.file._bundle_tool)
@@ -494,10 +517,10 @@ def _flutter_linux_bundle_impl(ctx):
 
     ctx.actions.run(
         executable = portable_tools(ctx).dart,
-        arguments = [args, json_config_args(ctx, config, refs)],
+        arguments = [args, json_config_args(ctx, config, refs), code_assets.args],
         inputs = depset(
             direct = inputs,
-            transitive = [portable_tools(ctx).tool_files],
+            transitive = [portable_tools(ctx).sdk_files.run, code_assets.inputs],
         ),
         outputs = [bundle_dir],
         mnemonic = "FlutterLinuxBundle",
@@ -506,7 +529,12 @@ def _flutter_linux_bundle_impl(ctx):
         progress_message = "Bundling Linux app %s" % ctx.label,
     )
 
-    return [DefaultInfo(files = depset([bundle_dir]))]
+    application = ctx.attr.application
+
+    # The program's own Dart files, for rules_dart's analysis of the app.
+    return [DefaultInfo(files = depset([bundle_dir]))] + (
+        [application[DartAnalyzableInfo]] if DartAnalyzableInfo in application else []
+    )
 
 flutter_linux_bundle_rule = rule(
     implementation = _flutter_linux_bundle_impl,
@@ -526,6 +554,13 @@ flutter_linux_bundle_rule = rule(
         "_bundle_tool": attr.label(
             default = Label("//flutter/private/tools:bundle_app.dart"),
             allow_single_file = True,
+        ),
+        "_bundle_tool_imports": attr.label(
+            default = Label("//flutter/private/tools:bundle_app_imports"),
+        ),
+        "_sdk_record": attr.label(
+            default = Label("//flutter/private:sdk_record"),
+            providers = [FlutterSdkRecordInfo],
         ),
     },
     toolchains = [

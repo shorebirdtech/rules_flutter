@@ -1,16 +1,16 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
-load("@rules_flutter//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_kernel_target", "flutter_library", "flutter_test", "flutter_tester_binary")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_aot_snapshot", "flutter_application", "flutter_asset_bundle", "flutter_kernel", "flutter_library", "flutter_profile_build", "flutter_program_test", "flutter_test", "flutter_test_program", "flutter_tester_binary")
 load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
     "flutter_ios_app",
+    "flutter_ios_app_framework_gen",
     "flutter_ios_engine",
-    "flutter_ios_framework_gen",
     "flutter_ios_info_plist_gen",
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_registrant_gen",
@@ -21,16 +21,25 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load("@rules_flutter//tools/e2e_testing:compile_fail_test.bzl", "compile_fail_test")
+load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
+load(":build_in_mode.bzl", "build_in_mode")
+load(":build_variant_test.bzl", "build_variant_tests")
 
 exports_files(["pubspec.lock"])
 
 # -- Advanced: low-level compilation rules (most users use flutter_application) --
 
-flutter_kernel_target(
-    name = "hello_world",
+dart_package_metadata(
+    name = "pubspec-metadata",
     package_name = "hello_world",
+)
+
+flutter_kernel(
+    name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -39,11 +48,11 @@ flutter_kernel_target(
     ],
 )
 
-flutter_aot_target(
+flutter_aot_snapshot(
     name = "hello_world_aot",
-    package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -60,15 +69,39 @@ flutter_asset_bundle(
 
 flutter_application(
     name = "hello_world_app",
-    package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
     main = "lib/main.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
         "@rules_flutter//flutter:material_icons",
     ],
+)
+
+# An app that opens the licence page, to see the bundled licences listed.
+flutter_application(
+    name = "licences_app",
+    main = "lib/licences_main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:cupertino_icons",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_macos_app(
+    name = "licences_macos",
+    app_name = "Licences",
+    application = ":licences_app",
+    bundle_id = "com.example.licences",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+flutter_web_app(
+    name = "licences_web",
+    application = ":licences_app",
 )
 
 # -- macOS desktop app --------------------------------------------------------
@@ -104,7 +137,7 @@ flutter_ios_app(
 # credential — it is a different runner. Verifying a device build here does
 # not exercise `ios/Runner/`.
 
-flutter_ios_framework_gen(
+flutter_ios_app_framework_gen(
     name = "hello_world_ios_framework",
     application = ":hello_world_app",
 )
@@ -135,16 +168,20 @@ flutter_ios_runner_lib_gen(
     registrant = ":hello_world_ios_registrant",
 )
 
-apple_bundle_version(
+flutter_apple_bundle_version(
     name = "hello_world_ios_version",
-    build_version = "1.0",
-    short_version_string = "1.0",
+    application = ":hello_world_app",
     tags = ["manual"],
 )
 
-# `//device` is git-ignored and absent from a fresh clone. That is fine: the
-# target is tagged `manual`, so `bazel build //...` never expands it and
-# therefore never loads the missing package. Create it from device.example/.
+# Signed with the developer's own profile, which is not in this repository:
+# `//:device_profile` is a flag whose default fails with the setup steps (copy
+# device.example/ to the git-ignored device/, then set
+# `--//:device_profile=//device:profile` in .bazelrc.user). The flag keeps
+# `bazel query 'deps(//...)'` from following a label into the //device package
+# a fresh clone lacks. The target is `manual`, so `bazel build //...` skips it.
+device_profile()
+
 ios_application(
     name = "hello_world_ios_device",
     bundle_id = "com.example.helloworld",
@@ -152,7 +189,7 @@ ios_application(
     infoplists = [":hello_world_ios_runner_info_plist"],
     launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD,
     minimum_os_version = IOS_MINIMUM_OS_VERSION,
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
     tags = ["manual"],
     version = ":hello_world_ios_version",
     deps = [
@@ -170,16 +207,9 @@ ios_application(
 
 flutter_android_app(
     name = "hello_world_android",
-    package_name = "com.example.helloworld",
     app_name = "Hello World",
     application = ":hello_world_app",
-    # Android cross-builds fine on macOS/Linux (covered by those CI runners),
-    # but the rules_android resource compiler launches its JVM with -Xms3G,
-    # which eagerly commits 3 GiB and OOMs on the GitHub windows-latest runner's
-    # small fixed pagefile. This is a CI-runner resource limit, not a platform
-    # incompatibility, so the Windows CI job filters this tag out via
-    # --build_tag_filters rather than marking the target Windows-incompatible.
-    tags = ["no-windows-ci"],
+    application_id = "com.example.helloworld",
 )
 
 # -- Other platforms -----------------------------------------------------------
@@ -187,7 +217,7 @@ flutter_android_app(
 flutter_linux_app(
     name = "hello_world_linux",
     application = ":hello_world_app",
-    gtk_app_id = "com.example.helloworld",
+    application_id = "com.example.helloworld",
     # On non-Linux hosts, use --platforms=@rules_flutter//flutter/platforms:linux_x64 -c dbg
     target_compatible_with = ["@platforms//os:linux"],
 )
@@ -200,14 +230,7 @@ flutter_windows_app(
 
 flutter_web_app(
     name = "hello_world_web",
-    package_name = "hello_world",
-    srcs = ["lib/common_widgets.dart"],
-    deps = [
-        "@deps//:cupertino_icons",
-        "@deps//:flutter",
-        "@deps//:flutter_localized_locales",
-        "@rules_flutter//flutter:material_icons",
-    ],
+    application = ":hello_world_app",
 )
 
 # -- Tests ---------------------------------------------------------------------
@@ -218,12 +241,12 @@ flutter_web_app(
 # regression-check the bootstrap + harness wired into //flutter/private:flutter_test.
 flutter_test(
     name = "widget_test",
-    package_name = "hello_world",
     srcs = [
         "lib/common_widgets.dart",
         "lib/main.dart",
     ],
     main = "test/widget_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -233,6 +256,213 @@ flutter_test(
     ],
 )
 
+# A dependency's assets are loaded under `packages/<name>/`; its own test
+# (`//asset_keys:own_asset_keys_test`) loads them bare.
+flutter_test(
+    name = "dependency_asset_keys_test",
+    main = "test/dependency_asset_keys_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//asset_keys",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+# The NOTICES.Z a test bundles names the packages the test depends on, the
+# engine's included.
+flutter_test(
+    name = "licences_test",
+    main = "test/licences_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:cupertino_icons",
+        "@deps//:flutter",
+        "@deps//:flutter_localized_locales",
+        "@deps//:flutter_test",
+    ],
+)
+
+# `package:integration_test` is a Flutter SDK package: `pubspec.lock` lists it as
+# `source: sdk`, and it is built from the pinned Flutter source like a hosted
+# package. Its binding must initialise and pump a widget under flutter_tester.
+flutter_test(
+    name = "integration_binding_test",
+    srcs = [
+        "lib/common_widgets.dart",
+        "lib/main.dart",
+    ],
+    main = "test/integration_binding_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:cupertino_icons",
+        "@deps//:flutter",
+        "@deps//:flutter_localized_locales",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# `flutter_driver`, and `fuchsia_remote_debug_protocol` which it depends on and
+# which no pubspec of ours names, build from the Flutter source too.
+build_test(
+    name = "flutter_driver_build_test",
+    targets = ["@deps//:flutter_driver"],
+)
+
+# `assert`s fire in a `flutter_test`, as under `flutter test`, whichever way the
+# test is built: per-library kernel modules or one whole-program compile
+# (`--@rules_dart//dart:modular_kernel=false`), `-c fastbuild` or `-c dbg`. The
+# plain target is the default build (modules, fastbuild); `build_variant_tests`
+# declares the other three beside it. See test/asserts/asserts_fire_test.dart.
+flutter_test(
+    name = "asserts_fire_test",
+    main = "test/asserts/asserts_fire_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//asserts_dep",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+build_variant_tests(
+    name = "asserts_fire_builds",
+    test = ":asserts_fire_test",
+)
+
+# A library's `data`, and that of the libraries under it, is in the runfiles of
+# the test that reaches it. See test/library_data_test.dart.
+flutter_test(
+    name = "library_data_test",
+    main = "test/library_data_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//data_dep",
+        "@deps//:flutter_test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+# Widget creation locations are tracked in a `flutter_test`, as under
+# `flutter test`, in the same four builds. See test/asserts/widget_creation_test.dart.
+flutter_test(
+    name = "widget_creation_test",
+    main = "test/asserts/widget_creation_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+build_variant_tests(
+    name = "widget_creation_builds",
+    test = ":widget_creation_test",
+)
+
+# `appFlavor` is the test's `flavor`, and null without one, in both kernel modes.
+# See test/flavor_test.dart and test/no_flavor_test.dart.
+flutter_test(
+    name = "flavor_test",
+    flavor = "paid",
+    main = "test/flavor_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+flutter_test(
+    name = "no_flavor_test",
+    main = "test/no_flavor_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+# `FlutterVersion` and `appBuildName` are set, in both kernel modes. The
+# expected values are the pinned release's (`flutter.toolchain` in
+# MODULE.bazel): change them with it. See test/flutter_version_test.dart.
+flutter_test(
+    name = "flutter_version_test",
+    build_name = "2.3.4",
+    build_number = "7",
+    env = {
+        "EXPECTED_FLUTTER_VERSION": "3.47.9",
+        "EXPECTED_FLUTTER_FRAMEWORK_REVISION": "c197ca5199",
+        "EXPECTED_FLUTTER_ENGINE_REVISION": "89c39edfdf",
+    },
+    main = "test/flutter_version_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+build_variant_tests(
+    name = "flutter_version_builds",
+    test = ":flutter_version_test",
+)
+
+build_variant_tests(
+    name = "flavor_builds",
+    test = ":flavor_test",
+)
+
+# Constants that break a `const` constructor's assertion. `flutter test` fails
+# to compile a test that holds one, so compiling each of these programs MUST
+# FAIL, with a "Constant evaluation error" naming the assertion. The programs
+# are `manual`, since they do not build; each `_test` runs the compile that
+# fails and passes only when it fails so, and `_builds` does that in each of
+# the four builds. `_entry` holds the constant in the test's own file, `_dep`
+# in a library it depends on: in the modular build that library's compile
+# records the error, and the entry compile of the program that reaches it
+# fails with it.
+[
+    (
+        flutter_test_program(
+            name = "const_violation_%s" % where,
+            testonly = True,
+            main = "test/asserts/const_violation_%s_test.dart" % where,
+            package = ":pubspec-metadata",
+            tags = ["manual"],
+            deps = [
+                dep,
+                "@deps//:flutter_test",
+            ],
+        ),
+        compile_fail_test(
+            name = "const_violation_%s_test" % where,
+            size = "small",
+            mnemonics = [
+                "DartEntryKernel",
+                "DartKernel",
+            ],
+            output_contains = [
+                "Constant evaluation error",
+                "This assertion failed with message: Positive: -1 is not positive",
+            ],
+            target = ":const_violation_%s" % where,
+        ),
+        build_variant_tests(
+            name = "const_violation_%s_builds" % where,
+            test = ":const_violation_%s_test" % where,
+        ),
+    )
+    # What each one's test imports: the library the constant is in, or the
+    # one whose constructor it breaks.
+    for where, dep in [
+        ("entry", "//asserts_dep"),
+        ("dep", "//asserts_violation_dep"),
+    ]
+]
+
 # Bazel's test protocol under `flutter_test`: `--test_filter` selects cases,
 # `shard_count` splits them, and each case is reported in the XML Bazel
 # collects. (Its `size`/`timeout` as the suite's default timeout is unit-tested
@@ -241,9 +471,9 @@ flutter_test(
 # An Impeller-only shader, drawn in flutter_tester running Impeller.
 flutter_test(
     name = "impeller_shader_test",
-    package_name = "hello_world",
     enable_impeller = True,
     main = "test/impeller_shader_test.dart",
+    package = ":pubspec-metadata",
     shaders = ["shaders/indexed.frag"],
     deps = [
         "@deps//:flutter",
@@ -256,13 +486,9 @@ flutter_test(
 # not `testonly`; the test reads that output.
 flutter_tester_binary(
     name = "render_swatch",
-    package_name = "hello_world",
     enable_impeller = True,
     main = "tool/render_swatch.dart",
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -273,10 +499,6 @@ genrule(
     name = "swatch",
     outs = ["swatch.png"],
     cmd = "RENDER_OUT=$@ $(execpath :render_swatch)",
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     tools = [":render_swatch"],
 )
 
@@ -286,7 +508,7 @@ dart_test(
     main = "test/verify_rendered_swatch_test.dart",
     deps = [
         "@deps//:test",
-        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
     ],
 )
 
@@ -294,8 +516,8 @@ dart_test(
 # directories up from the test.
 flutter_test(
     name = "test_config_test",
-    package_name = "hello_world",
     main = "test/configured/nested/test_config_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -305,8 +527,8 @@ flutter_test(
 # The same, with `main` spelled as an absolute label in this package.
 flutter_test(
     name = "test_config_label_test",
-    package_name = "hello_world",
     main = "//:test/configured/nested/test_config_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -334,8 +556,8 @@ flutter_test(
 
 flutter_test(
     name = "bazel_protocol_test",
-    package_name = "hello_world",
     main = "test/bazel_protocol_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -344,8 +566,8 @@ flutter_test(
 
 flutter_test(
     name = "bazel_protocol_sharded_test",
-    package_name = "hello_world",
     main = "test/bazel_protocol_test.dart",
+    package = ":pubspec-metadata",
     shard_count = 3,
     deps = [
         "@deps//:flutter",
@@ -354,48 +576,51 @@ flutter_test(
 )
 
 # Verifies Dart environment defines: the `defines` attr, the
-# --@rules_flutter//flutter:extra_dart_defines flag (set in .bazelrc), and
+# --@rules_dart//dart:extra_dart_defines flag (set in .bazelrc), and
 # flag-beats-attr precedence.
 flutter_test(
     name = "dart_defines_test",
-    package_name = "hello_world",
     defines = [
         "E2E_ATTR=from_attr",
         "E2E_WINNER=attr",
     ],
     main = "test/dart_defines_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter_test",
     ],
+)
+
+# The Tier-2 pair: `flutter_test_program` compiles and `flutter_program_test`
+# runs the program it provides, as it would run one compiled by another rule.
+# Through the pair: the suite protocol, a golden compared against a declared PNG
+# (`data` on the program) and `@Tags` selection (`exclude_tags` drops the case
+# that fails). Regenerate the golden with
+# `bazel run //:program_pair_test -- --update-goldens`.
+flutter_test_program(
+    name = "program_pair_program",
+    testonly = True,
+    data = glob(["test/goldens/**"]),
+    main = "test/program_pair_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+flutter_program_test(
+    name = "program_pair_test",
+    exclude_tags = ["slow"],
+    program = ":program_pair_program",
 )
 
 # Smoke test: pure dart:ui resolution. Verifies the rule still produces a
 # working bootstrap for tests that don't initialize any Flutter binding.
 flutter_test(
     name = "hello_test",
-    package_name = "hello_world",
     main = "hello_test.dart",
-    deps = [
-        "@deps//:flutter_test",
-    ],
-)
-
-# Exercises: the coverage path through the runner, which `bazel test` alone
-# never reaches. `bazel coverage` spawns flutter_tester with its VM service
-# enabled, and the runner collects LCOV over it after the suite runs.
-# `COVERAGE_OUTPUT_FILE` is the runner's own trigger for that path, so setting
-# it exercises the real code under the canonical `bazel test //...` rather
-# than simulating it.
-#
-# The runner bounds collection just inside this timeout, so a hang is reported
-# with a reason rather than killed by Bazel as a bare TIMEOUT.
-flutter_test(
-    name = "hello_coverage_test",
-    package_name = "hello_world",
-    size = "small",
-    timeout = "moderate",
-    env = {"COVERAGE_OUTPUT_FILE": "coverage_probe.lcov"},
-    main = "hello_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter_test",
     ],
@@ -432,9 +657,6 @@ flutter_ios_simulator_build_test(
 
 build_test(
     name = "android_build_test",
-    # See hello_world_android: skipped on the Windows CI runner (pagefile OOM)
-    # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
-    tags = ["no-windows-ci"],
     targets = [":hello_world_android"],
 )
 
@@ -462,6 +684,84 @@ build_test(
     targets = [":hello_world_web"],
 )
 
+# -- Profile mode on macOS ------------------------------------------------------
+#
+# The macOS app built with `-c opt --@rules_flutter//flutter:profile`, whatever
+# the command line says, and a check that its App.framework holds a profile AOT
+# snapshot.
+
+flutter_profile_build(
+    name = "hello_world_macos_profile",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":hello_world_macos"],
+)
+
+dart_test(
+    name = "verify_macos_profile_bundle_test",
+    args = [
+        "hello_world_macos.zip",
+        "'Hello World'",
+    ],
+    data = [":hello_world_macos_profile"],
+    main = "test/verify_macos_profile_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# -- Profile mode on Linux and Windows -----------------------------------------
+#
+# The desktop bundles built with `-c opt --@rules_flutter//flutter:profile`,
+# whatever the command line says, so the CI jobs that run `bazel test //...` on
+# those hosts build profile mode too. A profile AOT snapshot cannot be built
+# for another desktop OS, so each runs on its own host only.
+
+flutter_profile_build(
+    name = "hello_world_linux_profile",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    targets = [":hello_world_linux"],
+)
+
+flutter_profile_build(
+    name = "hello_world_windows_profile",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:windows"],
+    targets = [":hello_world_windows"],
+)
+
+# Builds the bundle in profile mode, then checks its AOT snapshot is a profile
+# one. Names the bundle by its target and the snapshot by its place in it.
+dart_test(
+    name = "verify_linux_profile_bundle_test",
+    args = [
+        "hello_world_linux",
+        "lib/libapp.so",
+    ],
+    data = [":hello_world_linux_profile"],
+    main = "test/verify_profile_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "@deps//:test",
+        "@rules_flutter//tools/e2e_testing",
+    ],
+)
+
+dart_test(
+    name = "verify_windows_profile_bundle_test",
+    args = [
+        "hello_world_windows",
+        "data/app.so",
+    ],
+    data = [":hello_world_windows_profile"],
+    main = "test/verify_profile_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "@deps//:test",
+        "@rules_flutter//tools/e2e_testing",
+    ],
+)
+
 # Verifies the asset bundle structure for pub-package fonts/assets:
 # cupertino_icons (flutter.fonts), flutter_localized_locales (flutter.assets),
 # and the toolchain-backed material_icons. Asserts files land at
@@ -474,7 +774,7 @@ dart_test(
     main = "test/verify_pub_assets_test.dart",
     deps = [
         "@deps//:test",
-        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
     ],
 )
 
@@ -496,6 +796,7 @@ dart_test(
     data = [":hello_world_macos"],
     main = "test/verify_macos_entitlements_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # The app icon `flutter create` leaves in the tree, which this BUILD file
@@ -507,6 +808,7 @@ dart_test(
     data = [":hello_world_macos"],
     main = "test/verify_macos_app_icon_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # The workspace's lint ruleset, bundled with the pub package its `include:`
@@ -532,8 +834,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "hello_world",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
         "@deps//:flutter",
@@ -541,3 +843,84 @@ flutter_library(
         "@rules_flutter//flutter:material_icons",
     ],
 )
+
+# -- Reproducibility -----------------------------------------------------------
+#
+# Property: every output is a function of its declared inputs only, so none
+# holds a path of the machine or sandbox that built it, or a byte that depends
+# on the host OS. The tests (see their headers for why this is the property to
+# defend) look through the files of a build made in each Flutter mode, which
+# `build_in_mode` makes in one plain `bazel test`.
+#
+# The parts of an app are built separately, so a failure names the one that
+# leaks: the kernel (`:hello_world`, which a debug app ships as its code), the
+# AOT snapshot (`:hello_world_aot`, and the app, which ships one in every mode
+# but debug), the asset bundle, and the web bundle with both compilers.
+
+_REPRO_PARTS = {
+    "kernel": [":hello_world"],
+    "aot": [
+        ":hello_world_aot",
+        ":hello_world_app",
+    ],
+    "assets": [":hello_world_assets"],
+    "web": [":hello_world_web"],
+}
+
+# A debug app is a kernel, not an AOT snapshot, so it has no `aot` build.
+_REPRO_BUILDS = [
+    ("aot", "fastbuild"),
+    ("aot", "release"),
+    ("assets", "debug"),
+    ("assets", "fastbuild"),
+    ("assets", "release"),
+    ("assets", "profile"),
+    ("web", "fastbuild"),
+    ("web", "release"),
+]
+
+[build_in_mode(
+    name = "repro_%s_%s" % (part, mode),
+    mode = mode,
+    targets = _REPRO_PARTS[part] + (
+        # What a debug app ships as its code: the app's own kernel.
+        [":hello_world_app"] if (part, mode) == ("kernel", "debug") else []
+    ),
+) for part, mode in _REPRO_BUILDS]
+
+# Windows is left out: its paths are not the forward-slash ones the markers
+# look for, and it has no sandbox slot to leak.
+_NOT_WINDOWS = select({
+    "@platforms//os:windows": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
+# The paths to scan are the files of the build itself, expanded from its label.
+[dart_test(
+    name = "reproducible_%s_%s_test" % (part, mode),
+    size = "medium",
+    args = ["$(rootpaths :repro_%s_%s)" % (part, mode)],
+    data = [":repro_%s_%s" % (part, mode)],
+    env_inherit = [
+        "HOME",
+        "USER",
+    ],
+    main = "test/verify_reproducible_outputs_test.dart",
+    target_compatible_with = _NOT_WINDOWS,
+    deps = [
+        "@deps//:test",
+        "@rules_flutter//tools/e2e_testing",
+    ],
+) for part, mode in _REPRO_BUILDS if part != "assets"]
+
+[dart_test(
+    name = "reproducible_notices_%s_test" % mode,
+    size = "small",
+    args = ["$(rootpaths :repro_assets_%s)" % mode],
+    data = [":repro_assets_%s" % mode],
+    main = "test/verify_reproducible_notices_test.dart",
+    deps = [
+        "@deps//:test",
+        "@rules_flutter//tools/e2e_testing",
+    ],
+) for part, mode in _REPRO_BUILDS if part == "assets"]

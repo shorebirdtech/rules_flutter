@@ -24,7 +24,7 @@ def _flutter_linux_engine_impl(ctx):
             "@rules_flutter//flutter/platforms:linux_x64 as a convenience).",
         )
 
-    engine_files = flutter_sdk_info.engine_library.files.to_list()
+    engine_files = flutter_sdk_info.engine_library[DefaultInfo].files.to_list()
 
     # Separate engine files into .so, headers, etc.
     engine_so = None
@@ -83,7 +83,7 @@ def _flutter_linux_engine_impl(ctx):
     )
 
     return [
-        DefaultInfo(files = flutter_sdk_info.engine_library.files),
+        DefaultInfo(files = flutter_sdk_info.engine_library[DefaultInfo].files),
         cc_info,
     ]
 

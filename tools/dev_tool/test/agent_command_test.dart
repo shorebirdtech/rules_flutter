@@ -934,7 +934,10 @@ void main() {
         MacOSDevice(),
         LinuxDevice(),
         WindowsDevice(),
-        AndroidDevice(),
+        AndroidDevice(
+          adbPath: 'adb',
+          aapt2Path: 'aapt2',
+        ),
         IOSSimulatorDevice(udid: 'SIM'),
         IOSDevice(udid: 'PHONE'),
       ]) {
@@ -955,7 +958,13 @@ void main() {
         isTrue,
       );
       expect(
-        controlOrMetaIsMetaFor(AndroidDevice(), browserHostIsMac: true),
+        controlOrMetaIsMetaFor(
+          AndroidDevice(
+            adbPath: 'adb',
+            aapt2Path: 'aapt2',
+          ),
+          browserHostIsMac: true,
+        ),
         isFalse,
       );
       expect(
@@ -1011,7 +1020,12 @@ void main() {
     );
 
     test('sends what a key types, with Shift applied', () async {
-      final (fake, session) = await ready(AndroidDevice());
+      final (fake, session) = await ready(
+        AndroidDevice(
+          adbPath: 'adb',
+          aapt2Path: 'aapt2',
+        ),
+      );
       final cr = CommandRunner();
       setUpAgentCommands(cr, (_) => session);
 

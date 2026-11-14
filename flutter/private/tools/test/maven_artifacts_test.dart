@@ -1,0 +1,226 @@
+import 'dart:convert';
+
+import 'package:test/test.dart';
+
+import '../maven_artifacts.dart';
+
+/// Gradle module metadata whose variants constrain [constraints], as
+/// coordinate to version.
+String metadata(Map<String, String> constraints, {String key = 'requires'}) =>
+    jsonEncode({
+      'formatVersion': '1.1',
+      'variants': [
+        for (final name in ['api', 'runtime'])
+          {
+            'name': name,
+            'dependencyConstraints': [
+              for (final MapEntry(key: coordinate, value: version)
+                  in constraints.entries)
+                {
+                  'group': coordinate.split(':')[0],
+                  'module': coordinate.split(':')[1],
+                  'version': {key: version},
+                },
+            ],
+          },
+      ],
+    });
+
+void main() {
+  group('compareVersions', () {
+    test('orders numbers numerically and releases after qualifiers', () {
+      expect(compareVersions('1.10.0', '1.9.0'), 1);
+      expect(compareVersions('1.9', '1.9.0'), 0);
+      expect(compareVersions('1.9.0-rc01', '1.9.0'), -1);
+      expect(compareVersions('1.9.0-alpha01', '1.9.0-beta01'), -1);
+    });
+  });
+
+  group('constraintsOf', () {
+    test('reads every variant\'s constraints once', () {
+      expect(
+        constraintsOf(metadata({'androidx.activity:activity-ktx': '1.9.0'})),
+        [(coordinate: 'androidx.activity:activity-ktx', version: '1.9.0')],
+      );
+    });
+
+    test('reads strictly too', () {
+      expect(constraintsOf(metadata({'g:a': '2.0'}, key: 'strictly')), [
+        (coordinate: 'g:a', version: '2.0'),
+      ]);
+    });
+
+    test('leaves out ranges and metadata without constraints', () {
+      expect(constraintsOf(metadata({'g:a': '[1.0,2.0)'})), isEmpty);
+      expect(
+        constraintsOf(
+          jsonEncode({
+            'variants': [{}],
+          }),
+        ),
+        isEmpty,
+      );
+    });
+  });
+
+  group('align', () {
+    Future<List<Constraint>> Function(String, String) from(
+      Map<String, Map<String, String>> byModule,
+    ) =>
+        (coordinate, version) async => [
+          for (final MapEntry(:key, :value)
+              in (byModule['$coordinate:$version'] ?? const {}).entries)
+            (coordinate: key, version: value),
+        ];
+
+    test('raises a companion the main artifact constrains', () async {
+      final aligned = await align(
+        {'a:activity': '1.9.0', 'a:activity-ktx': '1.5.1'},
+        from({
+          'a:activity:1.9.0': {'a:activity-ktx': '1.9.0', 'a:compose': '1.9.0'},
+          'a:activity-ktx:1.5.1': {'a:activity': '1.5.1'},
+        }),
+      );
+      expect(aligned.keys, ['a:activity-ktx']);
+      expect(aligned['a:activity-ktx']!.version, '1.9.0');
+      expect(aligned['a:activity-ktx']!.by, 'a:activity 1.9.0');
+    });
+
+    test('follows the metadata of what it raised', () async {
+      final aligned = await align(
+        {'a:main': '2.0', 'a:ktx': '1.0', 'b:other': '1.0'},
+        from({
+          'a:main:2.0': {'a:ktx': '2.0'},
+          'a:ktx:2.0': {'b:other': '3.0'},
+        }),
+      );
+      expect(aligned.map((k, v) => MapEntry(k, v.version)), {
+        'a:ktx': '2.0',
+        'b:other': '3.0',
+      });
+    });
+  });
+
+  group('formatReport', () {
+    test('marks what the plugins need and what Gradle would align', () {
+      final report = formatReport(
+        app: '//:app',
+        requirements: {
+          'g:fine': Requirement('1.0', ['package:a 1.2']),
+          'g:old': Requirement('1.2', ['package:a 1.2']),
+          'g:gone': Requirement(null, ['package:b 3.4']),
+        },
+        resolved: {'g:fine': '1.0', 'g:old': '1.1', 'a:ktx': '1.5.1'},
+        aligned: {'a:ktx': Alignment('1.9.0', 'a:main 1.9.0')},
+      );
+      expect(
+        report,
+        contains('Android plugins that //:app links declare'),
+      );
+      expect(report, contains('# 2 of 3 are missing or too low'));
+      expect(report, contains('# 1 more resolves lower than'));
+      for (final line in [
+        '        "g:fine:1.0",  # declared by package:a 1.2\n',
+        '        "g:gone:<version>",  # declared by package:b 3.4; missing\n',
+        '        "g:old:1.2",  # declared by package:a 1.2; resolves 1.1\n',
+        '        "a:ktx:1.9.0",  # aligned with a:main 1.9.0; resolves 1.5.1\n',
+      ]) {
+        expect(report, contains(line));
+      }
+    });
+
+    test('raises a declared artifact Gradle would align higher', () {
+      final report = formatReport(
+        app: null,
+        requirements: {
+          'a:ktx': Requirement('1.0', ['package:a 1.0']),
+        },
+        resolved: {'a:ktx': '1.0'},
+        aligned: {'a:ktx': Alignment('1.9.0', 'a:main 1.9.0')},
+      );
+      expect(
+        report,
+        contains(
+          '"a:ktx:1.9.0",  # declared by package:a 1.0; '
+          'aligned with a:main 1.9.0; resolves 1.0',
+        ),
+      );
+      expect(report, isNot(contains(' more resolve')));
+    });
+
+    test('says when there is nothing to paste', () {
+      final report = formatReport(
+        app: '//:app',
+        requirements: {},
+        resolved: {'g:a': '1.0'},
+        aligned: {},
+      );
+      expect(report, contains('# None.'));
+    });
+  });
+
+  group('moduleMetadata', () {
+    test('takes the first repository that has it', () async {
+      final asked = <Uri>[];
+      final json = await moduleMetadata(
+        'androidx.activity:activity',
+        '1.9.0',
+        ['https://repo1.example/maven2', 'https://google.example/'],
+        (url) async {
+          asked.add(url);
+          return url.host == 'google.example' ? '{}' : null;
+        },
+      );
+      expect(json, '{}');
+      expect(asked.map((u) => u.toString()), [
+        'https://repo1.example/maven2/androidx/activity/activity/1.9.0/activity-1.9.0.module',
+        'https://google.example/androidx/activity/activity/1.9.0/activity-1.9.0.module',
+      ]);
+    });
+
+    test('is null when no repository has it', () async {
+      expect(
+        await moduleMetadata('g:a', '1', ['https://r.example'], (_) async {
+          return null;
+        }),
+        isNull,
+      );
+    });
+  });
+
+  group('snapshot', () {
+    final snapshot = <String, List<Constraint>?>{
+      'androidx.core:core:1.17.0': [
+        (coordinate: 'androidx.core:core-ktx', version: '1.17.0'),
+      ],
+      'androidx.activity:activity:1.9.0': [
+        (coordinate: 'androidx.activity:activity-ktx', version: '1.9.0'),
+        (coordinate: 'androidx.activity:activity-compose', version: '1.9.0'),
+      ],
+      'com.google.guava:guava:33.3.1-jre': null,
+      'g:a:1': [],
+    };
+
+    test('reads back what it writes', () {
+      final read = parseSnapshot(formatSnapshot(snapshot));
+      expect(read.keys, unorderedEquals(snapshot.keys));
+      for (final key in snapshot.keys) {
+        expect(read[key]?.toSet(), snapshot[key]?.toSet(), reason: key);
+      }
+    });
+
+    test('is laid out as prettier lays out JSON', () {
+      expect(formatSnapshot(snapshot), '''{
+  "androidx.activity:activity:1.9.0": [
+    "androidx.activity:activity-compose:1.9.0",
+    "androidx.activity:activity-ktx:1.9.0"
+  ],
+  "androidx.core:core:1.17.0": ["androidx.core:core-ktx:1.17.0"],
+  "com.google.guava:guava:33.3.1-jre": null,
+  "g:a:1": []
+}
+''');
+      expect(formatSnapshot({}), '{}\n');
+    });
+  });
+}

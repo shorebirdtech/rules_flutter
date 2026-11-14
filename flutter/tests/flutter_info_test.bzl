@@ -3,8 +3,8 @@
 `contributing_library` stands in for `flutter_library` / `flutter_plugin`: a
 rule that contributes on several channels at once and reaches `FlutterInfo`
 only through the constructor. `single_channel_library` stands in for
-`flutter_native_asset` / `flutter_data_asset` / `flutter_material_icons`, which
-contribute on exactly one channel and forward nothing.
+`flutter_material_icons`, which contributes on exactly one channel and
+forwards nothing.
 
 The claim under test: a caller gets every dependency's contribution on every
 channel without naming any field, so adding a field to `FlutterInfo` cannot
@@ -16,6 +16,7 @@ to skip those rather than fail on them.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_dart//dart:defs.bzl", "dart_library")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
@@ -28,7 +29,6 @@ def _contributing_library_impl(ctx):
         dart_info_no_package(),
         flutter_info(
             deps = ctx.attr.deps,
-            asset_dirs = ctx.files.assets,
             plugins = [
                 struct(name = n, platforms = {})
                 for n in ctx.attr.plugin_names
@@ -58,7 +58,7 @@ def _single_channel_library_impl(ctx):
         # must be immutable. The real `pub_fonts` contributions are built the
         # same way.
         flutter_info(pub_fonts = [
-            struct(package_name = "", family = ctx.attr.family, fonts = (), files = ()),
+            struct(package_name = "", family = ctx.attr.family, fonts = ()),
         ]),
     ]
 
@@ -71,9 +71,6 @@ single_channel_library = rule(
 def _field(structs, name):
     return sorted([getattr(s, name) for s in structs.to_list()])
 
-def _short_paths(dep):
-    return sorted([f.short_path for f in dep.to_list()])
-
 def _forwards_every_channel_test_impl(ctx):
     env = analysistest.begin(ctx)
     info = analysistest.target_under_test(env)[FlutterInfo]
@@ -81,23 +78,12 @@ def _forwards_every_channel_test_impl(ctx):
     # The channels this target contributes on carry its own value *and* the
     # dependency's. A merge that took only `direct` would pass an
     # own-contribution check and still drop every dependency.
-    assets = _short_paths(info.asset_dirs)
-    asserts.true(
-        env,
-        [p for p in assets if p.endswith("_own.png")] != [],
-        "own asset missing from asset_dirs: %s" % assets,
-    )
-    asserts.true(
-        env,
-        [p for p in assets if p.endswith("_dep.png")] != [],
-        "dependency's asset missing from asset_dirs: %s" % assets,
-    )
     asserts.equals(env, ["dep_plugin", "own_plugin"], sorted([p.name for p in info.plugins]))
     asserts.equals(env, ["dep_pkg", "own_pkg"], _field(info.pub_assets, "package_name"))
 
     # A channel neither target contributes on is still a real, empty depset —
     # consumers read it unguarded.
-    asserts.equals(env, [], info.data_assets.to_list())
+    asserts.equals(env, [], info.apple_privacy_manifests.to_list())
 
     return analysistest.end(env)
 
@@ -141,9 +127,8 @@ def _single_channel_test_impl(ctx):
     # Every other channel is empty rather than absent. `flutter_application`
     # reads them all off every dep, so a missing one is an analysis error and an
     # empty one is the honest "contributes nothing here".
-    asserts.equals(env, [], info.asset_dirs.to_list())
     asserts.equals(env, [], info.plugins)
-    asserts.equals(env, [], info.native_assets.to_list())
+    asserts.equals(env, [], info.windows_plugin_libraries.to_list())
     asserts.equals(env, [], info.apple_privacy_manifests.to_list())
 
     return analysistest.end(env)
@@ -156,15 +141,15 @@ def flutter_info_test_suite(name):
     Args:
         name: Name of the resulting test_suite.
     """
-    native.genrule(
+    write_file(
         name = name + "_own_asset",
-        outs = [name + "_own.png"],
-        cmd = "touch $@",
+        out = name + "_own.png",
+        content = [],
     )
-    native.genrule(
+    write_file(
         name = name + "_dep_asset",
-        outs = [name + "_dep.png"],
-        cmd = "touch $@",
+        out = name + "_dep.png",
+        content = [],
     )
 
     contributing_library(
@@ -210,7 +195,7 @@ def flutter_info_test_suite(name):
 
     dart_library(
         name = name + "_plain_dart",
-        package_name = "plain_dart",
+        package = ":pubspec-metadata",
         tags = ["manual"],
     )
     contributing_library(

@@ -14,7 +14,8 @@ curl -s 'http://localhost:53817/command?token=9f2c…e1' \
 |---|---|
 | `POST /command?token=…` | Run a command. Body `{"method":"app.X","params":{"appId":"…",…}}`. Answers `{"result":{…}}` or `{"error":"…"}`. |
 | `GET /commands?token=…` | What this run accepts now: `{"protocolVersion":3,"commands":[{"name","longRunning"}]}`. |
-| `GET /sessions/<appId>/screenshot/native?token=…` | PNG of the app as the platform sees it. Add `&settle=false` to skip the idle wait, `&window=<title>` on macOS for one window. |
+| `GET /sessions/<appId>/screenshot/native?token=…` | PNG of the app as the platform sees it. Add `&settle=false` to skip the idle wait, `&window=<title>` on macOS for one window, `&screen=<id or name>` for one screen of a device that has several (see "Screens"). |
+| `GET /sessions/<appId>/screens?token=…` | The device's screens: `{"screens":[{"id","name","type","width","height","active","primary"}]}`. `active` is `true` for the one the app is on. |
 | `GET /sessions/<appId>/logs?token=…` | The app's console output. See "Logs" below. |
 | `GET /sessions/<appId>/screenshot/flutter?token=…` | Engine screenshot. `501` on every platform at the pinned Flutter (Impeller); use `native`. |
 
@@ -95,6 +96,32 @@ POST /command  {"method":"app.getRect","params":{"appId":"___my_app_macos_macOS"
 `getText` returns the first text under the match, in reading order, and all of
 them in `texts`: a `Text` (including `Text.rich`), `RichText`, or a text field's
 contents. Rects are in logical pixels.
+
+### Screens
+
+Most devices have one screen and `screenshot/native` captures it. The iPhone
+Duo simulator has two built-in screens, and the app draws on the one the
+posture (folded, half open, open) turns on; an iPhone mirrored to a wireless
+display has an external one too.
+
+```
+GET /sessions/<appId>/screens?token=…
+{"screens":[
+ {"id":"9552AE4F-…","name":"LCD","type":"integrated","width":1398,"height":2034,"active":true,"primary":true},
+ {"id":"40096A2C-…","name":"LCD-1","type":"integrated","width":2007,"height":2853,"active":false,"primary":false}]}
+```
+
+`active: true` marks the screen the app is on; `null` means the device does not
+say (every one-screen device). With no `screen`, `screenshot/native` captures
+the one built-in screen, or the one that is `active`. External screens
+(`type` other than `integrated`) are captured only when named. When it cannot
+tell (none active, several active, a simulator that has not reported its posture
+within the screenshot's 30 s), the answer is `422` with the screens in the body: pick one and
+repeat with `&screen=<id, displayId:<n> or name>`. Ids of a simulator change on
+every boot; list again.
+
+`window` is not `screen`: `window` is one window of a macOS app, matched by its
+title.
 
 ## Selectors
 
@@ -189,7 +216,7 @@ the first frame wait for it, so you do not need to poll for readiness after
 | Method | Params | Notes |
 |---|---|---|
 | `app.hotReload` | `appId` (optional: omit for every app) | Long-running. |
-| `app.restart` | `appId`; `fullRestart: false` makes it a reload | Long-running. Re-runs `main()`. |
+| `app.restart` | `appId`; `fullRestart: true` for a restart | Long-running. Without `fullRestart` it is a hot reload, as in `flutter run --machine`; with `true` it re-runs `main()`. `pause: true` is refused; `reason` and `debounce` are accepted and have no effect. |
 | `app.stop` | `appId` (required) | Stops one app; the tool keeps running other devices. |
 | `daemon.shutdown` | none | Ends the run: every app, the compiler, the browser, the tool. |
 
@@ -199,8 +226,9 @@ Reply fields:
 - `runningCode`: `updated` or `unchanged`, what the app is now running.
 - `message`: one sentence, safe to quote in a report.
 - `filesRecompiled`, `isEmpty`: what was compiled; `isEmpty: true` and
-  "(no changes detected)" mean the tool saw no edit. Check the file was saved
-  and is part of the target.
+  "(no changes detected)" mean a reload saw no edit. Check the file was saved
+  and is part of the target. A restart is never empty: it re-runs the whole
+  program, so it answers `runningCode: updated`.
 - `error`: compile diagnostics when `succeeded` is false.
 - `notShown`: per app, why the new code is not on screen yet (window hidden).
 - `relaunched`, `nativeLibsChanged`, `launch`, `ready`: a restart that replaced

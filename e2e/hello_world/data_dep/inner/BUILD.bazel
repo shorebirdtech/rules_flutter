@@ -1,0 +1,15 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "data_dep_inner",
+)
+
+dart_library(
+    name = "inner",
+    srcs = ["lib/inner.dart"],
+    data = ["dart_fixture.txt"],
+    package = ":pubspec-metadata",
+    visibility = ["//data_dep:__pkg__"],
+)

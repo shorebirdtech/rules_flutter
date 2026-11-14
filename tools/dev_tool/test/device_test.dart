@@ -2,13 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clock/clock.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/web_bundle_facts.dart';
 import 'package:flutter_bazel_dev_tool/key_press.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
 import 'package:flutter_bazel_dev_tool/mdns_vm_service_discovery.dart';
 import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
+import 'package:flutter_bazel_dev_tool/screen.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -36,6 +40,56 @@ String devicesJson(String transportType) => json.encode({
     ],
   },
 });
+
+/// A display as `devicectl device info displays --json-output` describes it.
+Map<String, Object?> display(
+  String name, {
+  String? uniqueId,
+  int displayId = 1,
+  bool? active,
+  String type = 'integrated',
+  bool primary = false,
+}) => {
+  'name': name,
+  'displayId': displayId,
+  'uniqueId': ?uniqueId,
+  'active': ?active,
+  'primary': primary,
+  'nativeSize': [100, 200],
+  'backlightState': 'unknown',
+  'type': {type: <String, Object?>{}},
+};
+
+/// What a fake `devicectl` answers to `device info displays`: it writes the
+/// JSON to the `--json-output` path, as the real one does.
+ProcessResult displaysAnswer(
+  List<String> args,
+  List<Map<String, Object?>> displays,
+) {
+  File(args[args.indexOf('--json-output') + 1]).writeAsStringSync(
+    json.encode({
+      'info': {'outcome': 'success', 'jsonVersion': 5},
+      'result': {'displays': displays},
+    }),
+  );
+  return ProcessResult(0, 0, '', '');
+}
+
+/// A fake `devicectl` that reports [displays] and records every command line
+/// it is given.
+({ProcessRunSync run, List<List<String>> calls}) fakeDevicectl(
+  List<Map<String, Object?>> Function() displays,
+) {
+  final calls = <List<String>>[];
+  return (
+    calls: calls,
+    run: (exe, args) async {
+      calls.add([exe, ...args]);
+      if (args.contains('displays')) return displaysAnswer(args, displays());
+      return ProcessResult(0, 0, '', '');
+    },
+  );
+}
 
 /// What a fake `simctl` answers: success, and for `simctl launch` the line
 /// naming the pid it started, which a launch needs to find its own app's VM
@@ -93,12 +147,19 @@ void main() {
     });
 
     test('AndroidDevice name includes deviceId when provided', () {
-      final device = AndroidDevice(deviceId: 'emulator-5554');
+      final device = AndroidDevice(
+        adbPath: 'adb',
+        aapt2Path: 'aapt2',
+        deviceId: 'emulator-5554',
+      );
       expect(device.name, 'Android (emulator-5554)');
     });
 
     test('AndroidDevice name is "Android" when no deviceId', () {
-      final device = AndroidDevice();
+      final device = AndroidDevice(
+        adbPath: 'adb',
+        aapt2Path: 'aapt2',
+      );
       expect(device.name, 'Android');
     });
   });
@@ -135,18 +196,190 @@ void main() {
       expect(device.buildArgs, ['--ios_multi_cpus=sim_arm64']);
     });
 
-    test('AndroidDevice defaults to arm64 platform', () {
-      final device = AndroidDevice();
-      expect(device.buildArgs, [
-        '--platforms=@rules_flutter//flutter/platforms:android_arm64',
-      ]);
+    test('AndroidDevice builds for the ABI it was told', () {
+      expect(
+        AndroidDevice(
+          adbPath: 'adb',
+          aapt2Path: 'aapt2',
+          abi: 'arm64-v8a',
+        ).buildArgs,
+        [
+          '--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a',
+        ],
+      );
+      expect(
+        AndroidDevice(
+          adbPath: 'adb',
+          aapt2Path: 'aapt2',
+          abi: 'x86_64',
+        ).buildArgs,
+        [
+          '--@rules_android//flags:android_platforms=@rules_android//:x86_64',
+        ],
+      );
     });
 
-    test('AndroidDevice respects custom abi', () {
-      final device = AndroidDevice(abi: 'x64');
-      expect(device.buildArgs, [
-        '--platforms=@rules_flutter//flutter/platforms:android_x64',
-      ]);
+    // An APK is dexed, linked, zipped and signed, and a macOS debug bundle's
+    // App.framework is the whole program's kernel; a restart needs only the
+    // libraries and assets that go into them, so each says where to read
+    // those without building the artifact.
+    test('AndroidDevice names the bundle parts a restart reads', () {
+      final parts = AndroidDevice(
+        adbPath: 'adb',
+        aapt2Path: 'aapt2',
+        abi: 'x86_64',
+      ).launchBundleParts;
+      expect(parts, isNotNull);
+      expect(parts!.aspect, contains('android_bundle_parts.bzl'));
+      expect(parts.assetsGroup, 'flutter_android_bundle_parts');
+      expect(parts.nativeLibsGroup, 'flutter_android_native_libs');
+    });
+
+    test('MacOSDevice names the bundle parts a restart reads', () {
+      final parts = MacOSDevice().launchBundleParts;
+      expect(parts, isNotNull);
+      expect(parts!.aspect, contains('macos_bundle_parts.bzl'));
+      expect(parts.assetsGroup, 'flutter_macos_bundle_parts');
+      expect(parts.nativeLibsGroup, 'flutter_macos_native_libs');
+    });
+
+    // An iOS debug App.framework, a Linux or Windows debug bundle's kernel and
+    // an iOS app's signing are all rebuilt by every Dart edit, so a restart
+    // reads the parts of each the way it does a macOS bundle's.
+    for (final (label, device, file, platform) in [
+      ('IOSSimulatorDevice', IOSSimulatorDevice(udid: 'TEST'), 'ios', 'ios'),
+      ('IOSDevice', IOSDevice(udid: 'TEST'), 'ios', 'ios'),
+      ('LinuxDevice', LinuxDevice(), 'linux', 'linux'),
+      ('WindowsDevice', WindowsDevice(), 'windows', 'windows'),
+    ]) {
+      test('$label names the bundle parts a restart reads', () {
+        final parts = device.launchBundleParts;
+        expect(parts, isNotNull);
+        expect(
+          parts!.aspect,
+          '@rules_flutter//flutter:${file}_bundle_parts.bzl%'
+          'flutter_${file}_bundle_parts_aspect',
+        );
+        expect(parts.assetsGroup, 'flutter_${platform}_bundle_parts');
+        expect(parts.nativeLibsGroup, 'flutter_${platform}_native_libs');
+      });
+    }
+
+    test('a web device names no parts: it has no bundle to read', () {
+      expect(WebDevice().launchBundleParts, isNull);
+    });
+
+    test('AndroidDevice does not guess an ABI it has not been told', () {
+      expect(
+        () => AndroidDevice(
+          adbPath: 'adb',
+          aapt2Path: 'aapt2',
+        ).buildArgs,
+        throwsStateError,
+      );
+    });
+
+    group('AndroidDevice asks the device its ABI', () {
+      Future<(List<String>, AndroidDevice)> resolved(
+        String abiList, {
+        String? deviceId,
+      }) async {
+        final calls = <String>[];
+        final device = AndroidDevice(
+          aapt2Path: 'aapt2',
+          deviceId: deviceId,
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            calls.add('$exe ${args.join(' ')}');
+            return ProcessResult(0, 0, '$abiList\n', '');
+          },
+        );
+        await device.resolveBuildArgs();
+        return (calls, device);
+      }
+
+      test('a phone builds for its own ABI', () async {
+        final (calls, device) = await resolved(
+          'arm64-v8a,armeabi-v7a,armeabi',
+          deviceId: 'PIXEL',
+        );
+        expect(calls, ['adb -s PIXEL shell getprop ro.product.cpu.abilist']);
+        expect(device.buildArgs, [
+          '--@rules_android//flags:android_platforms=@rules_android//:arm64-v8a',
+        ]);
+      });
+
+      test(
+        'an x86_64 emulator builds for x86_64, not the ABI it translates',
+        () async {
+          final (_, device) = await resolved('x86_64,arm64-v8a,x86');
+          expect(device.buildArgs, [
+            '--@rules_android//flags:android_platforms=@rules_android//:x86_64',
+          ]);
+        },
+      );
+
+      test('a 32-bit ARM device builds for armeabi-v7a', () async {
+        final (_, device) = await resolved('armeabi-v7a,armeabi');
+        expect(device.buildArgs, [
+          '--@rules_android//flags:android_platforms=@rules_android//:armeabi-v7a',
+        ]);
+      });
+
+      test(
+        'a device that runs no ABI we build for is refused by name',
+        () async {
+          expect(
+            resolved('armeabi,mips'),
+            throwsA(
+              isA<StateError>().having(
+                (e) => e.message,
+                'message',
+                allOf(
+                  contains('armeabi, mips'),
+                  contains('armeabi-v7a'),
+                  contains('arm64-v8a'),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+
+      test('a told ABI is not asked again', () async {
+        final calls = <String>[];
+        final device = AndroidDevice(
+          aapt2Path: 'aapt2',
+          abi: 'x86_64',
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            calls.add(args.join(' '));
+            return ProcessResult(0, 0, '', '');
+          },
+        );
+        await device.resolveBuildArgs();
+        expect(calls, isEmpty);
+      });
+
+      test('an adb failure is reported with the device it asked', () async {
+        final device = AndroidDevice(
+          aapt2Path: 'aapt2',
+          deviceId: 'PIXEL',
+          adbPath: 'adb',
+          runProcess: (exe, args) async =>
+              ProcessResult(0, 1, '', 'device offline'),
+        );
+        expect(
+          device.resolveBuildArgs(),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('PIXEL'), contains('device offline')),
+            ),
+          ),
+        );
+      });
     });
 
     test('WebDevice returns empty buildArgs', () {
@@ -172,6 +405,11 @@ void main() {
               '',
             );
           }
+          if (args.contains('displays')) {
+            return displaysAnswer(args, [
+              display('LCD', uniqueId: 'SCREEN-1', primary: true),
+            ]);
+          }
           return ProcessResult(0, 0, '', '');
         },
         startProcess: (exe, args) async =>
@@ -190,7 +428,18 @@ void main() {
         AppInstance(process: FakeProcess()),
         '/tmp/shot.png',
       );
-      expect(calls, ['simctl io SIM-FIRST screenshot /tmp/shot.png']);
+      expect(calls, hasLength(2));
+      expect(
+        calls.first,
+        startsWith('devicectl device info displays --device SIM-FIRST'),
+      );
+      expect(
+        calls.last,
+        startsWith(
+          'devicectl device capture screenshot --device SIM-FIRST '
+          '--destination /tmp/shot.png',
+        ),
+      );
     });
 
     test('has correct name with udid', () {
@@ -201,30 +450,36 @@ void main() {
     test('calls simctl install and launch', () async {
       final calls = <(String, List<String>)>[];
       final fakeLog = FakeProcess();
+      final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
 
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async {
           calls.add((exe, args));
           return simctlOk(args);
-        },
-        startProcess: (exe, args) async {
+        }),
+        startProcess: sim.start((exe, args) async {
           calls.add((exe, args));
           return fakeLog;
-        },
+        }),
       );
-
-      unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
       await device.launch('/path/to/MyApp.app');
 
-      // Should have: boot, install, log stream spawn, launch.
+      // Should have: boot (waited for), install, log stream spawn, launch.
       final xcrunCalls = calls.where((c) => c.$1 == 'xcrun').toList();
       expect(xcrunCalls.length, greaterThanOrEqualTo(4));
 
-      final bootCall = xcrunCalls.firstWhere((c) => c.$2.contains('boot'));
-      expect(bootCall.$2, contains('TEST-UDID'));
+      final bootCall = xcrunCalls.firstWhere(
+        (c) => c.$2.contains('bootstatus'),
+      );
+      expect(bootCall.$2, containsAllInOrder(['TEST-UDID', '-b']));
+      expect(
+        xcrunCalls.indexOf(bootCall),
+        lessThan(xcrunCalls.indexWhere((c) => c.$2.contains('install'))),
+        reason: 'nothing is installed before the boot has finished',
+      );
 
       final installCall = xcrunCalls.firstWhere(
         (c) => c.$2.contains('install'),
@@ -234,6 +489,47 @@ void main() {
 
       final launchCall = xcrunCalls.firstWhere((c) => c.$2.contains('launch'));
       expect(launchCall.$2, contains('com.example.test'));
+    });
+
+    // Measured against `xcrun simctl` (Xcode 27.2): `bootstatus -b` on a device
+    // that is already booted exits 0 at once, which is the ordinary case of
+    // every run after the first on a simulator someone left booted.
+    test('a simulator that is already booted is launched on', () async {
+      final calls = <String>[];
+      final sim = FakeSimulatorLog();
+      final device = IOSSimulatorDevice(
+        udid: 'TEST-UDID',
+        bundleId: 'com.example.test',
+        runProcess: sim.run((exe, args) async {
+          calls.add(args.join(' '));
+          return simctlOk(args);
+        }),
+        startProcess: sim.start((exe, args) async {
+          final p = FakeProcess();
+          if (args.contains('ndjson')) {
+            unawaited(
+              p.outputAttached.then(
+                (_) => p.emitStdout(
+                  json.encode({
+                    'processID': 1234,
+                    'eventMessage': _vmServiceLine,
+                  }),
+                ),
+              ),
+            );
+          }
+          return p;
+        }),
+      );
+
+      final instance = await device.launch('/path/to/MyApp.app');
+
+      expect(instance.vmServiceUri, isNotNull);
+      expect(
+        calls.where((c) => c.startsWith('simctl install')),
+        hasLength(1),
+        reason: 'the app has to be installed on the booted device',
+      );
     });
 
     test('throws on simctl install failure', () async {
@@ -338,18 +634,18 @@ void main() {
       () async {
         final calls = <List<String>>[];
         final fakeLog = FakeProcess();
+        final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
         final device = IOSSimulatorDevice(
           udid: 'TEST-UDID',
-          runProcess: (exe, args) async {
+          runProcess: sim.run((exe, args) async {
             calls.add([exe, ...args]);
             if (exe == 'defaults') {
               return ProcessResult(0, 0, 'com.example.fromplist\n', '');
             }
             return simctlOk(args);
-          },
-          startProcess: (exe, args) async => fakeLog,
+          }),
+          startProcess: sim.start((exe, args) async => fakeLog),
         );
-        unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
         final instance = await device.launch('/path/to/MyApp.app');
         await device.stop(instance);
@@ -372,11 +668,12 @@ void main() {
     test('extracts .app from .ipa before install', () async {
       final calls = <(String, List<String>)>[];
       final fakeLog = FakeProcess();
+      final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
 
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async {
           calls.add((exe, args));
           if (exe == 'unzip') {
             // Simulate unzip by creating Payload/app.app directory.
@@ -385,14 +682,12 @@ void main() {
             File('$dest/Payload/app.app/Info.plist').writeAsStringSync('');
           }
           return simctlOk(args);
-        },
-        startProcess: (exe, args) async {
+        }),
+        startProcess: sim.start((exe, args) async {
           calls.add((exe, args));
           return fakeLog;
-        },
+        }),
       );
-
-      unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
       final app = await device.launch('/path/to/app.ipa');
       addTearDown(app.disposeScratchDirs);
@@ -419,13 +714,14 @@ void main() {
         // simulator: `simctl install` of the new bundle left the old `add`, and
         // the same install after a `touch` replaced it.
         final fakeLog = FakeProcess();
+        final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
         DateTime? mtimeAtInstall;
         late String extractedLib;
 
         final device = IOSSimulatorDevice(
           udid: 'TEST-UDID',
           bundleId: 'com.example.test',
-          runProcess: (exe, args) async {
+          runProcess: sim.run((exe, args) async {
             if (exe == 'unzip') {
               final dest = args.last;
               extractedLib =
@@ -439,11 +735,9 @@ void main() {
               mtimeAtInstall = File(extractedLib).lastModifiedSync();
             }
             return simctlOk(args);
-          },
-          startProcess: (exe, args) async => fakeLog,
+          }),
+          startProcess: sim.start((exe, args) async => fakeLog),
         );
-
-        unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
         final before = DateTime.now().subtract(const Duration(seconds: 5));
         final app = await device.launch('/path/to/app.ipa');
         addTearDown(app.disposeScratchDirs);
@@ -462,11 +756,12 @@ void main() {
       // which happens first, and FakeProcess's controllers are broadcast, so
       // the line would be delivered to the log drain and dropped for
       // discovery.
+      final sim = FakeSimulatorLog();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => simctlOk(args),
-        startProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async => simctlOk(args)),
+        startProcess: sim.start((exe, args) async {
           final p = FakeProcess();
           if (args.contains('ndjson')) {
             unawaited(
@@ -483,7 +778,7 @@ void main() {
             );
           }
           return p;
-        },
+        }),
       );
 
       final instance = await device.launch('/path/to/MyApp.app');
@@ -514,6 +809,78 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  group('WebDevice running a named browser', () {
+    test('needs that browser and no other, so a missing one is not made up for '
+        'by the host\'s own Chrome', () async {
+      final tools = await WebDevice(
+        chromePath: '/no/such/chrome',
+      ).requiredHostTools();
+
+      expect(tools, hasLength(1));
+      expect(tools.single.candidates, ['/no/such/chrome']);
+      expect(tools.single.pathNames, isEmpty);
+      expect(
+        tools.single.require,
+        throwsA(
+          isA<MissingHostToolException>().having(
+            (e) => e.message,
+            'message',
+            contains('/no/such/chrome'),
+          ),
+        ),
+      );
+    });
+
+    test('picks the bundle directory out of what the build made, whatever '
+        'order the outputs come in', () async {
+      final out = await Directory.systemTemp.createTemp('web_outputs_');
+      addTearDown(() => out.delete(recursive: true));
+      final bundle = Directory(p.join(out.path, 'app_web'))..createSync();
+      final serving = File(p.join(out.path, 'app_web.serving.json'))
+        ..writeAsStringSync('{}');
+      final dev = File(p.join(out.path, 'app.dev_config.json'))
+        ..writeAsStringSync('{}');
+
+      for (final order in [
+        [bundle.path, serving.path, dev.path],
+        [serving.path, dev.path, bundle.path],
+      ]) {
+        expect(WebDevice().pickArtifact(order), bundle.path);
+      }
+    });
+
+    test('says so when the build made no bundle directory', () {
+      expect(
+        () => WebDevice().pickArtifact(['/out/app_web.serving.json']),
+        throwsA(
+          isA<NotAWebBundle>().having(
+            (e) => e.message,
+            'message',
+            contains('_web'),
+          ),
+        ),
+      );
+    });
+
+    test('says how Chrome ended when it did, and nothing when it is still '
+        'running', () async {
+      final process = FakeProcess();
+      final instance = AppInstance(process: process);
+      final device = WebDevice();
+
+      fakeAsync((async) {
+        String? whileRunning = 'unset';
+        device.whyAppExited(instance).then((r) => whileRunning = r);
+        async.elapse(const Duration(minutes: 1));
+        expect(whileRunning, isNull);
+      });
+
+      process.complete(139);
+      final why = await device.whyAppExited(instance);
+      expect(why, allOf(contains('Chrome'), contains('exited with code 139')));
     });
   });
 
@@ -633,512 +1000,13 @@ void main() {
     });
   });
 
-  group('ChromeSession', () {
-    const appUrl = 'http://localhost:8080';
-
-    /// A CDP `/json` endpoint whose listing is scripted per request, so a
-    /// test can play out "nothing yet → unnavigated tab → app page".
-    Future<HttpServer> serveCdpJson(
-      List<dynamic> Function(int call) listing,
-    ) async {
-      final server = await HttpServer.bind('127.0.0.1', 0);
-      addTearDown(() => server.close(force: true));
-      var calls = 0;
-      server.listen((request) async {
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(json.encode(listing(calls++)));
-        await request.response.close();
-      });
-      return server;
-    }
-
-    /// Chrome's port announcement for [server], as the real browser prints it.
-    String devToolsLine(HttpServer server) =>
-        'DevTools listening on ws://127.0.0.1:${server.port}/devtools/browser/x\n';
-
-    Map<String, Object?> appPage(HttpServer server) => {
-      'type': 'page',
-      'url': '$appUrl/index.html',
-      'webSocketDebuggerUrl': 'ws://127.0.0.1:${server.port}/page',
-    };
-
-    const blankPage = {
-      'type': 'page',
-      'url': 'about:blank',
-      'webSocketDebuggerUrl': 'ws://blank',
-    };
-
-    const extensionPage = {
-      'type': 'background_page',
-      'url': 'chrome-extension://x/bg.html',
-      'webSocketDebuggerUrl': 'ws://bg',
-    };
-
-    /// The profile directory a launch created, recovered from its argv.
-    Directory profileDirOf(List<String> args) => Directory(
-      args
-          .firstWhere((a) => a.startsWith('--user-data-dir='))
-          .substring('--user-data-dir='.length),
-    );
-
-    test(
-      'launches with the debug flags, a fresh profile, and the app URL',
-      () async {
-        late final HttpServer cdp;
-        cdp = await serveCdpJson(
-          (_) => [extensionPage, blankPage, appPage(cdp)],
-        );
-
-        final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
-          url: appUrl,
-          chromePath: '/fake/chrome',
-          startProcess: (exe, a) async {
-            expect(exe, '/fake/chrome');
-            args = a;
-            return proc;
-          },
-        );
-        await proc.outputAttached;
-        proc.emitStderr(devToolsLine(cdp));
-
-        final session = await launch;
-        addTearDown(() async {
-          session.process.kill();
-          await profileDirOf(args).delete(recursive: true);
-        });
-
-        expect(args.first, '--remote-debugging-port=0');
-        expect(args, containsAll(chromeDebugFlags));
-        expect(
-          args.last,
-          appUrl,
-          reason: 'the app URL is what the launched tab must navigate to',
-        );
-        expect(
-          await profileDirOf(args).exists(),
-          isTrue,
-          reason: 'the launch owns a real, fresh profile directory',
-        );
-        expect(session.cdpPort, cdp.port);
-        expect(session.appUrl, appUrl);
-        // What the run announces for a client that drives Chrome itself: the
-        // app's page, not the extension or the blank tab listed beside it.
-        expect(
-          session.pageWebSocketDebuggerUrl,
-          'ws://127.0.0.1:${cdp.port}/page',
-        );
-      },
-    );
-
-    test('polls until the tab has navigated to the app page', () async {
-      late final HttpServer cdp;
-      var calls = 0;
-      cdp = await serveCdpJson((call) {
-        calls = call + 1;
-        // The two states a just-launched browser really passes through
-        // before the app page exists.
-        if (call == 0) return const <dynamic>[];
-        if (call == 1) return [extensionPage, blankPage];
-        return [extensionPage, blankPage, appPage(cdp)];
-      });
-
-      final proc = FakeProcess();
-      late List<String> args;
-      final launch = ChromeSession.launch(
-        url: appUrl,
-        chromePath: '/fake/chrome',
-        pollInterval: const Duration(milliseconds: 10),
-        startProcess: (exe, a) async {
-          args = a;
-          return proc;
-        },
-      );
-      await proc.outputAttached;
-      proc.emitStderr(devToolsLine(cdp));
-
-      final session = await launch;
-      addTearDown(() async {
-        session.process.kill();
-        await profileDirOf(args).delete(recursive: true);
-      });
-
-      expect(
-        calls,
-        greaterThanOrEqualTo(3),
-        reason:
-            'the launch must poll through the not-yet states, '
-            'not fail on the first look',
-      );
-      expect(await session.resolveAppPage(), 'ws://127.0.0.1:${cdp.port}/page');
-    });
-
-    test(
-      'fails the launch when the app page never appears, and cleans up',
-      () async {
-        // A tab that never navigates: only the extension and about:blank ever
-        // show up. Falling back to either is exactly the bug — drive them and
-        // screenshots and the console silently watch the wrong page.
-        final cdp = await serveCdpJson((_) => [extensionPage, blankPage]);
-
-        final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
-          url: appUrl,
-          chromePath: '/fake/chrome',
-          pageTimeout: const Duration(milliseconds: 100),
-          pollInterval: const Duration(milliseconds: 10),
-          startProcess: (exe, a) async {
-            args = a;
-            return proc;
-          },
-        );
-        await proc.outputAttached;
-        proc.emitStderr(devToolsLine(cdp));
-
-        await expectLater(
-          launch,
-          throwsA(
-            isA<StateError>().having(
-              (e) => e.message,
-              'message',
-              allOf(
-                contains(appUrl),
-                // What was there instead is the fact someone debugs from.
-                contains('chrome-extension://x/bg.html'),
-                contains('about:blank'),
-              ),
-            ),
-          ),
-        );
-        expect(
-          await proc.exitCode,
-          isNotNull,
-          reason: 'the failed launch must not leave the browser running',
-        );
-        expect(
-          await profileDirOf(args).exists(),
-          isFalse,
-          reason: 'the failed launch must not leave its profile behind',
-        );
-      },
-    );
-
-    test('fails the launch when Chrome exits without announcing a port, '
-        'quoting what it said, and cleans up', () async {
-      final proc = FakeProcess();
-      late List<String> args;
-      final launch = ChromeSession.launch(
-        url: appUrl,
-        chromePath: '/fake/chrome',
-        startProcess: (exe, a) async {
-          args = a;
-          return proc;
-        },
-      );
-      await proc.outputAttached;
-      // The shape this actually takes on a CI runner: Chrome refuses its
-      // sandbox, says why, and exits. The reason exists only on stderr — the
-      // exit status is a bare 1 — so an error that does not carry it forward
-      // reports a symptom and destroys the cause.
-      proc.emitStderr('Running as root without --no-sandbox is not supported.');
-      proc.complete(1);
-
-      await expectLater(
-        launch,
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            allOf(
-              contains('exited'),
-              contains('debugging port'),
-              contains('Running as root without --no-sandbox'),
-            ),
-          ),
-        ),
-      );
-      expect(await profileDirOf(args).exists(), isFalse);
-    });
-
-    test('says so when Chrome exits having printed nothing', () async {
-      // The other half: silence is a diagnosis too — it rules out every cause
-      // that announces itself. Rendering an empty tail as nothing at all would
-      // read as if the quoting had been forgotten.
-      final proc = FakeProcess();
-      late List<String> args;
-      final launch = ChromeSession.launch(
-        url: appUrl,
-        chromePath: '/fake/chrome',
-        startProcess: (exe, a) async {
-          args = a;
-          return proc;
-        },
-      );
-      await proc.outputAttached;
-      proc.complete(1);
-
-      await expectLater(
-        launch,
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            contains('printed nothing at all'),
-          ),
-        ),
-      );
-      expect(await profileDirOf(args).exists(), isFalse);
-    });
-
-    test(
-      'fails the launch when Chrome never announces a port, quoting what it '
-      'said, and cleans up',
-      () async {
-        final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
-          url: appUrl,
-          chromePath: '/fake/chrome',
-          portTimeout: const Duration(milliseconds: 100),
-          startProcess: (exe, a) async {
-            args = a;
-            return proc;
-          },
-        );
-        await proc.outputAttached;
-        // The browser stays up, says why it is stuck, and never announces.
-        proc.emitStderr(
-          'Failed to connect to the bus: Could not parse server '
-          'address\n',
-        );
-
-        await expectLater(
-          launch,
-          throwsA(
-            isA<StateError>().having(
-              (e) => e.message,
-              'message',
-              allOf(
-                contains('did not announce'),
-                contains('Failed to connect to the bus'),
-              ),
-            ),
-          ),
-        );
-        expect(await proc.exitCode, isNotNull);
-        expect(await profileDirOf(args).exists(), isFalse);
-      },
-    );
-
-    group('browser launch options', () {
-      // Asserted on the argv rather than by launching a real browser: what a
-      // flag does here IS the command line, and a mis-ordered or missing
-      // switch is the whole failure mode.
-
-      List<String> argsFor(BrowserLaunchOptions options) =>
-          ChromeSession.launchArgs(appUrl, options, userDataDir: '/tmp/p');
-
-      // Capture resolution follows the launch switch, not the CDP override: a
-      // `deviceScaleFactor` in the override alone is lost once the CDP client
-      // detaches, so the scale has to reach the command line. Width and height
-      // must not — those stay the CDP override's, since --window-size cannot
-      // express them.
-      test('a viewport scale becomes --force-device-scale-factor', () {
-        final args = argsFor(
-          const BrowserLaunchOptions(
-            viewport: WebViewport(
-              width: 393,
-              height: 660,
-              deviceScaleFactor: 3,
-            ),
-          ),
-        );
-        expect(args, contains('--force-device-scale-factor=3.0'));
-        expect(args.where((a) => a.startsWith('--window-size')), isEmpty);
-      });
-
-      test('a viewport without a scale leaves the command line alone', () {
-        final args = argsFor(
-          const BrowserLaunchOptions(
-            viewport: WebViewport(width: 393, height: 660),
-          ),
-        );
-        expect(
-          args.where((a) => a.startsWith('--force-device-scale-factor')),
-          isEmpty,
-        );
-      });
-
-      test('--web-run-headless adds headless and a real window size', () {
-        final args = argsFor(const BrowserLaunchOptions(headless: true));
-        expect(args, contains('--headless'));
-        expect(args, contains('--window-size=2400,1800'));
-      });
-
-      test('headless does not turn the sandbox off', () {
-        // Upstream bundles `--no-sandbox` with headless. A launch that
-        // quietly drops a security boundary is not what the flag says it
-        // does; --web-browser-flag=--no-sandbox is how a run that needs it
-        // asks.
-        expect(
-          argsFor(const BrowserLaunchOptions(headless: true)),
-          isNot(contains('--no-sandbox')),
-        );
-        expect(
-          argsFor(const BrowserLaunchOptions()),
-          isNot(contains('--headless')),
-        );
-      });
-
-      test('--web-browser-flag lands last, just before the URL', () {
-        // Chrome resolves a repeated switch by position, so a user switch
-        // that fights one of the tool's defaults has to come after it to
-        // mean anything at all.
-        final args = argsFor(
-          const BrowserLaunchOptions(
-            browserFlags: ['--mute-audio', '--lang=fr'],
-          ),
-        );
-        expect(args.last, appUrl);
-        expect(args[args.length - 3], '--mute-audio');
-        expect(args[args.length - 2], '--lang=fr');
-        for (final own in chromeDebugFlags) {
-          expect(
-            args.indexOf(own),
-            lessThan(args.indexOf('--mute-audio')),
-            reason: 'a user switch must be able to override $own',
-          );
-        }
-      });
-
-      test('--web-browser-debug-port is the port asked for', () {
-        expect(
-          argsFor(const BrowserLaunchOptions(debugPort: 9222)).first,
-          '--remote-debugging-port=9222',
-        );
-        // Unset still asks explicitly, for any free port.
-        expect(
-          argsFor(const BrowserLaunchOptions()).first,
-          '--remote-debugging-port=0',
-        );
-      });
-
-      test(
-        'a fixed debug port is still awaited, and taken from the browser',
-        () async {
-          // The announcement is the readiness signal, not merely the number: a
-          // launch that trusted the flag and skipped the wait would hand every
-          // CDP consumer a port before anything was listening on it.
-          late final HttpServer cdp;
-          cdp = await serveCdpJson(
-            (_) => [extensionPage, blankPage, appPage(cdp)],
-          );
-
-          final proc = FakeProcess();
-          late List<String> args;
-          final launch = ChromeSession.launch(
-            url: appUrl,
-            chromePath: '/fake/chrome',
-            options: BrowserLaunchOptions(debugPort: cdp.port),
-            startProcess: (exe, a) async {
-              args = a;
-              return proc;
-            },
-          );
-          await proc.outputAttached;
-          expect(args.first, '--remote-debugging-port=${cdp.port}');
-          proc.emitStderr(devToolsLine(cdp));
-
-          final session = await launch;
-          addTearDown(() async {
-            session.process.kill();
-            await profileDirOf(args).delete(recursive: true);
-          });
-          expect(session.cdpPort, cdp.port);
-        },
-      );
-
-      test('a browser that takes a different port fails the launch', () async {
-        // Nothing here could drive that browser: every CDP consumer dials the
-        // port that was asked for.
-        late final HttpServer cdp;
-        cdp = await serveCdpJson(
-          (_) => [extensionPage, blankPage, appPage(cdp)],
-        );
-
-        final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
-          url: appUrl,
-          chromePath: '/fake/chrome',
-          options: BrowserLaunchOptions(debugPort: cdp.port + 1),
-          startProcess: (exe, a) async {
-            args = a;
-            return proc;
-          },
-        );
-        await proc.outputAttached;
-        proc.emitStderr(devToolsLine(cdp));
-
-        await expectLater(
-          launch,
-          throwsA(
-            isA<StateError>().having(
-              (e) => e.message,
-              'message',
-              allOf(
-                contains('--web-browser-debug-port'),
-                contains('${cdp.port + 1}'),
-                contains('${cdp.port}'),
-              ),
-            ),
-          ),
-        );
-        expect(await proc.exitCode, isNotNull);
-        expect(await profileDirOf(args).exists(), isFalse);
-      });
-
-      test('a launch URL with a route still finds the app page', () async {
-        // The tab's URL and the launch URL are not the same string once the
-        // app routes, so the page is matched on origin. Here the launched URL
-        // carries a fragment the listed target does not.
-        late final HttpServer cdp;
-        cdp = await serveCdpJson(
-          (_) => [extensionPage, blankPage, appPage(cdp)],
-        );
-
-        final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
-          url: '$appUrl/#/settings',
-          chromePath: '/fake/chrome',
-          startProcess: (exe, a) async {
-            args = a;
-            return proc;
-          },
-        );
-        await proc.outputAttached;
-        proc.emitStderr(devToolsLine(cdp));
-
-        final session = await launch;
-        addTearDown(() async {
-          session.process.kill();
-          await profileDirOf(args).delete(recursive: true);
-        });
-        expect(args.last, '$appUrl/#/settings');
-        expect(session.cdpPort, cdp.port);
-      });
-    });
-  });
-
   group('AndroidDevice.launch', () {
     test('calls adb install with -r and device flag', () async {
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: 'emulator-5554',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1174,6 +1042,7 @@ void main() {
         final calls = <(String, List<String>)>[];
         final fakeLogcat = FakeProcess();
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           activityName: '.FlutterActivity',
           adbPath: 'adb',
@@ -1201,6 +1070,7 @@ void main() {
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1222,6 +1092,7 @@ void main() {
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         activityName: '.FlutterActivity',
         adbPath: 'adb',
@@ -1249,6 +1120,7 @@ void main() {
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1268,6 +1140,7 @@ void main() {
 
     test('throws on adb install failure', () async {
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1296,6 +1169,7 @@ void main() {
       // A reader who cannot see the serial the tool used has nothing to compare
       // against the one they would have typed.
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1324,6 +1198,7 @@ void main() {
       // `-d android` lets adb choose, and its message says which it chose or
       // why it would not. Quoting a serial we never passed would be a fiction.
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async => args.contains('install')
@@ -1368,6 +1243,7 @@ void main() {
         required int availableKb,
         bool alreadyInstalled = false,
       }) => AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1459,6 +1335,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         // else — a bad signature, an ABI mismatch — is passed through
         // unembellished rather than dressed up as a storage problem.
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
           runProcess: (exe, args) async => args.contains('install')
@@ -1488,6 +1365,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       FakeProcess logcat,
       ProcessResult Function() onForward,
     ) => AndroidDevice(
+      aapt2Path: 'aapt2',
       packageName: 'com.example.app',
       adbPath: 'adb',
       runProcess: (exe, args) async =>
@@ -1568,11 +1446,385 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       },
     );
 
+    // The VM service of an app on a handset or emulator comes up when the app
+    // does, and a first launch on a busy host takes minutes. Logcat does not
+    // end when the app does, so what bounds the wait is the app's process:
+    // present, the launch waits (and says so); gone, it fails at once with the
+    // log's last words.
+    group('waiting for the VM service', () {
+      /// What `am start -W` prints for a launch that completed.
+      const started =
+          'Starting: Intent { cmp=com.example.app/.MainActivity }\n'
+          'Status: ok\nLaunchState: COLD\nActivity: com.example.app/.MainActivity\n'
+          'TotalTime: 765\nWaitTime: 768\nComplete\n';
+
+      /// Launches on a device whose `pidof` answers [pids] on the n-th ask
+      /// (counting from 0), whose `am start -W` answers [amStart], and whose
+      /// forward succeeds. The launch's outcome is read off [launching] once the
+      /// fake clock has moved.
+      ({AndroidDevice device, FakeProcess logcat, List<List<String>> calls})
+      deviceWith(
+        String Function(int ask) pids, {
+        Future<ProcessResult> Function()? amStart,
+      }) {
+        final logcat = FakeProcess();
+        final calls = <List<String>>[];
+        var asked = 0;
+        final device = AndroidDevice(
+          aapt2Path: 'aapt2',
+          packageName: 'com.example.app',
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            calls.add(args);
+            if (args.contains('pidof')) {
+              return ProcessResult(0, 0, pids(asked++), '');
+            }
+            if (args.contains('forward')) {
+              return ProcessResult(0, 0, '41234\n', '');
+            }
+            if (args.contains('am') && args.contains('start')) {
+              return amStart == null
+                  ? ProcessResult(0, 0, started, '')
+                  : amStart();
+            }
+            return ProcessResult(0, 0, '', '');
+          },
+          startProcess: (exe, args) async => logcat,
+        );
+        return (device: device, logcat: logcat, calls: calls);
+      }
+
+      /// The launch of [device], its settled value or error visible as fake
+      /// time passes.
+      ({bool Function() done, Object? Function() error, Uri? Function() uri})
+      launching(AndroidDevice device) {
+        var done = false;
+        Object? error;
+        Uri? uri;
+        device
+            .launch('/path/to/app.apk')
+            .then(
+              (instance) {
+                uri = instance.vmServiceUri;
+                done = true;
+              },
+              onError: (Object e) {
+                error = e;
+                done = true;
+              },
+            );
+        return (done: () => done, error: () => error, uri: () => uri);
+      }
+
+      /// Moves the fake clock by [by]. The streams a launch cancels hand back
+      /// futures completed in the real zone, which fake time cannot run, so the
+      /// real event loop is given a turn after each step.
+      Future<void> pass(FakeAsync async, Duration by) async {
+        async.elapse(by);
+        for (var i = 0; i < 3; i++) {
+          await Future<void>.delayed(Duration.zero);
+          async.flushMicrotasks();
+        }
+      }
+
+      /// Starts [start] inside [async]'s zone.
+      T inside<T>(FakeAsync async, T Function() start) {
+        late T result;
+        async.run((_) => result = start());
+        async.flushMicrotasks();
+        return result;
+      }
+
+      Matcher stateErrorSaying(List<String> parts) => isA<StateError>().having(
+        (e) => e.message,
+        'message',
+        allOf([for (final part in parts) contains(part)]),
+      );
+
+      test('starts the activity with -W, which reports whether the launch '
+          'completed', () async {
+        final async = FakeAsync();
+        final w = deviceWith((_) => '777\n');
+        inside(async, () => launching(w.device));
+        await pass(async, const Duration(seconds: 1));
+        final start = w.calls.firstWhere(
+          (c) => c.contains('am') && c.contains('start'),
+        );
+        expect(start, contains('-W'));
+      });
+
+      test('an app that is alive and silent is waited for past 30 s, and '
+          'its announcement is taken whenever it comes', () async {
+        final async = FakeAsync();
+        final w = deviceWith((_) => '777\n');
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(minutes: 5));
+        expect(
+          launch.done(),
+          isFalse,
+          reason: 'a slow start is not a failed one: the app is running',
+        );
+
+        w.logcat.emitStdout(
+          '01-02 03:04:05.678 I/flutter (  777): The Dart VM service is '
+          'listening on http://127.0.0.1:12345/abc=/',
+        );
+        await pass(async, const Duration(seconds: 1));
+        expect(launch.error(), isNull);
+        expect(launch.uri().toString(), 'http://127.0.0.1:41234/abc=/');
+      });
+
+      test('an app whose process goes away before announcing fails the '
+          'launch at once, quoting the log', () async {
+        final async = FakeAsync();
+        // Running for the first two asks, then gone: it crashed.
+        final w = deviceWith((ask) => ask < 2 ? '777\n' : '\n');
+        final launch = inside(async, () => launching(w.device));
+        w.logcat.emitStdout(
+          '01-02 03:04:05.678 E/AndroidRuntime(  777): FATAL EXCEPTION: main',
+        );
+
+        await pass(async, const Duration(seconds: 20));
+        expect(launch.done(), isTrue);
+        expect(
+          launch.error(),
+          stateErrorSaying([
+            'com.example.app',
+            'exited before announcing a VM service',
+            'FATAL EXCEPTION',
+          ]),
+        );
+      });
+
+      // The launch reported complete, so there was a process; one that is not
+      // there at the next ask has died, and no count of asks is needed to say so.
+      test('a launch that completed and left no process fails at the next '
+          'ask', () async {
+        final async = FakeAsync();
+        final w = deviceWith((_) => '\n');
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(seconds: 3));
+        expect(launch.done(), isTrue);
+        expect(
+          launch.error(),
+          stateErrorSaying(['com.example.app', 'exited before announcing']),
+        );
+      });
+
+      // What a Pixel (Android 16) printed for an app whose `onCreate` threw,
+      // read off the device: the activity was launched, so the status is ok,
+      // and the process died before the launch could name how it started, so
+      // the state is UNKNOWN. A crash on start is not a launch that failed to
+      // start; the dead process is what says so.
+      test('a launch whose app crashed on start (Status: ok, LaunchState: '
+          'UNKNOWN) fails when its process is gone', () async {
+        final async = FakeAsync();
+        final w = deviceWith(
+          (_) => '\n',
+          amStart: () async => ProcessResult(
+            0,
+            0,
+            'Starting: Intent { cmp=com.example.app/.MainActivity }\n'
+                'Status: ok\nLaunchState: UNKNOWN (0)\n'
+                'Activity: com.example.app/.MainActivity\n'
+                'WaitTime: 694\nComplete\n',
+            '',
+          ),
+        );
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(seconds: 3));
+        expect(
+          launch.error(),
+          stateErrorSaying(['com.example.app', 'exited before announcing']),
+        );
+      });
+
+      // An exception after the engine started (`onCreate` throwing once
+      // `super.onCreate` has returned) comes after the VM service is announced,
+      // so the launch succeeds and the connection to the dead service is what
+      // fails. That failure has to say the app exited, not blame the service.
+      test('an app that announced its VM service and died is said to have '
+          'exited, with the log', () async {
+        final w = deviceWith((_) => '\n');
+        final instance = AppInstance(process: w.logcat);
+        instance.logs.add('E/AndroidRuntime( 7960): FATAL EXCEPTION: main');
+
+        final why = await w.device.whyAppExited(instance);
+
+        expect(
+          why,
+          allOf(
+            contains('com.example.app exited'),
+            contains('FATAL EXCEPTION'),
+          ),
+        );
+      });
+
+      test('an app still running is not said to have exited', () async {
+        final w = deviceWith((_) => '777\n');
+
+        expect(
+          await w.device.whyAppExited(AppInstance(process: w.logcat)),
+          isNull,
+        );
+      });
+
+      // `am start -W` returns once the first frame is drawn. An app started
+      // paused never draws one, so it has not answered, and no process is yet
+      // proof of nothing: waiting for it is the only honest thing to do.
+      test('a launch `am` has not answered is not judged by a clock', () async {
+        final async = FakeAsync();
+        final pending = Completer<ProcessResult>();
+        final w = deviceWith((_) => '\n', amStart: () => pending.future);
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(minutes: 10));
+        expect(launch.done(), isFalse);
+        expect(launch.error(), isNull);
+
+        // When `am` does answer that the launch completed, there was a process,
+        // and its absence at the next ask is a death.
+        pending.complete(ProcessResult(0, 0, started, ''));
+        // Completed from outside the fake zone, so its listeners run on the
+        // real event loop.
+        await Future<void>.delayed(Duration.zero);
+        await pass(async, const Duration(seconds: 3));
+        expect(
+          launch.error(),
+          stateErrorSaying(['com.example.app', 'exited before announcing']),
+        );
+      });
+
+      test(
+        'a launch `am` reports failed is failed, with what it said',
+        () async {
+          final async = FakeAsync();
+          final w = deviceWith(
+            (_) => '\n',
+            amStart: () async => ProcessResult(
+              0,
+              0,
+              'Starting: Intent { cmp=com.example.app/.MainActivity }\n'
+                  'Error type 3\n'
+                  'Error: Activity class {com.example.app/com.example.app.MainActivity} does not exist.\n',
+              '',
+            ),
+          );
+          final launch = inside(async, () => launching(w.device));
+
+          await pass(async, const Duration(seconds: 1));
+          expect(launch.done(), isTrue);
+          expect(
+            launch.error(),
+            stateErrorSaying(['am start', 'does not exist']),
+          );
+        },
+      );
+
+      test(
+        'a launch with a status other than ok is failed, naming it',
+        () async {
+          final async = FakeAsync();
+          final w = deviceWith(
+            (_) => '777\n',
+            amStart: () async => ProcessResult(
+              0,
+              0,
+              'Status: canceled\nLaunchState: UNKNOWN (0)\n',
+              '',
+            ),
+          );
+          final launch = inside(async, () => launching(w.device));
+
+          await pass(async, const Duration(seconds: 1));
+          expect(launch.error(), stateErrorSaying(['canceled']));
+        },
+      );
+
+      // `am` stops waiting after its own bound. That says the first frame was
+      // not drawn in time, which a loaded host does, not that nothing started.
+      test('a launch `am` gave up waiting for is not failed by that', () async {
+        final async = FakeAsync();
+        final w = deviceWith(
+          (_) => '777\n',
+          amStart: () async => ProcessResult(
+            0,
+            0,
+            'Starting: Intent { cmp=com.example.app/.MainActivity }\n'
+                'Status: timeout\nLaunchState: UNKNOWN (-1)\n'
+                'Activity: com.example.app/.MainActivity\n'
+                'WaitTime: 10170\nComplete\n',
+            '',
+          ),
+        );
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(minutes: 3));
+        expect(launch.done(), isFalse);
+      });
+
+      // The VM service of a process that was already running was announced
+      // before this launch, and nothing will announce it again.
+      test('a launch that found the app already running says why no '
+          'announcement can come', () async {
+        final async = FakeAsync();
+        final w = deviceWith(
+          (_) => '777\n',
+          amStart: () async => ProcessResult(
+            0,
+            0,
+            'Status: ok\nLaunchState: WARM\nActivity: com.example.app/.MainActivity\n',
+            '',
+          ),
+        );
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, const Duration(seconds: 1));
+        expect(
+          launch.error(),
+          stateErrorSaying(['already running', 'WARM']),
+        );
+      });
+
+      test('a release app has no VM service to wait for', () async {
+        final async = FakeAsync();
+        final w = deviceWith((_) => '777\n');
+        w.device.buildMode = BuildMode.release;
+        final launch = inside(async, () => launching(w.device));
+
+        await pass(async, Duration.zero);
+        expect(launch.done(), isTrue, reason: 'nothing is announced');
+        expect(launch.error(), isNull);
+        expect(launch.uri(), isNull);
+      });
+
+      test(
+        'a release app whose launch failed is failed all the same',
+        () async {
+          final async = FakeAsync();
+          final w = deviceWith(
+            (_) => '777\n',
+            amStart: () async =>
+                ProcessResult(0, 0, 'Error: Activity not started\n', ''),
+          );
+          w.device.buildMode = BuildMode.release;
+          final launch = inside(async, () => launching(w.device));
+
+          await pass(async, const Duration(seconds: 1));
+          expect(launch.error(), stateErrorSaying(['not started']));
+        },
+      );
+    });
+
     test('stop calls force-stop when packageName is set', () async {
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1601,6 +1853,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     }) {
       final calls = <List<String>>[];
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -1694,17 +1947,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(await namesFor(WindowsDevice()), isEmpty);
     });
 
-    test('an Android run needs adb, plus aapt2 to read the APK', () async {
-      expect(await namesFor(AndroidDevice()), ['adb', 'aapt2']);
-    });
-
-    test('aapt2 is not needed when the package is already known', () async {
-      expect(await namesFor(AndroidDevice(packageName: 'com.example.app')), [
-        'adb',
-      ]);
-    });
-
-    test('an explicitly located tool is not searched for', () async {
+    // Its adb and aapt2 are the workspace's SDK's, built before the device
+    // exists, so there is nothing on the host to look for.
+    test('an Android run needs nothing installed', () async {
       expect(
         await namesFor(
           AndroidDevice(adbPath: '/sdk/adb', aapt2Path: '/sdk/aapt2'),
@@ -1944,6 +2189,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       required FakeProcess logcat,
     }) {
       return AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -2111,6 +2357,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -2438,10 +2685,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
         startProcess: start,
       ),
-      'LinuxDevice': (start) => LinuxDevice(
-        runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
-        startProcess: start,
-      ),
+      'LinuxDevice': (start) => LinuxDevice(startProcess: start),
       // Staged inside `bundleRoot` so the tearDown takes it: these tests never
       // reach `stop()`, and the default staging directory lands in the system
       // temp root.
@@ -2555,6 +2799,19 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
           await device.stop(instance);
           expect(instance.logs.isClosed, isTrue);
+        });
+
+        test('stop() stops reading the process\'s pipes', () async {
+          // An app can leave a helper behind holding the write ends of its
+          // output pipes; a reader waiting for their end-of-file would keep
+          // this tool's process from exiting after the run is over.
+          final (instance, proc) = await launchWith(build);
+          final device = build((exe, args) async => FakeProcess());
+
+          await device.stop(instance);
+
+          expect(proc.stdoutHasListener, isFalse);
+          expect(proc.stderrHasListener, isFalse);
         });
       });
     });
@@ -2821,13 +3078,16 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('an iOS Simulator launch attaches to the app it launched', () async {
+      final sim = FakeSimulatorLog();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => args.contains('launch')
-            ? ProcessResult(0, 0, 'com.example.test: 1234\n', '')
-            : ProcessResult(0, 0, '', ''),
-        startProcess: (exe, args) async {
+        runProcess: sim.run(
+          (exe, args) async => args.contains('launch')
+              ? ProcessResult(0, 0, 'com.example.test: 1234\n', '')
+              : ProcessResult(0, 0, '', ''),
+        ),
+        startProcess: sim.start((exe, args) async {
           final p = FakeProcess();
           if (args.contains('ndjson')) {
             unawaited(
@@ -2838,18 +3098,65 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
             );
           }
           return p;
-        },
+        }),
       );
       final instance = await device.launch('/path/to/MyApp.app');
       expect(instance.vmServiceUri, Uri.parse('http://127.0.0.1:2222/k=/'));
     });
 
-    test('an iOS Simulator launch that reports no pid fails', () async {
+    // The race this closes: `log stream` delivers only what is logged after
+    // it attaches, and its banner is no proof that it has. Here the discovery
+    // stream attaches only after the launch's first marker: an app launched
+    // then announces its VM service into nothing, and the run waits for good
+    // on an app that is up.
+    test('an iOS Simulator app is launched only once every log stream has '
+        'shown it is listening', () async {
+      final streams = <FakeProcess>[];
+      var markersLogged = 0;
+      // A stream sees what is logged once it is attached, and nothing before.
+      bool attached(int stream) => stream > 0 || markersLogged >= 2;
+      void log(String line) {
+        for (final (i, s) in streams.indexed) {
+          if (attached(i)) s.emitStdout(line);
+        }
+      }
+
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
-        startProcess: (exe, args) async => FakeProcess(),
+        runProcess: (exe, args) async {
+          if (args.contains('syslog')) {
+            markersLogged++;
+            // In both styles: the output stream is `--style json`.
+            log(json.encode({'eventMessage': args.last}));
+            log('  "eventMessage" : ${json.encode(args.last)},');
+          } else if (args.contains('launch')) {
+            log(ndjson(1234, announce(2222)));
+            return ProcessResult(0, 0, 'com.example.test: 1234\n', '');
+          }
+          return ProcessResult(0, 0, '', '');
+        },
+        startProcess: (exe, args) async {
+          final p = FakeProcess();
+          streams.add(p);
+          Timer.run(() => p.emitStdout('Filtering the log data using "..."'));
+          return p;
+        },
+      );
+
+      final instance = await device.launch('/path/to/MyApp.app');
+
+      expect(markersLogged, greaterThanOrEqualTo(2));
+      expect(instance.vmServiceUri, Uri.parse('http://127.0.0.1:2222/k=/'));
+    });
+
+    test('an iOS Simulator launch that reports no pid fails', () async {
+      final sim = FakeSimulatorLog();
+      final device = IOSSimulatorDevice(
+        udid: 'TEST-UDID',
+        bundleId: 'com.example.test',
+        runProcess: sim.run((exe, args) async => ProcessResult(0, 0, '', '')),
+        startProcess: sim.start((exe, args) async => FakeProcess()),
       );
       await expectLater(
         device.launch('/path/to/MyApp.app'),
@@ -2867,6 +3174,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final logcat = FakeProcess();
       final forwards = <String>[];
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
         runProcess: (exe, args) async {
@@ -2893,6 +3201,102 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(forwards, ['tcp:2222']);
       expect(instance.vmServiceUri, Uri.parse('http://127.0.0.1:40001/k=/'));
     });
+
+    // `-T 1` starts at whatever is last in the log when logcat gets round to
+    // reading it, and the app is launched alongside: on a busy host the app
+    // can announce its VM service first, and the run then waits for good. The
+    // log is read instead from the last record before the launch, which the
+    // device keeps, so nothing logged after it can be missed.
+    test(
+      'an Android launch reads the log from before the app started',
+      () async {
+        final calls = <List<String>>[];
+        final device = AndroidDevice(
+          aapt2Path: 'aapt2',
+          packageName: 'com.example.app',
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            calls.add(args);
+            if (args.contains('logcat') && args.contains('-t')) {
+              return ProcessResult(
+                0,
+                0,
+                '--------- beginning of main\n'
+                    '11-06 15:31:53.862 I/adbd    ( 1418): adbd service '
+                    'requested\n',
+                '',
+              );
+            }
+            return adbOk(args);
+          },
+          startProcess: (exe, args) async {
+            calls.add(args);
+            return FakeProcess()..complete(0);
+          },
+        );
+        await device.launch('/path/to/app.apk');
+
+        final last = calls.indexWhere((c) => c.contains('-t'));
+        final follow = calls.indexWhere(
+          (c) => c.contains('logcat') && !c.contains('-t'),
+        );
+        final start = calls.indexWhere((c) => c.contains('start'));
+        expect(last, isNonNegative);
+        expect(last, lessThan(follow));
+        expect(follow, lessThan(start));
+        expect(calls[follow], containsAllInOrder(['-T', '11-06 15:31:53.862']));
+      },
+    );
+
+    test('an Android launch on an empty log reads all of it', () async {
+      final calls = <List<String>>[];
+      final device = AndroidDevice(
+        aapt2Path: 'aapt2',
+        packageName: 'com.example.app',
+        adbPath: 'adb',
+        runProcess: (exe, args) async {
+          calls.add(args);
+          return adbOk(args);
+        },
+        startProcess: (exe, args) async {
+          calls.add(args);
+          return FakeProcess()..complete(0);
+        },
+      );
+      await device.launch('/path/to/app.apk');
+      final follow = calls.firstWhere(
+        (c) => c.contains('logcat') && !c.contains('-t'),
+      );
+      expect(follow, isNot(contains('-T')));
+    });
+
+    test(
+      'an Android launch that cannot read the log fails, saying so',
+      () async {
+        final device = AndroidDevice(
+          aapt2Path: 'aapt2',
+          packageName: 'com.example.app',
+          adbPath: 'adb',
+          runProcess: (exe, args) async {
+            if (args.contains('logcat')) {
+              return ProcessResult(0, 1, '', 'error: closed');
+            }
+            return adbOk(args);
+          },
+          startProcess: (exe, args) async => FakeProcess(),
+        );
+        await expectLater(
+          device.launch('/path/to/app.apk'),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('logcat'), contains('error: closed')),
+            ),
+          ),
+        );
+      },
+    );
   });
 
   group('iOS Simulator log capture', () {
@@ -2947,16 +3351,18 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
     });
 
-    test('launch spawns a second log stream for app output', () async {
+    test('launch spawns separate log streams for app output and for how '
+        'the app ends', () async {
       final started = <(String, List<String>)>[];
+      final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => simctlOk(args),
-        startProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async => simctlOk(args)),
+        startProcess: sim.start((exe, args) async {
           started.add((exe, args));
-          return FakeProcess()..complete(0);
-        },
+          return FakeProcess();
+        }),
       );
 
       await device.launch('/path/to/MyApp.app');
@@ -2964,8 +3370,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final logStreams = started.where((c) => c.$2.contains('stream')).toList();
       expect(
         logStreams,
-        hasLength(2),
-        reason: 'one narrow stream for discovery, one for app output',
+        hasLength(3),
+        reason:
+            'one narrow stream for discovery, one for app output, one for '
+            "the simulator's record of the app's end",
       );
 
       // Discovery keeps its content match; output gets the process-scoped
@@ -2979,27 +3387,32 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         logStreams.any((c) => c.$2.any((a) => a.contains('processImagePath'))),
         isTrue,
       );
+      expect(
+        logStreams.any(
+          (c) => c.$2.any(
+            (a) =>
+                a.contains('termination reported by launchd') &&
+                a.contains('com.example.test'),
+          ),
+        ),
+        isTrue,
+      );
     });
 
     test('--start-paused is passed to the app, after the bundle id', () async {
       // simctl treats everything after the bundle id as the app's argv, which
       // is where the iOS embedder reads engine switches from.
       final runs = <(String, List<String>)>[];
-      final spawned = <FakeProcess>[];
+      // Ending the discovery stream is what lets launch return.
+      final sim = FakeSimulatorLog(endStreamsAtLaunch: true);
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async {
           runs.add((exe, args));
           return simctlOk(args);
-        },
-        startProcess: (exe, args) async {
-          final p = FakeProcess();
-          spawned.add(p);
-          // Ending the discovery stream is what lets launch return.
-          unawaited(p.outputAttached.then((_) => p.complete(0)));
-          return p;
-        },
+        }),
+        startProcess: sim.start((exe, args) async => FakeProcess()),
       )..startPaused = true;
 
       await device.launch('/path/to/MyApp.app');
@@ -3018,18 +3431,19 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // launch call — so the test has to wait for both to exist *and* both to
       // be listening before it emits anything into these broadcast streams.
       final bothSpawned = Completer<void>();
+      final sim = FakeSimulatorLog();
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
-        runProcess: (exe, args) async => simctlOk(args),
-        startProcess: (exe, args) async {
+        runProcess: sim.run((exe, args) async => simctlOk(args)),
+        startProcess: sim.start((exe, args) async {
           final p = FakeProcess();
           spawned.add(p);
           if (spawned.length == 2 && !bothSpawned.isCompleted) {
             bothSpawned.complete();
           }
           return p;
-        },
+        }),
       );
 
       final pending = device.launch('/path/to/MyApp.app');
@@ -3179,22 +3593,105 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
   });
 
   group('LinuxDevice.screenshot', () {
-    test('uses scrot when no vmClient', () async {
-      final calls = <(String, List<String>)>[];
+    test('captures the X display itself when no vmClient', () async {
+      final calls = <(String, Map<String, String>)>[];
 
       final device = LinuxDevice(
-        runProcess: (exe, args) async {
-          calls.add((exe, args));
-          return ProcessResult(0, 0, '', '');
+        captureX11: (outputPath, {required environment}) async {
+          calls.add((outputPath, environment));
         },
-      );
+      )..environment = {'DISPLAY': ':42'};
 
       final instance = AppInstance(process: FakeProcess());
       await device.screenshot(instance, '/tmp/linux.png');
 
       expect(calls, hasLength(1));
-      expect(calls[0].$1, 'scrot');
-      expect(calls[0].$2, ['/tmp/linux.png']);
+      expect(calls[0].$1, '/tmp/linux.png');
+      expect(calls[0].$2, {'DISPLAY': ':42'});
+    });
+
+    test(
+      'captures the display of this process without an environment',
+      () async {
+        Map<String, String>? seen;
+        final device = LinuxDevice(
+          captureX11: (outputPath, {required environment}) async {
+            seen = environment;
+          },
+        );
+
+        await device.screenshot(
+          AppInstance(process: FakeProcess()),
+          '/tmp/l.png',
+        );
+
+        expect(seen, Platform.environment);
+      },
+    );
+
+    test('a capture that fails is the error of the screenshot', () async {
+      final device = LinuxDevice(
+        captureX11: (outputPath, {required environment}) async =>
+            throw StateError('DISPLAY is not set'),
+      );
+
+      await expectLater(
+        device.screenshot(AppInstance(process: FakeProcess()), '/tmp/l.png'),
+        throwsA(isA<StateError>()),
+      );
+    });
+  });
+
+  group('LinuxDevice.launch', () {
+    // A test that Bazel ends while the app is starting runs its teardown before
+    // `launch` has returned an instance, so the device hears of the app only
+    // through [Device.abandonLaunch]. The app is a window on a display: it may
+    // not outlive the run.
+    test('abandoning a launch in flight stops the app', () async {
+      final started = Completer<FakeProcess>();
+      final device = LinuxDevice(
+        // The app starts and never announces a VM service.
+        startProcess: (exe, args) async {
+          final proc = FakeProcess();
+          started.complete(proc);
+          return proc;
+        },
+      );
+      unawaited(device.launch('/bundle/app').then((_) {}, onError: (_) {}));
+      final app = await started.future;
+      await app.outputAttached;
+
+      await device.abandonLaunch();
+
+      expect(app.killed, isTrue);
+    });
+
+    test('abandoning a launch that returned leaves the app to stop', () async {
+      final app = FakeProcess();
+      final device = LinuxDevice(startProcess: (exe, args) async => app);
+      final launch = device.launch('/bundle/app');
+      await app.outputAttached;
+      app.emitStdout(_vmServiceLine);
+      await launch;
+
+      await device.abandonLaunch();
+
+      expect(app.killed, isFalse);
+    });
+
+    test('an app given an environment runs in it, with the engine switches '
+        'of the launch, and nothing else of the host\'s', () {
+      final device = LinuxDevice()
+        ..environment = const {'DISPLAY': ':4', 'HOME': '/h'}
+        ..startPaused = true;
+
+      final env = device.launchEnvironment;
+
+      expect(env['DISPLAY'], ':4');
+      expect(env['HOME'], '/h');
+      expect(env['FLUTTER_VM_SERVICE_PORT'], '0');
+      expect(env['FLUTTER_ENGINE_SWITCH_1'], 'start-paused=true');
+      expect(env.keys, isNot(contains('PATH')));
     });
   });
 
@@ -3308,6 +3805,47 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       expect(File(launched).existsSync(), isFalse);
     });
+
+    // A test that Bazel ends while the app is starting runs its teardown before
+    // `launch` has returned an instance, so the device hears of the app only
+    // through [Device.abandonLaunch]. The app is a window on the desktop, and
+    // its copy of the bundle is held open by it: neither may outlive the run.
+    test(
+      'abandoning a launch in flight stops the app and removes its copy',
+      () async {
+        final started = Completer<FakeProcess>();
+        final launched = <String>[];
+        final device = WindowsDevice(
+          makeStagingDir: () =>
+              Directory(p.join(sandbox.path, 'staged'))..createSync(),
+          // The app starts and never announces a VM service.
+          startProcess: (exe, args) async {
+            launched.add(exe);
+            final proc = FakeProcess();
+            started.complete(proc);
+            return proc;
+          },
+        );
+        unawaited(device.launch(bundle.path));
+        final app = await started.future;
+        await app.outputAttached;
+
+        await device.abandonLaunch();
+
+        expect(app.killed, isTrue);
+        expect(File(launched.single).existsSync(), isFalse);
+      },
+    );
+
+    test('abandoning a launch that returned leaves the app to stop', () async {
+      final h = makeDevice();
+      await h.device.launch(bundle.path);
+
+      await h.device.abandonLaunch();
+
+      expect(h.procs.single.killed, isFalse);
+      expect(File(h.launched.single).existsSync(), isTrue);
+    });
   });
 
   group('WindowsDevice.screenshot', () {
@@ -3344,6 +3882,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final calls = <(String, List<String>)>[];
 
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         adbPath: 'adb',
         startScreenshotProcess: (exe, args) async {
@@ -3374,6 +3913,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         final wedged = FakeProcess();
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           deviceId: '58051JEBF01271',
           adbPath: 'adb',
           startScreenshotProcess: (exe, args) async => wedged,
@@ -3413,6 +3953,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       /// it is handed — the emulator names the file itself, so a caller can
       /// only look for what turned up.
       AndroidDevice emulator(List<String> files) => AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: 'emulator-5554',
         adbPath: 'adb',
         startScreenshotProcess: (exe, args) async {
@@ -3440,6 +3981,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       test('passes the console command a directory of its own', () async {
         final calls = <List<String>>[];
         final device = AndroidDevice(
+          aapt2Path: 'aapt2',
           deviceId: 'emulator-5554',
           adbPath: 'adb',
           startScreenshotProcess: (exe, args) async {
@@ -3511,6 +4053,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       const budget = Duration(milliseconds: 500);
       final started = <FakeProcess>[];
       final device = AndroidDevice(
+        aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         adbPath: 'adb',
         startScreenshotProcess: (exe, args) async {
@@ -3554,46 +4097,339 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
   });
 
   group('IOSSimulatorDevice.screenshot', () {
-    test('calls simctl io screenshot', () async {
-      final calls = <(String, List<String>)>[];
+    final instance = AppInstance(process: FakeProcess());
 
+    test('captures the one screen with devicectl', () async {
+      final devicectl = fakeDevicectl(
+        () => [display('LCD', uniqueId: 'SCREEN-1', primary: true)],
+      );
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
-        runProcess: (exe, args) async {
-          calls.add((exe, args));
-          return ProcessResult(0, 0, '', '');
-        },
+        runProcess: devicectl.run,
       );
 
-      final instance = AppInstance(process: FakeProcess());
       await device.screenshot(instance, '/tmp/ios.png');
 
-      expect(calls, hasLength(1));
-      expect(calls[0].$1, 'xcrun');
-      expect(calls[0].$2, [
-        'simctl',
-        'io',
-        'TEST-UDID',
+      expect(devicectl.calls, hasLength(2));
+      expect(devicectl.calls[0].take(5), [
+        'xcrun',
+        'devicectl',
+        'device',
+        'info',
+        'displays',
+      ]);
+      expect(devicectl.calls[0], containsAllInOrder(['--device', 'TEST-UDID']));
+      expect(devicectl.calls[1], [
+        'xcrun',
+        'devicectl',
+        'device',
+        'capture',
         'screenshot',
+        '--device',
+        'TEST-UDID',
+        '--destination',
         '/tmp/ios.png',
+        '--display-unique-id',
+        'SCREEN-1',
+        '--timeout',
+        '30',
+        '--quiet',
       ]);
     });
 
-    test('throws on simctl screenshot failure', () async {
+    test('on a two-screen simulator captures the active screen', () async {
+      var open = false;
+      final devicectl = fakeDevicectl(
+        () => [
+          display(
+            'LCD',
+            uniqueId: 'INNER',
+            displayId: 1,
+            active: !open,
+            primary: true,
+          ),
+          display('LCD-1', uniqueId: 'OUTER', displayId: 3, active: open),
+        ],
+      );
+      final device = IOSSimulatorDevice(
+        udid: 'DUO',
+        runProcess: devicectl.run,
+      );
+
+      await device.screenshot(instance, '/tmp/folded.png');
+      open = true;
+      await device.screenshot(instance, '/tmp/open.png');
+
+      // Looked up for each screenshot: the posture changed between them.
+      expect(
+        devicectl.calls
+            .where((c) => c.contains('capture'))
+            .map((c) => c[c.indexOf('--display-unique-id') + 1]),
+        ['INNER', 'OUTER'],
+      );
+    });
+
+    test('--screen names a screen, by unique id, displayId or name', () async {
+      final devicectl = fakeDevicectl(
+        () => [
+          display('LCD', uniqueId: 'INNER', displayId: 1, active: true),
+          display('LCD-1', uniqueId: 'OUTER', displayId: 3, active: false),
+        ],
+      );
+      final device = IOSSimulatorDevice(
+        udid: 'DUO',
+        runProcess: devicectl.run,
+      );
+
+      for (final name in ['OUTER', 'displayId:3', 'LCD-1']) {
+        await device.screenshot(instance, '/tmp/x.png', screen: name);
+      }
+
+      expect(
+        devicectl.calls
+            .where((c) => c.contains('capture'))
+            .map((c) => c[c.indexOf('--display-unique-id') + 1]),
+        ['OUTER', 'OUTER', 'OUTER'],
+      );
+    });
+
+    // Time in the tests below is the test's: `fakeAsync` moves it only when
+    // `elapse` is called, so what has finished by an exact moment, which step
+    // was waiting, how many times the device was asked and how many seconds
+    // devicectl was handed are all plain assertions. The listing's own file
+    // calls are synchronous so it can run here.
+    group('under fake time', () {
+      /// A devicectl that takes [list] to list the screens and [capture] to
+      /// capture, and records the `--timeout` it was handed by each.
+      ({ProcessRunSync run, List<int> listTimeouts, List<int> captureTimeouts})
+      slow({
+        Duration list = Duration.zero,
+        Duration capture = Duration.zero,
+        bool Function(int ask)? reported,
+      }) {
+        final listTimeouts = <int>[];
+        final captureTimeouts = <int>[];
+        return (
+          listTimeouts: listTimeouts,
+          captureTimeouts: captureTimeouts,
+          run: (exe, args) async {
+            final timeout = int.parse(args[args.indexOf('--timeout') + 1]);
+            if (args.contains('displays')) {
+              listTimeouts.add(timeout);
+              await Future<void>.delayed(list);
+              final known = reported?.call(listTimeouts.length) ?? true;
+              return displaysAnswer(args, [
+                display(
+                  'LCD',
+                  uniqueId: 'INNER',
+                  active: known ? true : null,
+                  primary: true,
+                ),
+                display(
+                  'LCD-1',
+                  uniqueId: 'OUTER',
+                  displayId: 3,
+                  active: known ? false : null,
+                ),
+              ]);
+            }
+            captureTimeouts.add(timeout);
+            await Future<void>.delayed(capture);
+            return ProcessResult(0, 0, '', '');
+          },
+        );
+      }
+
+      const ms = Duration(milliseconds: 1);
+
+      test('waits out a posture not yet reported, then captures', () {
+        fakeAsync((async) {
+          final devicectl = slow(reported: (ask) => ask > 2);
+          final device = IOSSimulatorDevice(
+            udid: 'DUO',
+            runProcess: devicectl.run,
+          )..screenPollInterval = ms * 10;
+
+          // Asked at 0, 10 and 20 ms; the third answer has a posture.
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 19);
+          expect(outcome.done, isFalse);
+          expect(devicectl.listTimeouts, hasLength(2));
+          async.elapse(ms);
+
+          expect(outcome.done, isTrue);
+          expect(outcome.error, isNull);
+          expect(devicectl.listTimeouts, hasLength(3));
+          expect(devicectl.captureTimeouts, hasLength(1));
+        });
+      });
+
+      test('a posture never reported ends at the deadline, having asked '
+          'every interval', () {
+        fakeAsync((async) {
+          // Each listing takes 5 ms and the interval is 20: asks start at
+          // 0, 25, 50 … The tenth ends at 230 ms with 20 ms left, which is not
+          // enough for another interval, so that is where it gives up.
+          final devicectl = slow(list: ms * 5, reported: (_) => false);
+          final device =
+              IOSSimulatorDevice(
+                  udid: 'DUO',
+                  runProcess: devicectl.run,
+                )
+                ..screenshotBound = ms * 250
+                ..screenPollInterval = ms * 20;
+
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 229);
+          expect(outcome.done, isFalse);
+          async.elapse(ms);
+
+          expect(outcome.done, isTrue);
+          expect(
+            outcome.error,
+            isA<ScreenSelectionException>().having(
+              (e) => e.message,
+              'message',
+              contains('waiting for the device to report which of its screens'),
+            ),
+          );
+          expect(devicectl.listTimeouts, hasLength(10));
+          expect(devicectl.captureTimeouts, isEmpty);
+        });
+      });
+
+      test('a capture gets what the listing left and runs out in it', () {
+        fakeAsync((async) {
+          final devicectl = slow(list: ms * 150, capture: ms * 500);
+          final device = IOSSimulatorDevice(
+            udid: 'DUO',
+            runProcess: devicectl.run,
+          )..screenshotBound = ms * 300;
+
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 299);
+          expect(outcome.done, isFalse);
+          async.elapse(ms);
+
+          // 300 ms in all: not the 150 for the listing and then 300 more.
+          expect(outcome.done, isTrue);
+          expect(
+            outcome.error,
+            isA<ScreenshotTimeout>().having(
+              (e) => e.step,
+              'step',
+              'capturing LCD of iOS Simulator (DUO)',
+            ),
+          );
+        });
+      });
+
+      test('a listing that outlasts the deadline is the step that ran out', () {
+        fakeAsync((async) {
+          final devicectl = slow(list: const Duration(seconds: 2));
+          final device = IOSSimulatorDevice(
+            udid: 'DUO',
+            runProcess: devicectl.run,
+          )..screenshotBound = ms * 100;
+
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 99);
+          expect(outcome.done, isFalse);
+          async.elapse(ms);
+
+          expect(
+            outcome.error,
+            isA<ScreenshotTimeout>().having(
+              (e) => e.step,
+              'step',
+              'listing the screens of iOS Simulator (DUO)',
+            ),
+          );
+          expect(devicectl.captureTimeouts, isEmpty);
+        });
+      });
+
+      test('devicectl is handed the seconds that are left', () {
+        fakeAsync((async) {
+          final devicectl = slow(list: ms * 1200);
+          final device = IOSSimulatorDevice(
+            udid: 'DUO',
+            runProcess: devicectl.run,
+          )..screenshotBound = const Duration(seconds: 3);
+
+          final outcome = track(device.screenshot(instance, '/tmp/ios.png'));
+          async.elapse(ms * 1200);
+
+          // 3 s for the listing; then 3 s less its 1.2 s, rounded up.
+          expect(outcome.done, isTrue);
+          expect(outcome.error, isNull);
+          expect(devicectl.listTimeouts, [3]);
+          expect(devicectl.captureTimeouts, [2]);
+        });
+      });
+    });
+
+    test('a simulator devicectl does not know names the requirement', () async {
+      final device = IOSSimulatorDevice(
+        udid: 'SIM-1',
+        runProcess: (exe, args) async => ProcessResult(
+          0,
+          1,
+          '',
+          'ERROR: The specified device was not found. (Name: SIM-1)',
+        ),
+      );
+      await expectLater(
+        device.screenshot(instance, '/tmp/ios.png'),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('devicectl does not know the simulator SIM-1'),
+              contains('Xcode 27 or later'),
+              contains('devicectl list devices'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('lists the screens it has', () async {
+      final devicectl = fakeDevicectl(
+        () => [display('LCD', uniqueId: 'SCREEN-1', primary: true)],
+      );
+      final device = IOSSimulatorDevice(
+        udid: 'TEST-UDID',
+        runProcess: devicectl.run,
+      );
+      final screens = await device.screens();
+      expect(screens.single.id, 'SCREEN-1');
+      expect(screens.single.name, 'LCD');
+    });
+
+    test('throws on a devicectl capture failure', () async {
       final device = IOSSimulatorDevice(
         udid: 'TEST-UDID',
         runProcess: (exe, args) async {
-          if ((args as List).contains('screenshot')) {
-            return ProcessResult(0, 1, '', 'SCREENSHOT_FAILED');
+          if (args.contains('displays')) {
+            return displaysAnswer(args, [
+              display('LCD', uniqueId: 'SCREEN-1', primary: true),
+            ]);
           }
-          return ProcessResult(0, 0, '', '');
+          return ProcessResult(0, 1, '', 'SCREENSHOT_FAILED');
         },
       );
 
-      final instance = AppInstance(process: FakeProcess());
       expect(
         () => device.screenshot(instance, '/tmp/shot.png'),
-        throwsStateError,
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('SCREENSHOT_FAILED'),
+          ),
+        ),
       );
     });
   });
@@ -3679,7 +4515,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       bool consoleExitsAtLaunch = false,
       String? installJson = installedJson,
       List<Map<String, Object?>>? runningProcesses,
-      bool forwardBinds = true,
+      TcpProbe? forwardProbe,
       FakeProcess? devicectlProcess,
       FakeProcess? lldbProcess,
       FakeProcess? iproxyProcess,
@@ -3709,16 +4545,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // would stall `close()` in tearDown.
       forward.listen((socket) => socket.destroy());
       final forwardPort = forward.port;
-      if (forwardBinds) {
-        sockets.add(forward);
-      } else {
-        // A forward that never binds — what a launch sees when iproxy cannot
-        // take the port. Closing the listener the OS just handed out is the
-        // way to name a port with nothing behind it; if something else claims
-        // it in the gap the launch succeeds and the test fails loudly, rather
-        // than passing on a wait that never happened.
-        await forward.close();
-      }
+      sockets.add(forward);
 
       final mdns = MdnsVmServiceDiscovery(
         clientFactory: FakeMDnsClientFactory(
@@ -3737,6 +4564,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
         mdns: mdns,
+        forwardProbe: forwardProbe,
         runProcess: (exe, args) async {
           runs.add([exe, ...args.cast<String>()]);
           onRun?.call(exe, args.cast<String>());
@@ -3990,42 +4818,56 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // A forward that never binds is the likeliest way for a wired launch to
     // fail this late, and it is the one failure that happens *after* all three
     // helpers are up — so every one of them has to be reaped.
-    test('a wired launch whose forward never binds kills every helper', () async {
-      final devicectl = FakeProcess();
-      final lldb = FakeProcess();
-      final iproxy = FakeProcess();
+    test(
+      'a wired launch whose forward never binds kills every helper',
+      () async {
+        final devicectl = FakeProcess();
+        final lldb = FakeProcess();
+        final iproxy = FakeProcess();
 
-      // Real elapsed time: `waitForLocalTcpPort` polls its 10s budget out, the
-      // same wait a user sits through. There is no shorter failure past iproxy
-      // — the lldb commands ahead of it wait 30s each.
-      await expectLater(
-        launchFaked(
-          forwardBinds: false,
-          devicectlProcess: devicectl,
-          lldbProcess: lldb,
-          iproxyProcess: iproxy,
-        ),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            contains('iproxy forward for the iOS VM service'),
+        // The wait's 10s budget runs on a clock the refused probe moves, so the
+        // budget runs out on the first refusal and the test spends no time on
+        // it. There is no shorter failure past iproxy — the lldb commands ahead
+        // of it wait 30s each.
+        var now = DateTime(2026);
+        final probed = <int>[];
+        await expectLater(
+          withClock(
+            Clock(() => now),
+            () => launchFaked(
+              forwardProbe: (port) async {
+                probed.add(port);
+                now = now.add(const Duration(seconds: 11));
+                throw const SocketException('Connection refused');
+              },
+              devicectlProcess: devicectl,
+              lldbProcess: lldb,
+              iproxyProcess: iproxy,
+            ),
           ),
-        ),
-      );
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('iproxy forward for the iOS VM service'),
+            ),
+          ),
+        );
 
-      expect(
-        iproxy.killed,
-        isTrue,
-        reason: 'a surviving iproxy holds its host port indefinitely',
-      );
-      expect(
-        lldb.killed,
-        isTrue,
-        reason: 'lldb holds the app itself, stopped, on the device',
-      );
-      expect(devicectl.killed, isTrue);
-    });
+        expect(probed, hasLength(1));
+        expect(
+          iproxy.killed,
+          isTrue,
+          reason: 'a surviving iproxy holds its host port indefinitely',
+        );
+        expect(
+          lldb.killed,
+          isTrue,
+          reason: 'lldb holds the app itself, stopped, on the device',
+        );
+        expect(devicectl.killed, isTrue);
+      },
+    );
 
     test('a launch that fails after resuming the app terminates it', () async {
       // Discovery comes after the resume, so the app is up and running on the
@@ -4321,6 +5163,69 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         expect(reason.isError, isTrue);
       },
     );
+
+    group('an app that announced its VM service and then died', () {
+      test(
+        'is said to have exited, with what the debugger last said',
+        () async {
+          final processes = [runningProcess(pid: 4242)];
+          final r = await launchFaked(runningProcesses: processes);
+          emitLldbStop(r.lldb, 'EXC_BAD_ACCESS (code=1, address=0x0)');
+          await pumpEventQueue();
+          processes.clear();
+
+          final why = await r.device.whyAppExited(r.instance);
+
+          expect(
+            why,
+            allOf(
+              contains('com.example.test (pid 4242)'),
+              contains('exited after announcing its VM service'),
+              contains('EXC_BAD_ACCESS (code=1'),
+            ),
+          );
+        },
+      );
+
+      test('is not said to have exited while its process is listed', () async {
+        final r = await launchFaked();
+
+        expect(await r.device.whyAppExited(r.instance), isNull);
+      });
+
+      // The listing is the platform's word on what runs on the phone, so a
+      // different process under the pid (the pid reused) is no evidence for
+      // the app: it is gone.
+      test('is gone when its pid now belongs to another process', () async {
+        final processes = [runningProcess(pid: 4242)];
+        final r = await launchFaked(runningProcesses: processes);
+        processes
+          ..clear()
+          ..add(
+            runningProcess(pid: 4242, executable: 'file:///usr/libexec/other'),
+          );
+
+        expect(
+          await r.device.whyAppExited(r.instance),
+          contains('exited after announcing'),
+        );
+      });
+
+      // A phone that cannot be asked has not said the app is gone.
+      test('is not declared gone when the phone cannot be asked', () async {
+        var asking = false;
+        final r = await launchFaked(
+          onRun: (exe, args) {
+            if (asking && args.contains('processes')) {
+              throw ProcessException(exe, args, 'device unreachable');
+            }
+          },
+        );
+        asking = true;
+
+        expect(await r.device.whyAppExited(r.instance), isNull);
+      });
+    });
 
     // The session lives as long as lldb, and lldb stays at its prompt after
     // the app it debugs exits. An app closed on the phone, or killed by the
@@ -5002,19 +5907,15 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
   group('IOSDevice.screenshot', () {
     test('captures with devicectl, addressed by the UDID', () async {
-      final calls = <List<String>>[];
-      final device = IOSDevice(
-        udid: 'TEST-UDID',
-        runProcess: (exe, args) async {
-          calls.add([exe, ...args.cast<String>()]);
-          return ProcessResult(0, 0, '', '');
-        },
+      final devicectl = fakeDevicectl(
+        () => [display('LCD', uniqueId: 'SCREEN-1', primary: true)],
       );
+      final device = IOSDevice(udid: 'TEST-UDID', runProcess: devicectl.run);
       await device.screenshot(
         AppInstance(process: FakeProcess()),
         '/tmp/ios.png',
       );
-      expect(calls.single, [
+      expect(devicectl.calls.last, [
         'xcrun',
         'devicectl',
         'device',
@@ -5024,13 +5925,86 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         'TEST-UDID',
         '--destination',
         '/tmp/ios.png',
+        '--display-unique-id',
+        'SCREEN-1',
         '--timeout',
         '30',
         '--quiet',
       ]);
     });
 
-    test('names Xcode 27 when devicectl lacks device capture', () async {
+    // A wired iPhone reports its own screen, which has no unique id, and a
+    // wireless display beside it. The built-in one is the default, and is
+    // captured by naming no id, which devicectl documents as the primary.
+    test('takes the built-in screen over a wireless display', () async {
+      final devicectl = fakeDevicectl(
+        () => [
+          display('LCD', primary: true),
+          display(
+            'Wireless',
+            uniqueId: 'WIRELESS',
+            displayId: 2,
+            type: 'wireless',
+          ),
+        ],
+      );
+      final device = IOSDevice(udid: 'TEST-UDID', runProcess: devicectl.run);
+      await device.screenshot(
+        AppInstance(process: FakeProcess()),
+        '/tmp/ios.png',
+      );
+      expect(devicectl.calls.last, isNot(contains('--display-unique-id')));
+    });
+
+    test('a wireless display is captured when it is named', () async {
+      final devicectl = fakeDevicectl(
+        () => [
+          display('LCD', primary: true),
+          display(
+            'Wireless',
+            uniqueId: 'WIRELESS',
+            displayId: 2,
+            type: 'wireless',
+          ),
+        ],
+      );
+      final device = IOSDevice(udid: 'TEST-UDID', runProcess: devicectl.run);
+      await device.screenshot(
+        AppInstance(process: FakeProcess()),
+        '/tmp/ios.png',
+        screen: 'Wireless',
+      );
+      expect(
+        devicectl.calls.last,
+        containsAllInOrder(['--display-unique-id', 'WIRELESS']),
+      );
+    });
+
+    test(
+      'a screen with no unique id that is not primary cannot be captured',
+      () {
+        final devicectl = fakeDevicectl(
+          () => [display('LCD', primary: true), display('LCD-1', displayId: 3)],
+        );
+        final device = IOSDevice(udid: 'TEST-UDID', runProcess: devicectl.run);
+        expect(
+          () => device.screenshot(
+            AppInstance(process: FakeProcess()),
+            '/tmp/ios.png',
+            screen: 'displayId:3',
+          ),
+          throwsA(
+            isA<ScreenSelectionException>().having(
+              (e) => e.reason,
+              'reason',
+              contains('LCD-1 cannot be captured'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('names Xcode 27 when devicectl lacks the subcommands', () async {
       // What a devicectl without the subcommand prints for this command line:
       // its parser stops at `device` and rejects the first option after it.
       final device = IOSDevice(
@@ -5052,7 +6026,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           isA<StateError>().having(
             (e) => e.message,
             'message',
-            contains('iPhone screenshots need Xcode 27 or later'),
+            contains('iOS screenshots need Xcode 27 or later'),
           ),
         ),
       );
@@ -5061,12 +6035,19 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('reports a capture that runs and fails as it is', () async {
       final device = IOSDevice(
         udid: 'TEST-UDID',
-        runProcess: (exe, args) async => ProcessResult(
-          0,
-          1,
-          '',
-          'ERROR: The specified device was not found.',
-        ),
+        runProcess: (exe, args) async {
+          if (args.contains('displays')) {
+            return displaysAnswer(args, [
+              display('LCD', uniqueId: 'SCREEN-1', primary: true),
+            ]);
+          }
+          return ProcessResult(
+            0,
+            1,
+            '',
+            'ERROR: The specified device was not found.',
+          );
+        },
       );
       expect(
         () => device.screenshot(
@@ -5142,43 +6123,100 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       await waitForLocalTcpPort(server.port, what: 'test listener');
     });
 
-    test('waits for a listener that binds late', () async {
-      // Grab a free port, then release it so nothing is listening when the
-      // wait starts; bind for real shortly after.
-      final probe = await ServerSocket.bind('127.0.0.1', 0);
-      final port = probe.port;
-      await probe.close();
+    // The rest of the wait is time and answers, not sockets: the probe is
+    // faked and `fakeAsync` moves the clock, so each outcome below is exact.
+    group('against a faked probe', () {
+      /// A probe that refuses until [acceptsFrom] on the (fake) clock, and
+      /// records when it was asked.
+      ({TcpProbe probe, List<Duration> asked}) listener(
+        FakeAsync async, {
+        Duration? acceptsFrom,
+      }) {
+        final asked = <Duration>[];
+        return (
+          asked: asked,
+          probe: (port) async {
+            asked.add(async.elapsed);
+            if (acceptsFrom == null || async.elapsed < acceptsFrom) {
+              throw const SocketException('Connection refused');
+            }
+          },
+        );
+      }
 
-      ServerSocket? server;
-      addTearDown(() => server?.close());
-      final lateBind = Future<void>.delayed(
-        const Duration(milliseconds: 300),
-        () async => server = await ServerSocket.bind('127.0.0.1', port),
-      );
-      await waitForLocalTcpPort(port, what: 'late listener');
-      await lateBind;
-      expect(server, isNotNull);
-    });
+      test('waits for a listener that binds late', () {
+        fakeAsync((async) {
+          final l = listener(async, acceptsFrom: const Duration(seconds: 1));
+          final outcome = track(
+            waitForLocalTcpPort(1, what: 'late listener', probe: l.probe),
+          );
 
-    test('throws a StateError naming the forward when nothing binds', () async {
-      final probe = await ServerSocket.bind('127.0.0.1', 0);
-      final port = probe.port;
-      await probe.close();
+          async.elapse(const Duration(milliseconds: 999));
+          expect(outcome.done, isFalse);
 
-      await expectLater(
-        waitForLocalTcpPort(
-          port,
-          what: 'iproxy forward',
-          budget: const Duration(milliseconds: 400),
-        ),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            contains('iproxy forward'),
-          ),
-        ),
-      );
+          // Asks at 0, 50, 150, 350, 750 ms, then every 500 ms: 1250 is the
+          // first ask after the bind at 1000.
+          async.elapse(const Duration(milliseconds: 251));
+          expect(outcome.done, isTrue);
+          expect(outcome.error, isNull);
+          expect(
+            l.asked.map((d) => d.inMilliseconds),
+            [0, 50, 150, 350, 750, 1250],
+          );
+        });
+      });
+
+      test('throws a StateError naming the forward when nothing binds', () {
+        fakeAsync((async) {
+          final l = listener(async);
+          final outcome = track(
+            waitForLocalTcpPort(
+              4242,
+              what: 'iproxy forward',
+              budget: const Duration(seconds: 2),
+              probe: l.probe,
+            ),
+          );
+
+          // The budget is spent by the ask at 2250 ms (0, 50, 150, 350, 750,
+          // 1250, 1750, 2250); nothing is asked before it, and it fails then.
+          async.elapse(const Duration(milliseconds: 2249));
+          expect(outcome.done, isFalse);
+          async.elapse(const Duration(milliseconds: 1));
+
+          expect(outcome.done, isTrue);
+          expect(
+            outcome.error,
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              startsWith(
+                'iproxy forward on 127.0.0.1:4242 did not accept connections '
+                'within 2s of starting.',
+              ),
+            ),
+          );
+          expect(l.asked.last, const Duration(milliseconds: 2250));
+        });
+      });
+
+      test('an ask that lands past the budget still succeeds if it is up', () {
+        fakeAsync((async) {
+          final l = listener(async, acceptsFrom: const Duration(seconds: 2));
+          final outcome = track(
+            waitForLocalTcpPort(
+              1,
+              what: 'edge listener',
+              budget: const Duration(seconds: 2),
+              probe: l.probe,
+            ),
+          );
+          async.elapse(const Duration(seconds: 3));
+
+          expect(outcome.done, isTrue);
+          expect(outcome.error, isNull);
+        });
+      });
     });
   });
 
@@ -5319,17 +6357,20 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
         final device = MacOSDevice()
           ..teardownBound = const Duration(milliseconds: 200);
-        final sw = Stopwatch()..start();
-        await device
-            .stop(AppInstance(process: real))
-            .timeout(
-              const Duration(seconds: 10),
-              onTimeout: () => fail(
-                'stop() never returned against a real '
-                'SIGTERM-trapping process',
+        // The 10 s is a guard against hanging, not a claim about speed: how
+        // long the stop took is load, and it is not asserted. That the wait
+        // was bounded is the escalation itself, the record below.
+        final records = await recording(
+          () => device
+              .stop(AppInstance(process: real))
+              .timeout(
+                const Duration(seconds: 10),
+                onTimeout: () => fail(
+                  'stop() never returned against a real '
+                  'SIGTERM-trapping process',
+                ),
               ),
-            );
-        sw.stop();
+        );
 
         expect(
           await real.exitCode,
@@ -5339,11 +6380,12 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
               'what dart:io reports for it',
         );
         expect(
-          sw.elapsed,
-          lessThan(const Duration(seconds: 3)),
+          records.where((r) => r.message.contains('process_kill_escalated')),
+          isNotEmpty,
           reason: 'the wait is bounded, not merely eventual',
         );
       },
+      testOn: '!windows',
     );
 
     // A Ctrl-C in a terminal reaches the app as well as this tool — they share

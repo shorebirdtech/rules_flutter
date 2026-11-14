@@ -13,13 +13,21 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
+import 'macos_gui.dart';
 
 const _pngSignature = <int>[0x89, 0x50, 0x4E, 0x47];
+
+/// The menu-bar name of the `:hello_world_macos` app (its bundle `app_name`).
+const _appName = 'Hello World';
 
 void main() {
   group(
     'agent extensions e2e',
     () {
+      // The group drives a real window: screenshots and window control need a
+      // live display, which a terminal driving the suite does not keep awake.
+      holdGuiSession();
+
       test(
         'drives hello_world_macos through tap + enterText + getText',
         () async {
@@ -641,6 +649,7 @@ void main() {
             'app.restart',
             params: {
               'appId': appId,
+              'fullRestart': true,
             },
           );
           expect(
@@ -698,20 +707,11 @@ void main() {
           });
 
           // Minimize the app window: the state an agent finds an app in when a
-          // human has put it away. Needs OS-level window control, which macOS
-          // gates behind permissions granted to the process running the tests;
-          // skip when they are missing, since without them the app never
-          // reaches the state under test. `_setMinimized` has already put the
-          // specific reason on stderr.
-          if (!await _setMinimized(true)) {
-            markTestSkipped(
-              'could not minimize the window — see the '
-              '"agent_e2e: could not set AXMinimized" line on stderr for '
-              'whether osascript refused (grant Accessibility) or never '
-              'answered (grant Automation)',
-            );
-            return;
-          }
+          // human has put it away. System Events does it, and cannot while the
+          // screen is locked or the display is off or Accessibility is not
+          // granted: then the app never reaches the state under test, and the
+          // test fails with which of those it is rather than pass unrun.
+          await setMinimized(true, process: _appName);
 
           try {
             // Read-only finders work against a window nobody can see: they walk
@@ -746,7 +746,7 @@ void main() {
             );
             expect(tap, isNotNull, reason: 'app.tap must return a response');
           } finally {
-            await _setMinimized(false);
+            await setMinimized(false, process: _appName);
           }
 
           // The tap was really delivered, not merely acknowledged: `onPressed`
@@ -852,6 +852,7 @@ void main() {
             'app.restart',
             params: {
               'appId': appId,
+              'fullRestart': true,
             },
           );
           expect(
@@ -1286,6 +1287,7 @@ void main() {
       );
     },
     skip: !Platform.isMacOS ? 'macOS only' : null,
+    tags: 'macos',
   );
 
   /// The same surface on `-d chrome`.
@@ -1390,7 +1392,7 @@ void main() {
         final restart = await dt.sendCommand(
           9,
           'app.restart',
-          params: {'appId': appId},
+          params: {'appId': appId, 'fullRestart': true},
         );
         expect(
           restart['error'],
@@ -1422,46 +1424,5 @@ void main() {
       },
       timeout: const Timeout(Duration(minutes: 6)),
     );
-  });
-}
-
-/// How long the window-control AppleScript gets to answer.
-///
-/// Setting one attribute on one window is sub-second work when the permissions
-/// are in place — this is a bound on the *unanswerable* case, not an expected
-/// wait, and a healthy call returns the moment it is done rather than sitting
-/// out the bound.
-const _osascriptBound = Duration(seconds: 10);
-
-/// Minimize/restore the `:hello_world_macos` window (bundle `app_name`
-/// "Hello World") via AppleScript.
-///
-/// Returns false when the window cannot be addressed, so callers can skip. Two
-/// different things produce that answer and both must, because neither leaves
-/// the test able to get the window off screen — the state it exists to drive:
-///
-///   * a refusal — no Accessibility permission for the invoking process, which
-///     `osascript` reports promptly as `not allowed assistive access (-1719)`;
-///   * silence — an undecided Automation (AppleEvents) TCC, where the send
-///     blocks in the consent machinery and never returns at all.
-///
-/// The second is why this is bounded rather than a plain [Process.run]; see
-/// [runBounded].
-Future<bool> _setMinimized(bool value) async {
-  final result = await runBounded(
-    'osascript',
-    [
-      '-e',
-      'tell application "System Events" to tell process "Hello World" '
-          'to set value of attribute "AXMinimized" of window 1 to $value',
-    ],
-    timeout: _osascriptBound,
-  );
-  if (!result.succeeded) {
-    // Named on stderr either way: a skip that says nothing hides a fixable
-    // problem. `timed out` and `exit 1: …` are different diagnoses with
-    // different fixes (grant Automation vs grant Accessibility).
-    stderr.writeln('agent_e2e: could not set AXMinimized=$value — $result');
-  }
-  return result.succeeded;
+  }, tags: 'web');
 }

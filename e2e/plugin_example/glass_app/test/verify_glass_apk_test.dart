@@ -4,11 +4,8 @@
 /// if they are.
 library;
 
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log.
-// ignore_for_file: avoid_print
-
-import 'dart:io';
+import 'package:rules_flutter_e2e_testing/apk.dart';
+import 'package:rules_flutter_e2e_testing/bytes.dart';
 
 const _expected = [
   'com.example.glass_plugin.GlassBootReceiver',
@@ -17,51 +14,18 @@ const _expected = [
 ];
 
 void main() {
-  final base =
-      '${Platform.environment['TEST_SRCDIR']}/'
-      '${Platform.environment['TEST_WORKSPACE']}';
-  final apk = '$base/glass_app/glass_android.apk';
-  final tmp = Directory.systemTemp.createTempSync('glass_apk_');
-  try {
-    final unzip = Process.runSync('unzip', [
-      '-q',
-      apk,
-      'AndroidManifest.xml',
-      '-d',
-      tmp.path,
-    ]);
-    if (unzip.exitCode != 0) {
-      stderr.writeln('FAIL: could not extract $apk: ${unzip.stderr}');
-      exit(1);
-    }
-    final manifest = File('${tmp.path}/AndroidManifest.xml').readAsBytesSync();
-    var failed = false;
-    for (final name in _expected) {
-      // Binary XML stores its strings as UTF-16.
-      if (_contains(manifest, _utf16(name))) {
-        print('OK: merged manifest names $name');
-      } else {
-        stderr.writeln('FAIL: merged manifest lacks $name');
-        failed = true;
-      }
-    }
-    if (failed) exit(1);
-  } finally {
-    tmp.deleteSync(recursive: true);
+  final apk = Apk.fromRunfiles(
+    'glass_app/glass_android.apk',
+    prefix: 'glass_apk_',
+  );
+  final manifest = apk.manifest.readAsBytesSync();
+  for (final name in _expected) {
+    // Binary XML stores its strings as UTF-16.
+    apk.check.expect(
+      'merged manifest names $name',
+      condition: containsBytes(manifest, utf16leBytes(name)),
+      detail: 'merged manifest lacks $name',
+    );
   }
-}
-
-List<int> _utf16(String s) => [
-  for (final unit in s.codeUnits) ...[unit & 0xff, unit >> 8],
-];
-
-bool _contains(List<int> haystack, List<int> needle) {
-  outer:
-  for (var i = 0; i + needle.length <= haystack.length; i++) {
-    for (var j = 0; j < needle.length; j++) {
-      if (haystack[i + j] != needle[j]) continue outer;
-    }
-    return true;
-  }
-  return false;
+  apk.finish('All glass_app APK checks passed.');
 }

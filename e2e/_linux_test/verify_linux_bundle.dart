@@ -37,7 +37,9 @@ void main(List<String> args) {
   }
 
   // Derive app name from the bundle directory name.
-  final appName = Uri.parse(bundlePath).pathSegments.last;
+  final appName = Directory(
+    bundlePath,
+  ).absolute.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
 
   var failed = false;
 

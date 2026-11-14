@@ -1,0 +1,123 @@
+# An app whose own package declares what it ships: a code asset, linked by hand
+# into the one dylib the app loads, and a data asset, both routed by the
+# package's own `dart_package_metadata` rather than by a pub package's. No link
+# hook runs here: `//` has the hooks over a dependency's assets and `//own_hook`
+# one over the app's own. The app, run on macOS, calls the code asset and reads
+# the data asset.
+
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_test", "dart_code_asset", "dart_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_data_asset", "dart_package_metadata", "flutter_application")
+load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+
+exports_files(["pubspec.lock"])
+
+# 1. The native side. (This workspace's other apps ship no native code.)
+cc_library(
+    name = "_synthetic_cc",
+    srcs = ["native/synthetic.c"],
+)
+
+cc_shared_library(
+    name = "_synthetic_dylib",
+    # The name it lands under in `Contents/Frameworks/`, and the one its
+    # install name gives.
+    shared_lib_name = "synthetic.dylib",
+    target_compatible_with = ["@platforms//os:macos"],
+    user_link_flags = [
+        "-Wl,-install_name,@rpath/synthetic.dylib",
+    ],
+    deps = [":_synthetic_cc"],
+)
+
+# 2. The Native Assets the package owns, routed by its metadata below: a code
+#    asset, by the `select()`, and a data asset. Apple builds are single-arch
+#    here; multi-arch is handled separately via `apple_universal_binary`.
+dart_code_asset(
+    name = "synthetic_native_asset_macos",
+    asset_id = "package:native_assets_synthetic/synthetic.dylib",
+    file = ":_synthetic_dylib",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+dart_data_asset(
+    name = "synthetic_blob",
+    src = "data/blob.txt",
+    asset_id = "package:native_assets_synthetic/blob.txt",
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "native_assets_synthetic",
+    code_assets = select({
+        "@platforms//os:macos": [":synthetic_native_asset_macos"],
+        "//conditions:default": [],
+    }),
+    data_assets = [":synthetic_blob"],
+)
+
+# 3. The application, and the macOS app that runs it.
+flutter_application(
+    name = "synthetic_app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_macos_app(
+    name = "macos_app",
+    app_name = "Native Assets Synthetic",
+    application = ":synthetic_app",
+    bundle_id = "com.example.nativeassetssynthetic",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# 4. The bundle holds the data asset at `packages/native_assets_synthetic/
+#    blob.txt` and lists it in the asset manifest, in whatever mode it is
+#    built (`-c dbg` for debug; the default is release, which runs no link
+#    hook here).
+dart_test(
+    name = "bundle_test",
+    args = ["$(rlocationpaths :synthetic_app)"],
+    data = [":synthetic_app"],
+    main = "test/bundle_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+# 5. The running app loads both: it calls the code asset and reads the data
+#    asset with `rootBundle`, and prints what it got. Needs a GUI session, so
+#    `manual`: `bazel test //own_assets:verify_macos_app_test --test_tag_filters=
+#    --strategy=TestRunner=standalone`.
+dart_test(
+    name = "verify_macos_app_test",
+    data = [":macos_app"],
+    main = "test/verify_macos_app_test.dart",
+    tags = [
+        "exclusive",
+        "manual",
+    ],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# `manual`, so `bazel test //...` never gives it to the analysis aspect; this
+# checks it anyway.
+dart_analysis_test(
+    name = "verify_macos_app_test_analysis",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":verify_macos_app_test"],
+)
+
+build_test(
+    name = "synthetic_app_build_test",
+    targets = [
+        ":macos_app",
+        ":_synthetic_dylib",
+    ],
+)

@@ -1,0 +1,23 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "greeting",
+)
+
+# The `package_name` of the `dart_package_metadata` is the pub package's name:
+# assets are bundled under `packages/<package_name>/`, which is the key
+# `rootBundle.loadString('packages/greeting/assets/greeting.txt')` asks for.
+flutter_library(
+    name = "greeting",
+    srcs = glob(["lib/**/*.dart"]),
+    assets = ["assets/greeting.txt"],
+    package = ":pubspec-metadata",
+    # The hub's repository aliases this target.
+    visibility = ["//visibility:public"],
+    deps = [
+        "@deps//:flutter",
+        "@deps//:intl",
+        "@deps//:tagline",
+    ],
+)

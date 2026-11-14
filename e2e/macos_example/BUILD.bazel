@@ -1,25 +1,29 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@rules_apple//apple:macos.bzl", "macos_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_profile_build")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_application_variant")
 load(
     "@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
     "flutter_macos_app",
+    "flutter_macos_app_framework_gen",
     "flutter_macos_engine",
-    "flutter_macos_framework_gen",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
 )
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "program_test", "skipped_test")
+load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
+load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_flag", "device_profile")
+load("@rules_flutter//tools/e2e_testing:version_build.bzl", "version_build")
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load(":profile_build.bzl", "profile_build")
 
 exports_files(["pubspec.lock"])
 
@@ -92,41 +96,60 @@ dart_analysis_config(
     options = [":options"],
 )
 
-# The app's Dart, as a library, so the analyzer has something to stage.
-# `flutter_application` is a bundle rather than a Dart package and carries no
-# DartInfo, so it cannot be analyzed directly.
-flutter_library(
-    name = "app_lib",
+dart_package_metadata(
+    name = "pubspec-metadata",
     package_name = "macos_example",
-    srcs = glob(["lib/**/*.dart"]),
-    deps = _APP_DEPS + [
-        # Supplies `lib/_embedder.yaml`, the only way the analyzer resolves
-        # `dart:ui`. Without it every Flutter import fails to resolve.
-    ],
 )
 
 flutter_application(
     name = "app_flutter",
-    package_name = "macos_example",
     # A first-party asset, so the dev loop's asset reload has something real to
     # deliver. asset_reload_e2e_test edits assets/message.txt while the app
     # runs and asserts the change reaches the UI.
     assets = glob(["assets/**"]),
+    # Not the default: the program reports it as `appBuildName` and
+    # `appBuildNumber` (see lib/main.dart), and every app built over it has it
+    # as its bundle's version.
+    build_name = "2.3.4",
+    build_number = "42",
     main = "lib/main.dart",
     native_deps = [":sub"],
+    package = ":pubspec-metadata",
     deps = _APP_DEPS,
+)
+
+# A flavor is a target: the same app as a flavor's application, and its macOS
+# app with the flavor's own bundle id and name. `appFlavor` is `paid` in it, and
+# stays so through hot reload and restart.
+flutter_application(
+    name = "app_paid",
+    assets = glob(["assets/**"]),
+    flavor = "paid",
+    main = "lib/main.dart",
+    native_deps = [":sub"],
+    package = ":pubspec-metadata",
+    deps = _APP_DEPS,
+)
+
+flutter_macos_app(
+    name = "macos_example_paid",
+    app_name = "Flutter App Paid",
+    application = ":app_paid",
+    bundle_id = "com.example.flutterapp.paid",
+    target_compatible_with = ["@platforms//os:macos"],
 )
 
 # An app whose `main` sits outside the package's `lib/` — the shape
 # `flutter run -t test_driver/app.dart` runs. It has no `package:` URI, so the
 # build and the dev loop both name it under the app scheme; hot reload of it,
 # and of the sibling it imports by relative path, is what this pair is for.
-flutter_application(
+# It is the application with that `main`: same package, assets, plugins and
+# native library.
+flutter_application_variant(
     name = "driver_flutter",
-    package_name = "macos_example",
     srcs = ["test_driver/banner.dart"],
+    application = ":app_flutter",
     main = "test_driver/app.dart",
-    deps = ["@deps//:flutter"],
 )
 
 flutter_macos_app(
@@ -141,7 +164,7 @@ flutter_macos_app(
 # Shared macOS targets (used by approaches 2 & 3)
 # =============================================================================
 
-flutter_macos_framework_gen(
+flutter_macos_app_framework_gen(
     name = "app_framework",
     application = ":app_flutter",
 )
@@ -160,11 +183,12 @@ flutter_macos_engine(
     name = "flutter_engine",
 )
 
-# Shared version and Info.plist for approaches 2 & 3.
-apple_bundle_version(
+# Shared version and Info.plist for approaches 2 & 3. The version is also the
+# apps with extensions', since an extension's must match its app's. It is the
+# application's, which the program reports and the app checks its own against.
+flutter_apple_bundle_version(
     name = "app_version",
-    build_version = "1.0",
-    short_version_string = "1.0",
+    application = ":app_flutter",
     tags = ["manual"],
     visibility = ["//extensions:__pkg__"],
 )
@@ -194,6 +218,9 @@ flutter_macos_app(
     additional_entitlements = ["entitlements/Network.entitlements"],
     app_name = "Flutter App",
     application = ":app_flutter",
+    # Not the default, so :verify_macos_bundle_test can see it arrive.
+    build_name = "2.3.4",
+    build_number = "42",
     bundle_id = "com.example.flutterapp",
     target_compatible_with = ["@platforms//os:macos"],
 )
@@ -251,6 +278,7 @@ flutter_macos_app(
         "//extensions:widgets",
     ],
     target_compatible_with = ["@platforms//os:macos"],
+    version = ":app_version",
 )
 
 # The same app signed by a team: the app and each extension get the profile
@@ -258,9 +286,22 @@ flutter_macos_app(
 # Group takes the team-prefixed form, which macOS grants to bundles that team
 # signed. Each extension needs a profile of its own; one without is signed ad
 # hoc and loses the group. :verify_macos_team_signing_test checks the result.
+#
+# Both reach //device through flags, `//:device_profile` and
+# `//:device_app_group`, whose defaults fail with the setup steps. A checked-in
+# `//device:...` label would make `bazel query 'deps(//...)'` load the package
+# a fresh clone lacks. Set them in .bazelrc.user (device.example/ says how).
+device_profile()
+
+device_flag(
+    name = "device_app_group",
+    device_target = "AppGroup.entitlements",
+    what = "team-prefixed App Group entitlements",
+)
+
 flutter_macos_app(
     name = "app_extensions_team",
-    additional_entitlements = ["//device:AppGroup.entitlements"],
+    additional_entitlements = [":device_app_group"],
     app_name = "Extensions App",
     application = ":app_flutter",
     bundle_id = "com.example.flutterapp.extensions",
@@ -268,8 +309,9 @@ flutter_macos_app(
         "//extensions:share_team",
         "//extensions:widgets_team",
     ],
-    provisioning_profile = "//device:profile",
+    provisioning_profile = ":device_profile",
     target_compatible_with = ["@platforms//os:macos"],
+    version = ":app_version",
 )
 
 # =============================================================================
@@ -286,6 +328,7 @@ flutter_macos_menu_xib_gen(
 
 flutter_macos_runner_lib_gen(
     name = "bazel_runner_lib",
+    application = ":app_flutter",
     engine = ":flutter_engine",
     module_name = "BazelRunner",
     registrant = ":app_registrant",
@@ -371,6 +414,12 @@ build_test(
 )
 
 build_test(
+    name = "macos_flavor_app_build_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":macos_example_paid"],
+)
+
+build_test(
     name = "macos_bazel_runner_build_test",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":app_bazel_runner"],
@@ -387,6 +436,24 @@ dart_test(
     data = [":app"],
     main = "test/verify_macos_bundle_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# `:app` built with `--@rules_flutter//flutter:build_number=123`, which replaces
+# the build number its application states and it repeats.
+version_build(
+    name = "app_build_number_123",
+    build_number = "123",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":app"],
+)
+
+dart_test(
+    name = "verify_macos_build_number_test",
+    data = [":app_build_number_123"],
+    main = "test/verify_macos_build_number_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Reads the entitlements blob codesign embedded in the built bundle. Bazel's
@@ -398,6 +465,7 @@ dart_test(
     data = [":app_intents"],
     main = "test/verify_macos_app_intents_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Each extension is embedded in Contents/PlugIns/, names its extension point,
@@ -408,19 +476,21 @@ dart_test(
     data = [":app_extensions"],
     main = "test/verify_macos_extensions_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Every bundle in the team-signed app has one TeamIdentifier, not an ad hoc
 # signature, every App Group is prefixed with it, and the signature verifies.
 # `manual`, like the app: it needs the per-developer //device package, so it
-# has no dart_analysis_test either, which would load that package in a plain
-# `bazel test //...`. Running it applies the analysis aspect.
+# has no dart_analysis_test either, which would fail analysis in a plain
+# `bazel test //...` until the device flags are set. Running it applies the analysis aspect.
 dart_test(
     name = "verify_macos_team_signing_test",
     data = [":app_extensions_team"],
     main = "test/verify_macos_team_signing_test.dart",
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
@@ -428,6 +498,7 @@ dart_test(
     data = [":app"],
     main = "test/verify_macos_entitlements_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
@@ -439,6 +510,7 @@ dart_test(
         "manual",
     ],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this
@@ -451,7 +523,7 @@ dart_analysis_test(
 
 # :app built in Flutter profile mode regardless of the command line, so the
 # profile test below does not depend on how it is invoked.
-profile_build(
+flutter_profile_build(
     name = "app_profile",
     tags = ["manual"],
     targets = [":app"],
@@ -469,10 +541,132 @@ dart_test(
         "manual",
     ],
     target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_analysis_test(
     name = "verify_macos_profile_app_test_analysis",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_macos_profile_app_test"],
+)
+
+# =============================================================================
+# What a release bundle ships
+#
+# `flutter build macos --release` strips App.framework/App (no local symbols,
+# no debugging map) and leaves a dSYM for it. Flutter's release mode is every
+# `-c` but `dbg`, so each property below is checked in `fastbuild` and in `opt`.
+# =============================================================================
+
+# The same app, which `:release_obfuscated_<mode>` builds with its Dart names
+# obfuscated and the symbols split out. A target of its own, so its bundle and
+# `:app`'s, in one test's runfiles, have paths of their own.
+flutter_macos_app(
+    name = "app_obfuscated",
+    app_name = "Flutter App",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.obfuscated",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# The same app asked not to strip, as `flutter build macos --release
+# --extra-gen-snapshot-options=--no-strip` is.
+flutter_application(
+    name = "app_no_strip_flutter",
+    assets = glob(["assets/**"]),
+    extra_gen_snapshot_options = ["--no-strip"],
+    main = "lib/main.dart",
+    native_deps = [":sub"],
+    package = ":pubspec-metadata",
+    deps = _APP_DEPS,
+)
+
+flutter_macos_app(
+    name = "app_no_strip",
+    app_name = "Flutter App",
+    application = ":app_no_strip_flutter",
+    bundle_id = "com.example.flutterapp.nostrip",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+[
+    apple_release_build(
+        name = "release_%s" % mode,
+        compilation_mode = mode,
+        generate_dsym = True,
+        targets = [
+            ":app",
+            ":app_no_strip",
+        ],
+    )
+    for mode in ("fastbuild", "opt")
+]
+
+[
+    apple_release_build(
+        name = "release_obfuscated_%s" % mode,
+        compilation_mode = mode,
+        obfuscate = True,
+        targets = [":app_obfuscated"],
+    )
+    for mode in ("fastbuild", "opt")
+]
+
+[
+    dart_test(
+        name = "verify_macos_release_%s_%s_test" % (what, mode),
+        data = [":release_%s" % mode] + ([":release_obfuscated_%s" % mode] if what == "obfuscated" else []),
+        main = "test/verify_macos_release_%s_test.dart" % what,
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for what in (
+        "stripped",
+        "unstripped",
+        "dsym",
+        "obfuscated",
+    )
+    for mode in (
+        "fastbuild",
+        "opt",
+    )
+]
+
+# =============================================================================
+# The build as a whole
+# =============================================================================
+
+# Property: a `flutter_macos_app` is skipped, not failed, for a platform it
+# declares it is not for, and a constraint the user declares on it is kept.
+# Each such test passes by being skipped (see `skipped_test`); the control is
+# the same app where it is compatible, and passes by analysing.
+analyses_test(
+    name = "macos_app_control_test",
+    target = ":app",
+)
+
+# The app passes on its program, as its bundle builds it, for analysis.
+program_test(
+    name = "macos_app_program_test",
+    main = "lib/main.dart",
+    target = ":app",
+)
+
+skipped_test(
+    name = "macos_app_skipped_on_linux_test",
+    on_linux = True,
+    target = ":app",
+)
+
+flutter_macos_app(
+    name = "app_windows_only",
+    app_name = "Windows Only",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.windowsonly",
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+skipped_test(
+    name = "macos_app_user_constraint_skipped_test",
+    target = ":app_windows_only",
 )

@@ -43,26 +43,10 @@
 /// rather than about the bundle on disk.
 library;
 
-import 'dart:io';
-
 import 'native_libs_fingerprint.dart';
 import 'native_libs_verdict.dart';
 
 export 'native_libs_verdict.dart';
-
-/// One file as the running process has it: the two facts a `stat` answers, and
-/// the content token behind them.
-class _Image {
-  /// `size:mtime`, which is what bazel moves when it re-runs an action and leaves
-  /// alone when it serves one from cache.
-  final String stamp;
-
-  /// The content token from [nativeLibsFingerprintOfFiles] — the authority, and
-  /// read only when [stamp] has moved.
-  final String content;
-
-  const _Image(this.stamp, this.content);
-}
 
 class NativeLibsWatch {
   /// Per library, the first-party sources it is built from.
@@ -92,10 +76,11 @@ class NativeLibsWatch {
   final Map<String, List<String>> contracts;
 
   /// What every watched file was when the running process launched — the images
-  /// it has mapped, and the contracts they were generated from. Advanced only by
+  /// it has mapped, and the contracts they were generated from — as the content
+  /// token [nativeLibsFingerprintOfFiles] gives each. Advanced only by
   /// [markLive], so a difference keeps being reported for as long as the process
   /// keeps running the old code.
-  Map<String, _Image> _live;
+  Map<String, String> _live;
 
   NativeLibsWatch._(this.contracts, this.sources, this._live);
 
@@ -118,10 +103,9 @@ class NativeLibsWatch {
   /// bundle build on the instant path.
   ///
   /// It is also self-healing, which is what makes the trade bearable: a restart
-  /// has `Relauncher` compare against what was launched, exact by construction
-  /// (the bundle itself, or the native-libs group when the launch build wrote
-  /// it), so the first `R` after the window relaunches the process and
-  /// re-baselines this watch through [markLive].
+  /// rebuilds the launch target and `Relauncher` compares the launched bundle
+  /// itself, which is exact by construction, so the first `R` after the window
+  /// relaunches the process and re-baselines this watch through [markLive].
   static Future<NativeLibsWatch> of(
     Map<String, List<String>> contracts, {
     Map<String, List<String>> sources = const {},
@@ -136,13 +120,14 @@ class NativeLibsWatch {
 
   /// What this command may do about the native libraries — see [NativeLibsVerdict].
   ///
-  /// Two stages, because this runs on every reload and a debug-build Rust or C++
-  /// library is tens of megabytes — measured at 126ms to hash 20MB, against 33µs
-  /// for a `stat`. A file bazel did not rewrite has the same size and mtime it had
-  /// and is never read: that is the Dart-only edit, and it stays free. Only a file
-  /// the build actually re-ran an action for is read, and then its *contents*
-  /// decide — a rebuild that produced identical bytes is not a change, and
-  /// reporting one would withhold a reload that was safe.
+  /// Every watched file is hashed on every call, so a Dart-only reload reads
+  /// each native library once (measured at 126ms to hash 20MB, a debug-build
+  /// Rust or C++ library being tens of megabytes). That cost buys an answer that
+  /// depends on the bytes alone: a size-and-mtime shortcut says "unchanged" about
+  /// a file rewritten to the same size inside one mtime tick or by a tool that
+  /// keeps the old mtime, and a reload would then inject over machine code from
+  /// before the edit. A rebuild that produced identical bytes is not a change,
+  /// and reporting one would withhold a reload that was safe.
   Future<NativeLibsVerdict> verdict() async {
     final movedContracts = await _moved(_allContracts);
     if (movedContracts.isNotEmpty) {
@@ -232,45 +217,20 @@ class NativeLibsWatch {
   /// The watched files among [paths] whose bytes differ from the ones the running
   /// process launched with.
   ///
-  /// A file whose stamp matched is never read. A file whose stamp moved but whose
-  /// bytes did not has its stamp recorded, which is what keeps it out of the
-  /// hashing stage for the rest of the run; a file that really moved is left
-  /// un-advanced on purpose, so the next command reaches the same verdict. Only a
-  /// new process changes that, through [markLive].
+  /// Every file is read, every time. A size-and-mtime stamp would spare the read,
+  /// but a stamp says "unchanged" about a file rewritten to the same size inside
+  /// one mtime tick (a coarse-timestamp filesystem) or by a tool that keeps the
+  /// old mtime (`cp -p`, `rsync -t`), and answering "current" over changed bytes
+  /// lets a reload inject over machine code from before the edit. A file that
+  /// really moved stays reported until [markLive] or [markPatched] advances it.
   Future<List<String>> _moved(Iterable<String> paths) async {
-    final restamped = <String, String>{};
-    for (final path in paths) {
-      final stamp = await _stamp(path);
-      if (stamp != _live[path]?.stamp) restamped[path] = stamp;
-    }
-    if (restamped.isEmpty) return const [];
-
-    final content = await nativeLibsFingerprintOfFiles(restamped.keys);
-    final moved = <String>[];
-    for (final entry in restamped.entries) {
-      final path = entry.key;
-      if (content[path] != _live[path]?.content) {
-        moved.add(path);
-      } else {
-        _live[path] = _Image(entry.value, content[path]!);
-      }
-    }
-    return moved..sort();
-  }
-
-  static Future<Map<String, _Image>> _read(Iterable<String> paths) async {
     final content = await nativeLibsFingerprintOfFiles(paths);
-    return {
-      for (final path in paths)
-        path: _Image(await _stamp(path), content[path]!),
-    };
+    return [
+      for (final entry in content.entries)
+        if (entry.value != _live[entry.key]) entry.key,
+    ]..sort();
   }
 
-  /// A file's size and mtime as one token. A path that is not there answers a
-  /// stamp of its own rather than throwing: the throw belongs to the content read,
-  /// which says which file the build declared and did not write.
-  static Future<String> _stamp(String path) async {
-    final stat = await File(path).stat();
-    return '${stat.size}:${stat.modified.microsecondsSinceEpoch}';
-  }
+  static Future<Map<String, String>> _read(Iterable<String> paths) =>
+      nativeLibsFingerprintOfFiles(paths);
 }

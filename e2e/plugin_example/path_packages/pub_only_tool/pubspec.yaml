@@ -1,0 +1,9 @@
+# A `path` package no Bazel build may contain: a tool run with `dart run`
+# outside Bazel. `flutter_pub.from_lock(ignored = ...)` says so, with the reason.
+name: pub_only_tool
+description: A tool run outside Bazel.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0

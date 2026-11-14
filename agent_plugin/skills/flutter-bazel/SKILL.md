@@ -19,6 +19,26 @@ The shape of a session: start the tool once, in the background, with its output
 in files. Read the channel's URL and token, and the app's id, from those files.
 Drive the app with `curl`. Reload after each edit. Shut it down at the end.
 
+## Bazel, not the `flutter` CLI
+
+In a rules_flutter workspace, Bazel builds everything, with the Flutter version
+`MODULE.bazel` pins. Advice written for `flutter` projects goes through Bazel
+here:
+
+- Tests: `bazel test //...`, or the `flutter_test` target you changed. Not
+  `flutter test`, and not the Dart MCP server's `run_tests`: both use whatever
+  Flutter the machine has, skip the code Bazel generates or maps in, and never
+  run the Bazel targets.
+- A new package: `bazel run @rules_flutter//flutter/pub -- add <package>`,
+  then add `@deps//:<package>` to the `deps` of the target that imports it
+  (`deps` being the name of the workspace's `flutter_pub.from_lock`).
+- Assets and fonts: the app target's `assets` in BUILD, not `flutter: assets:`
+  in its pubspec, which the build does not read. Material icons are
+  `@rules_flutter//flutter:material_icons` in `deps`, not
+  `uses-material-design`.
+- Reload and restart: through the session's channel (`app.hotReload`,
+  `app.restart`, below), which recompiles with Bazel.
+
 ## 1. Find the target, the tool and the device
 
 The target is the platform app, not the `flutter_application`:
@@ -36,8 +56,10 @@ Pick the device with `-d`. The host desktop (`macos`, `linux`, `windows`) is the
 fastest loop when the project has that target. Other ids: `chrome`,
 `ios-simulator`, `ios`, `android`, and the forms that name one device,
 `ios-simulator:<udid>`, `ios:<udid>`, `android:<serial>`. A bare serial or UDID
-is refused. See [reference/devices.md](reference/devices.md) before using
-anything but the host.
+is refused. `flutter_bazel devices` (or `devices --machine` for JSON) lists
+every usable device with the exact `-d` id to pass. See
+[reference/devices.md](reference/devices.md) before using anything but the
+host.
 
 ## 2. Start a session in the background
 
@@ -64,7 +86,7 @@ code in it.
 - `--machine` keeps stdout to JSON protocol events, one `[{...}]` per line, and
   turns the file watcher off, so nothing reloads until you ask.
 - `LOG_FORMAT=json` makes each of the tool's own stderr lines one JSON record.
-- `--no-devtools` stops it opening a DevTools tab in a browser.
+- `--no-devtools` skips starting a DevTools server, which you would not open. The app is still registered with the Dart Tooling Daemon.
 - On `-d chrome`, add `--web-run-headless`.
 
 The first run builds the tool and the app, which takes minutes on a cold cache.
@@ -214,13 +236,20 @@ reload again; the session does not need restarting.
 A reload keeps the app's state and re-runs `build` methods. It does not re-run
 `main()`, `initState` of widgets already on screen, or initializers of globals
 and static fields that have already been read. When the edit is in one of those,
-use `app.restart` with the same params, which re-runs `main()` and loses state.
+use `app.restart` with the same params plus `"fullRestart": true`, which re-runs `main()` and loses state. Without `fullRestart`, `app.restart` is a hot reload, as in `flutter run --machine`.
 A restart also picks up changed native code, relaunching the process if it has
 to; the channel, token and `appId` stay the same.
 
 Then look again: a screenshot, `getText`, or the semantics tree. A reply with
 `notShown`, or a read with `notRendering`, means the window is hidden or covered
 and is drawing nothing; see [reference/failures.md](reference/failures.md).
+
+The Dart MCP server (`dart mcp-server`) finds the session too, as it finds a
+`flutter run`: the run registers the app with a Dart Tooling Daemon, which
+`dart tooling-daemon --list` lists, and whose address is in the `app.dtd` event
+in `out`. Its `list_running_apps`, `hot_reload`, `hot_restart` and
+`get_runtime_errors` tools work on the app, and its reloads recompile with
+Bazel like `app.hotReload`. The channel is still what reads and drives the UI.
 
 ## 7. Read the logs
 

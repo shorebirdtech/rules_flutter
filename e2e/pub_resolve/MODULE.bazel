@@ -1,0 +1,36 @@
+"E2e test: a monorepo's app builds the `path:` packages of its lock, and a fork of a hosted one, from workspace targets mapped with flutter_pub.from_lock(resolve = ...)"
+
+module(name = "rules_flutter_pub_resolve")
+
+bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "rules_dart", version = "0.9.1")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+
+local_path_override(
+    module_name = "rules_flutter",
+    path = "../..",
+)
+
+flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
+flutter.toolchain(flutter_version = "3.47.9")
+
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
+
+# The lock is not at the root, and two of its packages are `path:` dependencies
+# of this repository. Each is mapped to the target that builds it; the target
+# name is free.
+flutter_pub.from_lock(
+    name = "deps",
+    lock = "//apps/greeter:pubspec.lock",
+    resolve = {
+        "greeting": "//packages/greeting",
+        "tagline": "//packages/tagline:tagline_lib",
+        # A hosted package of the lock, replaced for the whole graph by a fork.
+        "intl": "//third_party/intl",
+    },
+)
+
+use_repo(flutter, "flutter_web_sdk")
+
+use_repo(flutter_pub, "deps")

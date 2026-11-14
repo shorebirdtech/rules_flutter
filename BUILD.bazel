@@ -1,20 +1,27 @@
 load("@package_metadata//licenses/rules:license.bzl", "license")
 load("@package_metadata//purl:purl.bzl", "purl")
 load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_options")
 
-# Every `analysis_options.yaml` in this workspace, for the `dart_analyze`
-# aspect `.bazelrc` enables under `bazel test`. Each Dart file is analyzed and
-# format-checked against the nearest listed one above it, as in the IDE; this
-# workspace has one, at the root.
+# This workspace's one `analysis_options.yaml`, listed by //dev:analysis_config
+# for the `dart_analyze` aspect `.bazelrc` enables under `bazel test`.
 dart_analysis_options(
     name = "analysis_options",
     src = "analysis_options.yaml",
+    visibility = ["//dev:__pkg__"],
 )
 
-dart_analysis_config(
-    name = "analysis_config",
-    options = [":analysis_options"],
+# `pubspec.lock` is the lock of the tool workspace (`dev_tool_deps` in
+# MODULE.bazel); the Maven lock is what consumers get, read by the test that
+# keeps its androidx versions together.
+exports_files(
+    ["pubspec.lock"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["rules_flutter_maven_install.json"],
+    visibility = ["//tools/maven_locks:__pkg__"],
 )
 
 package_metadata(

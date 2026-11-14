@@ -1,0 +1,20 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_font_family", "flutter_library")
+
+flutter_library(
+    name = "widgets",
+    srcs = ["widgets.dart"],
+    assets = [
+        "pa.txt",
+        "w.txt",
+    ],
+    fonts = [":own_font"],
+    package = "//apps/own:pubspec-metadata",
+    shaders = ["s.frag"],
+    visibility = ["//apps/own:__pkg__"],
+)
+
+flutter_font_family(
+    name = "own_font",
+    family = "OwnFont",
+    fonts = ["f.ttf"],
+)

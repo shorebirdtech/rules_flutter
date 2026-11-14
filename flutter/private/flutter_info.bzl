@@ -1,7 +1,7 @@
 """The `FlutterInfo` constructor.
 
-`FlutterInfo` is built by several rules — `flutter_library`, `flutter_plugin`,
-`flutter_native_asset`, `flutter_data_asset` and `flutter_material_icons`.
+`FlutterInfo` is built by several rules — `flutter_library`, `flutter_plugin`
+and `flutter_material_icons`.
 Construction goes through here so no caller decides how a field merges: a rule
 that does not contribute on a channel must still forward its dependencies'
 values, and writing `depset()` instead silently drops them.
@@ -41,7 +41,6 @@ def dedup_plugins(all_plugins):
 
 def flutter_info(
         deps = [],
-        asset_dirs = [],
         shader_srcs = [],
         plugins = [],
         native_libs = [],
@@ -51,11 +50,11 @@ def flutter_info(
         linux_plugin_libraries = [],
         windows_plugin_libraries = [],
         apple_privacy_manifests = [],
-        native_assets = [],
-        data_assets = [],
         pub_fonts = [],
         pub_assets = [],
-        pub_shaders = []):
+        pub_shaders = [],
+        additional_licenses = [],
+        android_libs = []):
     """Builds a `FlutterInfo`, merging its dependencies' contributions.
 
     The caller supplies only what this target contributes itself, as plain
@@ -69,8 +68,8 @@ def flutter_info(
     Args:
       deps: Targets whose `FlutterInfo` contributions are merged in. Entries
         without one are ignored.
-      asset_dirs: Directories of Flutter assets this target ships.
-      shader_srcs: Raw shader sources (`.frag`/`.glsl`) this target ships.
+      shader_srcs: The Flutter framework's own shader sources (`.frag`/`.glsl`),
+        which only `package:flutter` ships.
       plugins: Plugin metadata structs this target declares. Deduplicated by
         name against the dependencies' plugins, this target's first.
       native_libs: Shared libraries this target contributes, typically from a
@@ -86,11 +85,15 @@ def flutter_info(
         (`label`, `srcs`, `hdrs`, `include_dirs`, `package`).
       windows_plugin_libraries: Windows plugin source bundles, same shape.
       apple_privacy_manifests: `PrivacyInfo.xcprivacy` files this target ships.
-      native_assets: `FlutterNativeAssetInfo` providers this target declares.
-      data_assets: `FlutterDataAssetInfo` providers this target declares.
       pub_fonts: Font contribution structs from a pub `flutter.fonts` block.
       pub_assets: Asset contribution structs from a pub `flutter.assets` block.
       pub_shaders: Shader contribution structs from a `flutter.shaders` block.
+      additional_licenses: `struct(package_name, files)` pairs this target
+        contributes, the files of its `flutter: licenses:`.
+      android_libs: `struct(package, group, lib)` triples this target contributes,
+        one per plugin Android library it selects (`lib` is the
+        `JavaInfo`-bearing Target; `group` the Maven group of the plugin's
+        Android `flutter_plugin_platform`, or "").
 
     Returns:
       A `FlutterInfo`.
@@ -102,10 +105,6 @@ def flutter_info(
         dep_plugins.extend(info.plugins)
 
     return FlutterInfo(
-        asset_dirs = depset(
-            direct = asset_dirs,
-            transitive = [info.asset_dirs for info in dep_infos],
-        ),
         shader_srcs = depset(
             direct = shader_srcs,
             transitive = [info.shader_srcs for info in dep_infos],
@@ -148,14 +147,6 @@ def flutter_info(
             direct = apple_privacy_manifests,
             transitive = [info.apple_privacy_manifests for info in dep_infos],
         ),
-        native_assets = depset(
-            direct = native_assets,
-            transitive = [info.native_assets for info in dep_infos],
-        ),
-        data_assets = depset(
-            direct = data_assets,
-            transitive = [info.data_assets for info in dep_infos],
-        ),
         pub_fonts = depset(
             direct = pub_fonts,
             transitive = [info.pub_fonts for info in dep_infos],
@@ -168,16 +159,12 @@ def flutter_info(
             direct = pub_shaders,
             transitive = [info.pub_shaders for info in dep_infos],
         ),
+        additional_licenses = depset(
+            direct = additional_licenses,
+            transitive = [info.additional_licenses for info in dep_infos],
+        ),
+        android_libs = depset(
+            direct = android_libs,
+            transitive = [info.android_libs for info in dep_infos],
+        ),
     )
-
-# The attribute `flutter_library` and `flutter_plugin` share for a package's
-# link hook, which `flutter_application` runs for the assets it lists in
-# `link_hook_assets`. Mirrors `dart_library.link_hook`.
-LINK_HOOK_ATTR = attr.label(
-    doc = "The package's `hook/link.dart`, if it has one. An application " +
-          "that lists the package's assets in `link_hook_assets` runs it " +
-          "over the compiler's recorded uses in a release or profile build. " +
-          "Keep it out of `srcs`; its imports (`hooks`, `data_assets`, " +
-          "`record_use`) are ordinary `deps`.",
-    allow_single_file = [".dart"],
-)

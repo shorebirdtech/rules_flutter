@@ -139,6 +139,7 @@ void main() {
             'app.restart',
             params: {
               'appId': appId,
+              'fullRestart': true,
             },
           );
           expect(
@@ -192,7 +193,7 @@ void main() {
           final restart = await dt.sendCommand(
             9,
             'app.restart',
-            params: {'appId': appId},
+            params: {'appId': appId, 'fullRestart': true},
           );
           final result = restart['result'] as Map<String, dynamic>? ?? {};
           expect(result['succeeded'], isTrue, reason: '$restart');
@@ -339,6 +340,7 @@ void main() {
       );
     },
     skip: !Platform.isMacOS ? 'macOS only' : null,
+    tags: 'macos',
   );
 
   // -- Web ---------------------------------------------------------------
@@ -389,7 +391,10 @@ void main() {
         // url_launcher's web implementation.
         expect(summary, contains('launchOk=launch ok'));
 
-        // The curated `ext/` overlay packages: audio_session reaches web
+        // shared_preferences' web implementation (localStorage).
+        expect(summary, contains('prefs=roundtrip ok'));
+
+        // The curated `flutter/ext/` overlay packages: audio_session reaches web
         // through the overlay's own Dart, and record_android is Android-only
         // and must say so rather than throw.
         expect(summary, contains('audioSession=web: not supported'));
@@ -404,7 +409,7 @@ void main() {
       },
       timeout: const Timeout(Duration(minutes: 10)),
     );
-  });
+  }, tags: 'web');
 
   // -- iOS Simulator ----------------------------------------------------
   //
@@ -499,6 +504,7 @@ void main() {
             'app.restart',
             params: {
               'appId': appId,
+              'fullRestart': true,
             },
           );
           expect(
@@ -520,6 +526,7 @@ void main() {
       );
     },
     skip: !Platform.isMacOS ? 'macOS only (needs Xcode Simulator)' : null,
+    tags: 'ios_sim',
   );
 
   // -- Web / Chrome -----------------------------------------------------
@@ -609,6 +616,7 @@ void main() {
       );
     },
     skip: !Platform.isMacOS ? 'macOS only' : null,
+    tags: 'web',
   );
 
   group(
@@ -646,6 +654,7 @@ void main() {
         );
         expect(line, contains('appName=plugin_example'));
         expect(line, contains('launchOk=launch ok'));
+        expect(line, contains('prefs=roundtrip ok'));
       }
 
       // The DDC synthetic entrypoint has to carry both the registrant import
@@ -672,6 +681,7 @@ void main() {
         timeout: const Timeout(Duration(minutes: 6)),
       );
     },
+    tags: 'web',
   );
 
   // -- Android ----------------------------------------------------------
@@ -681,10 +691,10 @@ void main() {
   // test does not start or stop emulators (mirrors how Bazel Android
   // instrumentation tests behave).
   //
-  // Probed exactly once, here, and read by both the group's `skip:` and the
-  // test body. Two calls could disagree — a phone unplugged between them —
-  // and the one that decided whether to skip would not be the one that
-  // decided what to run against.
+  // Probed exactly once, here, and read by the test body, so a phone
+  // unplugged between two probes cannot make them disagree. A bench without
+  // Android excludes the group with `--exclude-tags android`; otherwise a
+  // missing device fails it.
   final android = AndroidDeviceProbe.detect();
   group(
     'Android e2e',
@@ -704,17 +714,10 @@ void main() {
         // connected phone when both are attached; the probe honors it and
         // fails if it names something adb does not offer.
         //
-        // The group only skips for a genuinely empty bench, so reaching here
-        // with anything but a found device means the probe failed — a broken
-        // or missing adb, or hardware in a state nothing can run on. That is
-        // a tooling failure and it fails the test, loudly, saying which.
-        final probe = android;
-        if (probe is! AndroidDeviceFound) {
-          fail(
-            'Android device detection failed: '
-            '${(probe as AndroidProbeFailed).reason}',
-          );
-        }
+        // Anything but a found device fails the test, saying which: an empty
+        // bench, a broken or missing adb, or hardware in a state nothing can
+        // run on.
+        final probe = android.require();
         // A phone and an emulator are different test surfaces — different
         // GPU, different ABI path, different timing — so a green run has to
         // name which one it covered rather than leaving it to be inferred from
@@ -732,7 +735,7 @@ void main() {
         );
       });
     },
-    skip: android.skipReason,
+    tags: 'android',
   );
 }
 
@@ -772,7 +775,7 @@ String _documentsPath(String line) =>
 ///
 /// Through AppKit's `NSRunningApplication` in JavaScript for Automation, which
 /// needs no Accessibility or Automation grant — unlike System Events, which
-/// `agent_e2e_test` uses and has to skip without. Bringing an app to the front
+/// `agent_e2e_test` uses and fails without, naming the cause. Bringing an app to the front
 /// goes through `open`, because an app activating another is refused under
 /// macOS's cooperative activation.
 ///

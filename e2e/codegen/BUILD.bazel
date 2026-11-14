@@ -1,14 +1,14 @@
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_test")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:macos.bzl", "macos_application")
-load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
-load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_analysis_config", "dart_analysis_options", "dart_binary", "dart_codegen", "dart_library")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_gen_l10n", "flutter_library", "flutter_native_library", "flutter_test", "flutter_tester_binary")
+load("@rules_dart//dart:defs.bzl", "dart_aggregate_codegen", "dart_analysis_config", "dart_analysis_options", "dart_codegen", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_gen_l10n", "flutter_library", "flutter_native_library", "flutter_test", "flutter_tester_binary")
 load(
     "@rules_flutter//flutter:macos.bzl",
     "MACOS_MINIMUM_OS_VERSION",
+    "flutter_apple_bundle_version",
+    "flutter_macos_app_framework_gen",
     "flutter_macos_engine",
-    "flutter_macos_framework_gen",
     "flutter_macos_info_plist_gen",
     "flutter_macos_menu_xib_gen",
     "flutter_macos_native_libs_gen",
@@ -16,34 +16,32 @@ load(
     "flutter_macos_runner_lib_gen",
 )
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
+load("@rules_flutter//flutter/ext/go_router:defs.bzl", "go_router_codegen")
 load(":whole_program_test.bzl", "whole_program_test")
-
-# The generator scripts this package's codegen rules invoke by file label.
-# Named once here because the `dart_binary` analysis handles below iterate it.
-_GENERATOR_SCRIPTS = [
-    "simple_generator",
-    "json_generator",
-    "aggregate_generator",
-]
 
 # --- Per-file codegen (dart_codegen) ---
 # Generates a .g.dart companion for each source file independently.
 # dart_codegen is single-source, so each input file gets its own target.
 
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "codegen_e2e",
+)
+
 dart_codegen(
     name = "model_generated",
-    package_name = "codegen_e2e",
     src = "lib/model.dart",
-    generator = "tools/simple_generator.dart",
+    generator = "//tools:simple_generator",
     output_suffixes = [".g.dart"],
+    package = ":pubspec-metadata",
 )
 
 dart_codegen(
     name = "order_generated",
-    package_name = "codegen_e2e",
     src = "lib/order.dart",
-    generator = "tools/simple_generator.dart",
+    generator = "//tools:simple_generator",
     output_suffixes = [".g.dart"],
+    package = ":pubspec-metadata",
 )
 
 # --- Aggregate codegen (dart_aggregate_codegen) ---
@@ -51,13 +49,13 @@ dart_codegen(
 
 dart_aggregate_codegen(
     name = "model_registry",
-    package_name = "codegen_e2e",
     srcs = [
         "lib/model.dart",
         "lib/order.dart",
     ],
-    generator_script = "tools/aggregate_generator.dart",
+    generator = "//tools:aggregate_generator",
     outputs = ["lib/registry.g.dart"],
+    package = ":pubspec-metadata",
 )
 
 # --- Flutter app consuming a generated part ---
@@ -67,15 +65,14 @@ dart_aggregate_codegen(
 
 dart_codegen(
     name = "user_json",
-    package_name = "codegen_e2e",
     src = "lib/user.dart",
-    generator = "tools/json_generator.dart",
+    generator = "//tools:json_generator",
     output_suffixes = [".g.dart"],
+    package = ":pubspec-metadata",
 )
 
 flutter_application(
     name = "app",
-    package_name = "codegen_e2e",
     srcs = [
         "lib/user.dart",
         ":user_json",
@@ -89,6 +86,7 @@ flutter_application(
     # process cannot take it. `native_libs_reload_e2e_test.dart` drives both
     # directions off it.
     native_deps = [":native_add_lib"],
+    package = ":pubspec-metadata",
     deps = [
         "//dep_lib",
         "//dep_part",
@@ -103,7 +101,7 @@ flutter_application(
 # This exists specifically so the dev tool's hot-reload path is exercised
 # against an app whose *own* Dart package is source-assembled: `:app` mixes a
 # source-tree file (lib/user.dart) with a generated one (:user_json), so
-# `colocate_packages` rewrites the app package's lib_root to an assembled
+# `colocate_packages` rewrites the app package's package_root to an assembled
 # `*.pkgsrcs` tree-artifact, and its package_config.json rootUri becomes
 # `app.codegen_e2e.pkgsrcs` rather than the source-tree `../../..`. Pure
 # source-tree examples (macos_example, hello_world) never produce this shape,
@@ -139,7 +137,7 @@ flutter_native_library(
     library = "//native_add:native_add_shared",
 )
 
-flutter_macos_framework_gen(
+flutter_macos_app_framework_gen(
     name = "app_framework",
     application = ":app",
 )
@@ -158,10 +156,9 @@ flutter_macos_engine(
     name = "flutter_engine",
 )
 
-apple_bundle_version(
+flutter_apple_bundle_version(
     name = "app_version",
-    build_version = "1.0",
-    short_version_string = "1.0",
+    application = ":app",
     tags = ["manual"],
 )
 
@@ -238,12 +235,65 @@ build_test(
 # generated companion.
 flutter_test(
     name = "user_test",
-    package_name = "codegen_e2e",
     srcs = [
         "lib/user.dart",
         ":user_json",
     ],
     main = "test/user_test.dart",
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter_test"],
+)
+
+# --- A builder rules_flutter ships: go_router_builder ---
+# lib/routes.dart declares `@TypedGoRoute` routes and `part 'routes.g.dart'`;
+# `go_router_codegen` runs the builder, which resolves go_router's and
+# Flutter's types, and the test drives the routes it writes in a router.
+
+go_router_codegen(
+    name = "routes_gen",
+    srcs = ["lib/routes.dart"],
+    annotation_dep = "@deps//:go_router",
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_test(
+    name = "routes_test",
+    srcs = [
+        "lib/routes.dart",
+        ":routes_gen",
+    ],
+    main = "test/routes_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:go_router",
+    ],
+)
+
+# --- A generator that resolves dart:ui ---
+# lib/swatch.dart imports Flutter and has `Color`, `Offset` and `Size` fields.
+# `ui_type_generator` throws on a type that does not resolve, so this building
+# at all shows the action's analysis has Flutter's `dart:ui`.
+
+dart_codegen(
+    name = "swatch_gen",
+    src = "lib/swatch.dart",
+    generator = "//tools:ui_type_generator",
+    output_suffixes = [".g.dart"],
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_test(
+    name = "swatch_test",
+    srcs = [
+        "lib/swatch.dart",
+        ":swatch_gen",
+    ],
+    main = "test/swatch_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -258,11 +308,10 @@ flutter_test(
 # is the host the test runs on.
 flutter_test(
     name = "native_asset_test",
-    package_name = "codegen_e2e",
     main = "test/native_asset_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "//native_add",
-        "@deps//:flutter",
         "@deps//:flutter_test",
     ],
 )
@@ -274,19 +323,18 @@ flutter_test(
 # asset is built for the transitioned platform and must still load.
 platform(
     name = "host_transitioned",
-    flags = ["--@rules_flutter//flutter:extra_dart_defines=PLATFORM_TRANSITIONED=true"],
+    flags = ["--@rules_dart//dart:extra_dart_defines=PLATFORM_TRANSITIONED=true"],
     parents = ["@platforms//host"],
 )
 
 flutter_test(
     name = "transitioned_native_asset_test_untransitioned",
-    package_name = "codegen_e2e",
     main = "test/transitioned_native_asset_test.dart",
+    package = ":pubspec-metadata",
     # Fails untransitioned, by design; only the transition below runs it.
     tags = ["manual"],
     deps = [
         "//native_add",
-        "@deps//:flutter",
         "@deps//:flutter_test",
     ],
 )
@@ -303,11 +351,10 @@ platform_transition_test(
 # library is not found. The action writes its stamp only if the suite passed.
 flutter_tester_binary(
     name = "native_asset_program",
-    package_name = "codegen_e2e",
     main = "test/native_asset_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "//native_add",
-        "@deps//:flutter",
         "@deps//:flutter_test",
     ],
 )
@@ -329,15 +376,14 @@ build_test(
 # image from the runfiles tree.
 flutter_test(
     name = "shared_library_asset_test",
-    package_name = "codegen_e2e",
     code_assets = [
         "//shared_counter:package_combined",
         "//shared_counter:test_combined",
     ],
     main = "test/shared_library_asset_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "//shared_counter",
-        "@deps//:flutter",
         "@deps//:flutter_test",
     ],
 )
@@ -363,21 +409,10 @@ flutter_native_library(
 
 flutter_web_bundle(
     name = "web_app",
-    package_name = "codegen_e2e",
-    srcs = [
-        "lib/user.dart",
-        ":user_json",
-    ],
+    application = ":app",
     compiler = "dart2js",
-    main = "lib/main.dart",
     native_modules = [":demo_module"],
     renderer = "canvaskit",
-    deps = [
-        "//dep_lib",
-        "//dep_part",
-        "@deps//:flutter",
-        "@rules_flutter//flutter:material_icons",
-    ],
 )
 
 build_test(
@@ -408,7 +443,6 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "codegen_e2e",
     # Mirrors the app's srcs rather than globbing: `user.g.dart` is a build
     # output, so a source glob cannot see it, and analysing `lib/user.dart`
     # without it fails on the unresolved `part`. lib/model.dart and
@@ -419,6 +453,7 @@ flutter_library(
         "lib/user.dart",
         ":user_json",
     ],
+    package = ":pubspec-metadata",
     deps = [
         "//dep_lib",
         "//dep_part",
@@ -438,34 +473,14 @@ flutter_library(
 # anything from Flutter, so nothing here needs `sky_engine`.
 dart_library(
     name = "models_lib",
-    package_name = "codegen_e2e",
     srcs = [
         "lib/model.dart",
         "lib/order.dart",
         ":model_generated",
         ":order_generated",
     ],
+    package = ":pubspec-metadata",
 )
-
-# Analysis handles for the generator scripts.
-#
-# `generator` and `generator_script` take a bare `.dart` file label — the
-# script runs as `dart <script>` with no package resolution of its own — so
-# no target owns the file, and the analysis aspect checks only files a target
-# owns. A `dart_binary` over the same source supplies the owner.
-#
-# Deliberately not wired into any codegen rule. `generator_bin` enlists its
-# executable in the persistent-worker protocol (see
-# `dart/private/dart_aggregate_codegen.bzl`), which these plain scripts do not
-# speak, so moving one into that slot to gain a target would hand it worker
-# requests it cannot answer.
-#
-# `options`, matching the test-source analyze targets above: these generators
-# hold to the same very_good_analysis bar as the app code.
-[dart_binary(
-    name = name,
-    main = "tools/%s.dart" % name,
-) for name in _GENERATOR_SCRIPTS]
 
 # --- Localizations (flutter_gen_l10n) ---
 # Exercises: the vendored `flutter gen-l10n` generator end to end — arb files in,
@@ -486,9 +501,9 @@ flutter_gen_l10n(
 
 flutter_test(
     name = "l10n_test",
-    package_name = "codegen_e2e",
     srcs = [":app_l10n"],
     main = "test/l10n_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_localizations",
@@ -502,9 +517,9 @@ flutter_test(
 # the spelling every golden suite needs.
 flutter_test(
     name = "golden_test",
-    package_name = "codegen_e2e",
     data = glob(["test/goldens/**"]),
     main = "test/golden_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -515,8 +530,8 @@ flutter_test(
 # not "fix" it by adding one.
 flutter_test(
     name = "golden_undeclared_test",
-    package_name = "codegen_e2e",
     main = "test/golden_undeclared_test.dart",
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -529,8 +544,8 @@ flutter_test(
 # add `@deps//:flutter_test` to it.
 flutter_test(
     name = "test_api_only_test",
-    package_name = "codegen_e2e",
     main = "test/test_api_only_test.dart",
+    package = ":pubspec-metadata",
     deps = ["@deps//:test_api"],
 )
 

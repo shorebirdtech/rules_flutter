@@ -24,83 +24,40 @@
 ///     --strategy=TestRunner=standalone
 ///
 /// Pass criteria: the app writes
-/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2` to `$TMPDIR/ffi_result.txt`.
+/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2
+/// negate(5)=-5 kept(20)=21` to `$TMPDIR/ffi_result.txt`.
 library;
-
-// This script's diagnostics are its product: it reports what it found in
-// the built artifact to the bazel test log, so `print` is its output
-// channel rather than a stray debugging statement.
-// ignore_for_file: avoid_print
 
 import 'dart:io';
 
+import 'package:rules_flutter_e2e_testing/archive.dart';
+import 'package:rules_flutter_e2e_testing/marker_run.dart';
+
 const _marker =
-    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2';
+    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2 '
+    'negate(5)=-5 kept(20)=21';
 const _timeout = Duration(seconds: 30);
 
 Future<void> main() async {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
-  final zipPath = '$testSrcDir/$testWorkspace/ffi_macos.zip';
-  if (!File(zipPath).existsSync()) {
-    stderr.writeln('Bundle zip not found at $zipPath');
-    exit(1);
-  }
-
-  final tmpDir = Directory.systemTemp.createTempSync('ffi_macos_runtime');
-  Process? app;
+  final bundle = ExtractedArchive.fromRunfiles(
+    'ffi_macos.zip',
+    prefix: 'ffi_macos_runtime',
+  );
   try {
-    final unzip = Process.runSync('unzip', ['-q', zipPath, '-d', tmpDir.path]);
-    if (unzip.exitCode != 0) {
-      stderr.writeln('Failed to extract zip: ${unzip.stderr}');
-      exit(1);
-    }
-
-    final binary = '${tmpDir.path}/ffi_macos.app/Contents/MacOS/ffi_macos';
-    final markerDir = Directory('${tmpDir.path}/marker')..createSync();
-    final markerFile = File('${markerDir.path}/ffi_result.txt');
-
-    print('Launching $binary ...');
-    app = await Process.start(
-      binary,
-      const [],
-      environment: {...Platform.environment, 'TMPDIR': markerDir.path},
+    final markerDir = Directory('${bundle.path}/marker')..createSync();
+    await runUntilMarker(
+      binary: '${bundle.path}/ffi_macos.app/Contents/MacOS/ffi_macos',
+      markerFile: File('${markerDir.path}/ffi_result.txt'),
+      expected: _marker,
+      timeout: _timeout,
+      environment: {'TMPDIR': markerDir.path},
     );
-
-    print('Waiting up to ${_timeout.inSeconds}s for ${markerFile.path} ...');
-    final deadline = DateTime.now().add(_timeout);
-    String? contents;
-    while (DateTime.now().isBefore(deadline)) {
-      if (markerFile.existsSync()) {
-        contents = markerFile.readAsStringSync().trim();
-        break;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    }
-
-    if (contents == null) {
-      stderr.writeln(
-        'FAIL: app never wrote ${markerFile.path} — it likely '
-        'crashed before main() completed (native library failed to load?).',
-      );
-      exit(1);
-    }
-    print('App recorded: "$contents"');
-    if (contents != _marker) {
-      stderr.writeln('FAIL: expected "$_marker" but got "$contents".');
-      exit(1);
-    }
-    print(
-      'PASS: @Native asset bind (add), raw filename open (mul) and '
-      'the curated sqlite3 code asset all worked at runtime.',
+    stdout.writeln(
+      'PASS: @Native asset bind (add), raw filename open (mul), '
+      'the curated sqlite3 code asset and the prebuilt one (negate) all '
+      'worked at runtime.',
     );
   } finally {
-    app?.kill();
-    tmpDir.deleteSync(recursive: true);
+    bundle.dispose();
   }
 }

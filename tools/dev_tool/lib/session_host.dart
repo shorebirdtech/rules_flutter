@@ -17,6 +17,7 @@ import 'dart:io';
 
 import 'agent_command.dart';
 import 'bazel.dart';
+import 'chrome_profile.dart';
 import 'command_failure.dart';
 import 'command_runner.dart';
 import 'dev_tool_exception.dart';
@@ -25,8 +26,10 @@ import 'logging.dart';
 import 'machine_protocol.dart';
 import 'reload_pipeline.dart';
 import 'session.dart';
+import 'tooling_daemon.dart';
 import 'shutdown_signals.dart';
 import 'teardown.dart';
+import 'tool_services.dart';
 
 class SessionHost {
   /// Every app this command is driving, in launch (or connect) order.
@@ -61,6 +64,28 @@ class SessionHost {
     enabled: _isMachine,
     commandRunner: commandRunner,
   );
+
+  /// The `reloadSources` and `hotRestart` services every VM service client of
+  /// this run registers, routed to this run's `app.hotReload` and
+  /// `app.restart`. See [ToolServices].
+  ///
+  /// Handed to a client only by a run that can reload: one with hot reload
+  /// off registers nothing, so DevTools hides buttons that could only fail.
+  late final ToolServices toolServices = ToolServices(
+    commands: commandRunner,
+    report: (action, result, {required method}) => reportReloadCommand(
+      action,
+      result,
+      sessionReportLog(protocol),
+      method: method,
+      announce: (params) => announceReloadResult(protocol, params),
+    ),
+  );
+
+  /// The Dart Tooling Daemon this run registers its apps with, once the
+  /// command knows the toolchain's `dart`. Null for a run that serves no VM
+  /// service, and until then. See [RunToolingDaemon].
+  RunToolingDaemon? toolingDaemon;
 
   /// Owns everything created after `app.started`. See [Teardown].
   final Teardown teardown = Teardown();
@@ -154,6 +179,44 @@ class SessionHost {
     }
   }
 
+  /// End the run once every app in [sessions] has ended for good, whatever
+  /// the run is doing at that moment.
+  ///
+  /// The session loop ends on the same thing, but a run reaches it only after
+  /// its setup, and setup goes on past the launch: the hot-reload pipeline is
+  /// a bazel build and a compile of its own, minutes long on a cold cache. An
+  /// app closed (or finished) in that window leaves that work nothing to
+  /// serve, so the teardown runs then: it stops the bazel commands in flight,
+  /// which is what ends the setup step waiting on them, and the run exits as
+  /// the session loop would have. A crash ends the run through [fail] anyway.
+  ///
+  /// Called once the launches are done, so that [sessions] is every app the
+  /// run has. Ending the run earlier, while another device's launch is still
+  /// to come, would take that one down with it.
+  void endWhenEveryAppHasEnded() {
+    if (sessions.isEmpty) return;
+    unawaited(
+      Future.wait([for (final s in sessions) s.terminated]).then((_) async {
+        if (teardown.hasRun) return;
+        _logger.info({
+          'message': 'all_apps_ended',
+          'text': sessions.length == 1
+              ? 'The app has ended; stopping the run.'
+              : 'Every app has ended; stopping the run.',
+        });
+        try {
+          await performCleanup();
+        } catch (e) {
+          _logger.warning({
+            'message': 'cleanup_failed',
+            'text': 'Warning: cleanup after the apps ended failed: $e',
+            'error': '$e',
+          });
+        }
+      }),
+    );
+  }
+
   /// End the run because of a failure that surfaced after it was already live,
   /// and so could not simply be thrown where it was found.
   ///
@@ -183,21 +246,58 @@ class SessionHost {
   /// The single place either command is registered, for `run` and `attach`
   /// alike.
   ///
-  /// `fullRestart: false` is the machine protocol's way of asking for a reload
-  /// through the restart command, which is what a `flutter run`-shaped client
-  /// sends; it dispatches to [ReloadPipeline.hotReload].
+  /// `app.restart` follows upstream's `flutter run --machine` contract: a
+  /// missing `fullRestart` means `false`, a hot reload, so a client written
+  /// for `flutter run` does not lose state. `fullRestart: true` is the restart.
+  /// `app.hotReload` stays as the explicit form of the same reload.
   void registerReloadCommands(ReloadPipeline pipeline) {
     commandRunner.register(
       'app.hotReload',
       pipeline.hotReload,
       longRunning: true,
     );
-    commandRunner.register('app.restart', (params) async {
-      final fullRestart = params['fullRestart'] as bool? ?? true;
-      return fullRestart
-          ? pipeline.restart(params)
-          : pipeline.hotReload(params);
-    }, longRunning: true);
+    commandRunner.register(
+      'app.restart',
+      restartCommand(restart: pipeline.restart, hotReload: pipeline.hotReload),
+      longRunning: true,
+    );
+  }
+
+  /// The `app.restart` handler: [restart] when `fullRestart` is `true`,
+  /// [hotReload] otherwise.
+  ///
+  /// Upstream's `app.restart` also takes `pause`, `reason` and `debounce`.
+  /// `reason` only labels the restart in upstream's analytics and `debounce`
+  /// merges requests that arrive within 50 ms of each other; this tool's
+  /// command runner already runs one reload or restart at a time, so both are
+  /// accepted and have no effect. `pause: true` asks for the isolate to be left
+  /// paused after the reload, which this tool does not do, so it is refused
+  /// rather than ignored: a client that asked for it would otherwise believe
+  /// it got it.
+  static CommandHandler restartCommand({
+    required CommandHandler restart,
+    required CommandHandler hotReload,
+  }) {
+    return (params) async {
+      final fullRestart = _boolParam(params, 'fullRestart');
+      if (_boolParam(params, 'pause')) {
+        throw const CommandFailure.badRequest(
+          "'pause: true' is not supported: flutter_bazel does not leave the "
+          'isolate paused after a reload or restart.',
+        );
+      }
+      return fullRestart ? restart(params) : hotReload(params);
+    };
+  }
+
+  static bool _boolParam(Map<String, dynamic> params, String name) {
+    final value = params[name];
+    if (value != null && value is! bool) {
+      throw CommandFailure.badRequest(
+        "Invalid '$name': $value; expected a bool",
+      );
+    }
+    return value as bool? ?? false;
   }
 
   /// Register the commands that do not depend on a reload pipeline: stopping
@@ -239,23 +339,23 @@ class SessionHost {
   /// `ext.rules_flutter.*` extensions it proxies to.
   ///
   /// Conditional for the same reason `app.buildInfo` and `app.setViewport`
-  /// are: the command list is a statement about this run. Those extensions
-  /// need a VM service to be registered against, and on a browser only the DDC
-  /// dev loop has one — a `--wasm` or `--profile` web run serves a bundle
-  /// built by dart2wasm or dart2js, where `dart:developer`'s `registerExtension`
-  /// is a no-op stub and there is no service to reach it through anyway. Such
-  /// a run would advertise the whole surface and answer every call with
-  /// `no VM service for <appId>` a minute later, which reads as a connection
-  /// that failed rather than one that was never going to exist.
+  /// are: the command list is a statement about this run. Native and the DDC
+  /// dev loop reach the extensions over a VM service, and a debug web bundle
+  /// (`--wasm`, a debug `--no-hot`) over a bridge the page installs, driven
+  /// through the DevTools protocol. A profile or release bundle compiles the
+  /// extensions out, and would otherwise advertise the whole surface and
+  /// answer every call with a failure that reads as a connection problem
+  /// rather than as a build that never had them.
   void registerAgentCommands() =>
       setUpAgentCommands(commandRunner, findSession);
 
-  /// Offer `app.pressKey` on its own, for a web run with no agent surface.
+  /// Offer `app.pressKey` on its own, for a web run with no agent surface (a
+  /// non-debug bundle).
   ///
   /// The one `app.*` command such a run can answer: its keys go to the
-  /// browser over the DevTools protocol, which needs no VM service. With no
-  /// VM service there is nothing to ask whether the app has gone idle
-  /// afterwards, so it answers without waiting and says so.
+  /// browser over the DevTools protocol, which needs nothing from the app.
+  /// With no agent extensions in the app there is nothing to ask whether it
+  /// has gone idle afterwards, so it answers without waiting and says so.
   void registerPressKey() =>
       registerPressKeyCommand(commandRunner, findSession, canSettle: false);
 
@@ -302,7 +402,14 @@ class SessionHost {
         'path': '/sessions/{appId}/screenshot/native',
         'description':
             'native OS screenshot (PNG; waits for the app to go idle first — '
-            '&settle=false to capture this instant)',
+            '&settle=false to capture this instant; &screen=<id or name> on a '
+            'device with several screens)',
+      },
+      {
+        'method': 'GET',
+        'path': '/sessions/{appId}/screens',
+        'description':
+            'the device\'s screens, and which one the app is on (JSON)',
       },
       {
         'method': 'GET',
@@ -451,13 +558,23 @@ class SessionHost {
         await performCleanup();
         await closeTransports();
       },
-      exitProcess: exitProcess ?? exit,
+      exitProcess: exitProcess ?? exitReleasingBrowsers,
       logger: _logger,
     );
     for (final stream in signals ?? _processShutdownSignals()) {
       _signalSubscriptions.add(handler.listen(stream));
     }
   }
+}
+
+/// Exit now, ending any browser this process started first.
+///
+/// The exit a second signal asks for does not wait for the orderly shutdown,
+/// and a browser left running by a tool that has gone is an orphan: nothing
+/// is left to stop it or to delete its profile.
+Never exitReleasingBrowsers(int code) {
+  ChromeProfile.releaseAllNow();
+  exit(code);
 }
 
 /// Every signal this platform lets a run be stopped with.

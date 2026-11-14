@@ -1,0 +1,157 @@
+"E2e test: package:integration_test suites run in a real app, reported per test, by `flutter_*_integration_test`"
+
+module(name = "rules_flutter_integration_test_example")
+
+bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "rules_dart", version = "0.9.1")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "apple_support", version = "2.12.0")
+bazel_dep(name = "rules_apple", version = "5.4.0")
+bazel_dep(name = "rules_cc", version = "0.2.28")
+bazel_dep(name = "rules_swift", version = "4.2.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+
+local_path_override(
+    module_name = "rules_flutter",
+    path = "../..",
+)
+
+flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
+flutter.toolchain(flutter_version = "3.47.9")
+
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
+flutter_pub.from_lock(
+    name = "deps",
+    lock = "//:pubspec.lock",
+)
+
+use_repo(flutter, "flutter_ios_engine", "flutter_macos_engine", "flutter_web_sdk")
+
+use_repo(flutter_pub, "deps", "dev_tool_deps")
+
+# Android, as the README's Android section sets it up.
+bazel_dep(name = "rules_android", version = "0.8.1")
+bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+
+# rules_android_ndk 0.1.5, its newest release, links every arm64 library with
+# `-Wl,-z,max-page-size=4096`, and rules_flutter's check of an APK's native
+# libraries refuses them: a device with 16 KB pages cannot load them. Upstream
+# fixed it in efc0c191 (#121); this is a later commit of its main branch. Drop
+# the override for the first release that has the fix.
+git_override(
+    module_name = "rules_android_ndk",
+    commit = "9946c72d5b617115d34dc2efb334f829c558a87b",
+    remote = "https://github.com/bazelbuild/rules_android_ndk.git",
+)
+
+bazel_dep(name = "rules_jvm_external", version = "7.2")
+
+# rules_android starts its tool JVMs with an initial heap as large as the cap
+# (-Xms3G for resource processing, -Xms8g for desugar, D8 and R8), and Windows
+# charges a JVM's initial heap against the commit limit as it starts, so a few
+# at once fail an Android build on a Windows host with "The paging file is too
+# small". The patch keeps every cap and drops the initial sizes; the README's
+# "Building on Windows" asks the same of every Android build on Windows. Drop it
+# once a rules_android release does.
+single_version_override(
+    module_name = "rules_android",
+    patch_strip = 1,
+    patches = [
+        "//patches:rules_android_no_initial_heap.patch",
+        # rules_android puts the -A and -R arguments of `aapt2 link` on its
+        # command line, one per library, and an app with about a hundred
+        # libraries passes Windows' 32,767-character limit. The patch writes -R
+        # to a file by length rather than only past 200 entries, and leaves out
+        # asset directories with nothing to package. Drop it once a
+        # rules_android release does.
+        "//patches:rules_android_aapt2_command_length.patch",
+    ],
+)
+
+# The Android SDK and NDK, downloaded at pinned versions and checked against
+# their checksums rather than found on the machine, so the build needs no
+# `ANDROID_HOME` or `ANDROID_NDK_HOME`. `.bazelrc` accepts their licences.
+bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependency = True)
+
+android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
+
+# The Android platform the app compiles against, and the build tools.
+android.sdk(
+    build_tools_version = "35.0.0",
+    version = "35",
+)
+
+# The NDK CC toolchain, used for native and FFI deps built for Android and
+# to strip the engine's native libraries, as a Gradle build does: the NDK
+# Flutter's Gradle plugin builds with. `api_level` is your app's
+# `min_sdk_version` (24 unless you set it).
+android.ndk(
+    api_level = 24,
+    version = "r28c",
+)
+use_repo(android, "androidndk", "androidsdk")
+
+# Every module's `@androidsdk` and `@androidndk` (rules_android's,
+# rules_android_ndk's, rules_flutter's) are these.
+rules_android_sdk = use_extension(
+    "@rules_android//rules/android_sdk_repository:rule.bzl",
+    "android_sdk_repository_extension",
+    dev_dependency = True,
+)
+
+override_repo(rules_android_sdk, "androidsdk")
+
+rules_android_ndk = use_extension(
+    "@rules_android_ndk//:extension.bzl",
+    "android_ndk_repository_extension",
+    dev_dependency = True,
+)
+
+override_repo(rules_android_ndk, "androidndk")
+
+register_toolchains(
+    "@androidndk//:all",
+    "@androidsdk//:all",
+    dev_dependency = True,
+)
+
+# What the integration_test package's Gradle build declares, joining
+# rules_flutter's artifacts in one resolution, with a lock of this module's.
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(
+    name = "rules_flutter_maven",
+    artifacts = [
+        "androidx.test.espresso:espresso-core:3.6.1",
+        "androidx.test:rules:1.6.1",
+        "androidx.test:runner:1.6.2",
+        "com.google.guava:guava:28.1-android",
+    ],
+    known_contributing_modules = ["rules_flutter"],
+    lock_file = "//:rules_flutter_maven_install.json",
+    repositories = [
+        "https://maven.google.com",
+        "https://repo1.maven.org/maven2",
+    ],
+)
+use_repo(maven, "rules_flutter_maven")
+
+# Hermetic C++ toolchain for Linux arm64 execution platforms, so a C++ tool
+# built for the exec platform (zipper, xmllint) can be compiled when Bazel runs
+# actions on a Linux arm64 worker. Only the Linux-exec, Linux-target toolchain
+# exists: Mac and iOS builds keep apple_support's toolchain. It is registered
+# only on request, with `--extra_toolchains=@llvm_toolchains//:all` (for
+# example in .bazelrc.user, for builds that run on a Linux arm64 worker):
+# registering it here would make every build fetch llvm-project's sources,
+# which toolchain resolution loads the generated package from.
+bazel_dep(name = "llvm", version = "0.8.26", dev_dependency = True)
+
+llvm_tc = use_extension("@llvm//extensions:toolchain.bzl", "toolchain", dev_dependency = True)
+llvm_tc.exec(
+    arch = "aarch64",
+    os = "linux",
+)
+llvm_tc.target(
+    arch = "aarch64",
+    os = "linux",
+)
+use_repo(llvm_tc, "llvm_toolchains")

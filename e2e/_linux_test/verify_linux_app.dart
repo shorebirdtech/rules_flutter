@@ -42,7 +42,9 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
-  final appName = Uri.parse(bundlePath).pathSegments.last;
+  final appName = Directory(
+    bundlePath,
+  ).absolute.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
   final binaryPath = '$bundlePath/$appName';
 
   if (!File(binaryPath).existsSync()) {

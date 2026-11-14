@@ -1,0 +1,22 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "web_variant_select",
+)
+
+# A library whose dependency is one of two `web_variant` packages by web
+# platform, for the bundle tests in `web_test.bzl`: the `js` one for dart2js and
+# DDC, the `wasm` one for dart2wasm and the VM. The `select()` is here and not
+# on the bundle because a `select()` resolves in its own target's
+# configuration, where the bundle's web platform is not yet set.
+flutter_library(
+    name = "select",
+    srcs = ["lib/web_variant_select.dart"],
+    package = ":pubspec-metadata",
+    visibility = ["//flutter/tests:__pkg__"],
+    deps = select({
+        "@rules_dart//dart/constraints:js": ["//flutter/tests/web_variants/js:variant"],
+        "//conditions:default": ["//flutter/tests/web_variants/wasm:variant"],
+    }),
+)

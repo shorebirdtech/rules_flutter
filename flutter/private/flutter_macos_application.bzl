@@ -2,7 +2,7 @@
 
 Two rules:
 
-1. `flutter_macos_framework` — assembles the AOT dylib (release) or kernel
+1. `flutter_macos_app_framework` — assembles the AOT dylib (release) or kernel
    .dill (debug) into an App.framework with macOS directory structure.
    The framework is placed into the .app via additional_contents (NOT linked
    against the runner binary), matching how `flutter build macos` works.
@@ -10,15 +10,27 @@ Two rules:
 2. `flutter_macos_native_libs` — stages native .dylib files, flat under their
    basenames, for bundling via additional_contents.
 
-These are exported as `flutter_macos_framework_gen` and `flutter_macos_native_libs_gen`
+These are exported as `flutter_macos_app_framework_gen` and `flutter_macos_native_libs_gen`
 from flutter/macos.bzl.
 """
 
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("@apple_support//lib:apple_support.bzl", "apple_support")
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
 
-# -- flutter_macos_framework (App.framework assembly) -------------------------
+# framework_import_support is rules_apple-internal, but it is the only way to
+# construct AppleFrameworkImportInfo (its init is banned), which is how a dSYM
+# reaches the bundle's `dsyms` output group. See `flutter_ios_application.bzl`.
+# buildifier: disable=bzl-visibility
+load("@build_bazel_rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
+load("@rules_dart//dart:utils.bzl", "program_assets_action_args")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
+load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "declare_dsym", "split_and_strip_aot_binary")
+load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
+load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "candidate_code_asset_libraries", "run_code_assets_tool")
+load("//flutter/private:program_analysis.bzl", "bundled_program_info")
+
+# -- flutter_macos_app_framework (App.framework assembly) -------------------------
 
 _APP_FRAMEWORK_INFO_PLIST = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -45,21 +57,18 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 </plist>
 """
 
-def _flutter_macos_framework_impl(ctx):
-    """Assembles App.framework as a versioned macOS framework (tree artifact).
+def _flutter_macos_app_framework_impl(ctx):
+    """Assembles App.framework as a flat macOS framework (tree artifact).
 
-    Uses the standard macOS versioned framework layout required by NSBundle:
+    The layout has no `Versions/` directory and no symlinks:
         App.framework/
-            App -> Versions/Current/App
-            Resources -> Versions/Current/Resources
-            Versions/
-                A/
-                    App                          (AOT dylib, release only)
-                    Resources/
-                        Info.plist
-                        flutter_assets/          (asset bundle)
-                        app.dill                 (kernel snapshot, debug only)
-                Current -> A
+            App                          (AOT binary, release only)
+            Resources/
+                Info.plist
+                flutter_assets/          (asset bundle)
+
+    In debug mode the kernel (`kernel_blob.bin`) and VM snapshots sit inside
+    `flutter_assets/`.
 
     The framework is NOT linked against the runner binary. Instead it is placed
     into the .app bundle via additional_contents, matching how `flutter build
@@ -84,81 +93,118 @@ def _flutter_macos_framework_impl(ctx):
     # fails analysis with conflicting actions.
     wrapper_dir = ctx.actions.declare_directory(ctx.label.name)
 
-    inputs = [flutter_assets]
-    shell_parts = [
-        "set -e",
-        'FW="$1/App.framework"',
-        'mkdir -p "$FW/Resources"',
-    ]
+    dsym_files = []
 
-    # $1 = wrapper dir, $2 = AOT/dill source, $3 = flutter_assets dir,
-    # $4/$5 = the VM snapshots (debug only)
-    args = ctx.actions.args()
-    args.add_all([wrapper_dir], expand_directories = False)
+    # What App.framework holds, in the order it is placed: the AOT binary
+    # (release only), the assets, the Info.plist, and in debug mode the kernel
+    # and VM snapshots inside the assets.
+    steps = []
 
-    if is_debug:
-        if app_info.kernel_dill:
-            inputs.append(app_info.kernel_dill)
-            args.add(app_info.kernel_dill)
-
-            # The debug engine looks for kernel_blob.bin in flutter_assets/.
-            # We copy it after flutter_assets is assembled (see shell_parts below).
-            shell_parts.append("")  # placeholder — kernel copy happens after flutter_assets
-        else:
-            args.add("")  # placeholder
-    else:
+    if not is_debug:
         if not app_info.aot_output:
-            fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
-        inputs.append(app_info.aot_output)
-        args.add(app_info.aot_output)
-        shell_parts.append('cp "$2" "$FW/App"')
+            fail("flutter_macos_app_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
 
-    args.add_all([flutter_assets], expand_directories = False)
+        # Extract the dSYM and strip the binary, as `flutter build macos` does.
+        # Not under the wrapper directory, which is all the bundle takes.
+        binary = ctx.actions.declare_file("%s_binary/App" % ctx.label.name)
+        dsym = declare_dsym(ctx, ctx.label.name + "_dsym")
+        dsym_files = dsym.files
+        split_and_strip_aot_binary(
+            ctx,
+            dylib = app_info.aot_output,
+            object = app_info.aot_object,
+            binary = binary,
+            dsym = dsym,
+            strip = app_info.strip_aot,
+        )
+        steps.append(("file", "App.framework/App", binary))
 
-    # Copy flutter_assets and write Info.plist inside Resources/.
-    shell_parts.extend([
-        'cp -RL "$3"/. "$FW/Resources/flutter_assets"',
-        'cat > "$FW/Resources/Info.plist" << \'PLISTEOF\'\n' + _APP_FRAMEWORK_INFO_PLIST + "PLISTEOF",
-    ])
+    steps.append(("tree", "App.framework/Resources/flutter_assets", flutter_assets))
+
+    # The engine must hold the app's CPU, and an app of a custom SDK keeps the
+    # record of the checked pieces it was built from.
+    sdk_record = ctx.attr._sdk_record[FlutterSdkRecordInfo]
+    arch = apple_support.target_arch_from_rule_ctx(ctx)
+    if sdk_record.engine_cpus and arch not in sdk_record.engine_cpus:
+        fail(("%s: the engine %s contains %s, and this build is for %s. " +
+              "Build the engine for %s, or build for %s.") % (
+            ctx.label,
+            sdk_record.engine_label,
+            ", ".join(sdk_record.engine_cpus),
+            arch,
+            arch,
+            ", ".join(sdk_record.engine_cpus),
+        ))
+    if sdk_record.record:
+        steps.append(("file", "App.framework/Resources/flutter_assets/flutter_sdk.json", sdk_record.record))
+
+    info_plist = ctx.actions.declare_file(ctx.label.name + "_framework_inputs/Info.plist")
+    ctx.actions.write(info_plist, _APP_FRAMEWORK_INFO_PLIST)
+    steps.append(("file", "App.framework/Resources/Info.plist", info_plist))
 
     # In debug mode, place the kernel dill and VM snapshots into flutter_assets/.
     # The debug engine looks for kernel_blob.bin there. The vm_snapshot_data and
     # isolate_snapshot_data are needed for the kernel service isolate (hot reload).
     if is_debug and app_info.kernel_dill:
-        shell_parts.append('cp "$2" "$FW/Resources/flutter_assets/kernel_blob.bin"')
-        vm_snapshot = tools.vm_isolate_snapshot
-        iso_snapshot = tools.isolate_snapshot
-        inputs.extend([vm_snapshot, iso_snapshot])
-        args.add(vm_snapshot)
-        args.add(iso_snapshot)
-        shell_parts.append('cp "$4" "$FW/Resources/flutter_assets/vm_snapshot_data"')
-        shell_parts.append('cp "$5" "$FW/Resources/flutter_assets/isolate_snapshot_data"')
+        steps.extend([
+            ("file", "App.framework/Resources/flutter_assets/kernel_blob.bin", app_info.kernel_dill),
+            ("file", "App.framework/Resources/flutter_assets/vm_snapshot_data", tools.vm_isolate_snapshot),
+            ("file", "App.framework/Resources/flutter_assets/isolate_snapshot_data", tools.isolate_snapshot),
+        ])
 
-    ctx.actions.run_shell(
-        command = "\n".join(shell_parts),
-        arguments = [args],
-        inputs = inputs,
-        outputs = [wrapper_dir],
+    assemble_directory(
+        ctx,
+        tools,
+        wrapper_dir,
+        steps,
         mnemonic = "FlutterMacOSFramework",
-        exec_group = PORTABLE,
-        execution_requirements = PATH_MAPPING,
         progress_message = "Assembling App.framework for %s" % ctx.label,
     )
 
-    return [DefaultInfo(files = depset([wrapper_dir]))]
+    providers = [
+        DefaultInfo(files = depset([wrapper_dir])),
+        OutputGroupInfo(dsym = depset(dsym_files)),
+    ]
+    if dsym_files:
+        # A framework import that imports no framework: all it carries is the
+        # dSYM, which rules_apple puts in the app's `dsyms` output group.
+        providers.append(framework_import_support.framework_import_info_with_dependencies(
+            build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
+            deps = [],
+            dsyms = dsym_files,
+        ))
 
-flutter_macos_framework = rule(
-    implementation = _flutter_macos_framework_impl,
-    attrs = {
-        "application": attr.label(
-            doc = "A flutter_application target providing FlutterApplicationInfo.",
-            mandatory = True,
-            providers = [FlutterApplicationInfo],
-        ),
-    },
+    # For the app to pass on to analysis (`flutter_apple_app`).
+    return providers + bundled_program_info(ctx.attr.application)
+
+flutter_macos_app_framework = rule(
+    implementation = _flutter_macos_app_framework_impl,
+    attrs = dicts.add(
+        XCODE_TOOL_ATTRS,
+        ASSEMBLE_DIRECTORY_ATTRS,
+        {
+            "application": attr.label(
+                doc = "A flutter_application target providing FlutterApplicationInfo.",
+                mandatory = True,
+                providers = [FlutterApplicationInfo],
+            ),
+            "_sdk_record": attr.label(
+                default = "//flutter/private:sdk_record",
+                providers = [FlutterSdkRecordInfo],
+            ),
+        },
+    ),
     # Copies and a plist: the same bytes on any host. Signing is rules_apple's.
+    # Only the release binary's dSYM and strip run Xcode's tools.
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Assembles the Flutter AOT dylib and assets into App.framework for macOS.",
+    fragments = XCODE_TOOL_FRAGMENTS,
+    toolchains = XCODE_TOOL_TOOLCHAINS,
+    doc = """Assembles the Flutter AOT dylib and assets into App.framework for macOS.
+
+The release binary is stripped, as `flutter build macos` strips it (not with
+`--no-strip` in the application's `extra_gen_snapshot_options`); its dSYM
+is made either way. It is in the `dsym` output group, and in the `dsyms` output
+group of the app that bundles this.""",
 )
 
 # -- flutter_macos_native_libs (dylib staging for additional_contents) -------
@@ -167,11 +213,13 @@ def _flutter_macos_native_libs_impl(ctx):
     """Stages native .dylib files flat, for bundling via additional_contents.
 
     Includes both the legacy `native_libs` set (from `native_deps`-style
-    FFI cc_library targets) and the modern `bundled_code_assets` set
-    contributed by `flutter_native_asset(link_mode = "dynamic_loading_bundle")`.
-    rules_apple's `additional_contents = {target: "Frameworks"}` machinery
-    code-signs the dylibs as part of the outer `macos_application` build —
-    no bespoke codesign action needed here.
+    FFI cc_library targets), which always ships, and the code assets
+    (`dart_code_asset(link_mode = "dynamic_loading_bundle")` libraries) that
+    ship: in a release build a package's link hook chooses among its code
+    assets, so the staging action reads which from the program's assets
+    file. rules_apple's `additional_contents = {target: "Frameworks"}`
+    machinery code-signs the dylibs as part of the outer `macos_application`
+    build — no bespoke codesign action needed here.
 
     Every library ships as `Contents/Frameworks/<basename>`, because that is
     where the loader finds it: a bare-name `DynamicLibrary.open` resolves
@@ -186,60 +234,26 @@ def _flutter_macos_native_libs_impl(ctx):
     that directory is what this target provides: rules_apple expands a tree
     artifact's contents into the destination, as it does for App.framework's
     wrapper. The directory is named after this target, which keeps two apps in
-    one package from declaring the same output.
-
-    Two different libraries with the same basename would overwrite one another
-    there, so that fails the build and names both.
+    one package from declaring the same output. No two libraries can share a
+    basename there: `flutter_application` checks every candidate.
     """
     app_info = ctx.attr.application[FlutterApplicationInfo]
-
-    # One library can arrive by both routes; the same path is the same library.
-    libs_by_path = {}
-    for lib in app_info.native_libs + app_info.bundled_code_assets.to_list():
-        libs_by_path[lib.path] = lib
-
-    libs_by_basename = {}
-    for lib in libs_by_path.values():
-        other = libs_by_basename.get(lib.basename)
-        if other:
-            fail(
-                ("%s: two native libraries would both be bundled as " +
-                 "Contents/Frameworks/%s:\n  %s (from %s)\n  %s (from %s)\n" +
-                 "macOS loads a bundled library by its file name, so only " +
-                 "one of them can ship. Rename one.") % (
-                    ctx.label,
-                    lib.basename,
-                    other.path,
-                    other.owner,
-                    lib.path,
-                    lib.owner,
-                ),
-            )
-        libs_by_basename[lib.basename] = lib
-
-    if not libs_by_basename:
+    if not app_info.native_libs and not candidate_code_asset_libraries(app_info.program_assets):
         return [DefaultInfo(files = depset())]
 
     staged = ctx.actions.declare_directory(ctx.label.name)
+    code_assets = program_assets_action_args(ctx.actions, app_info.program_assets, data = False)
     args = ctx.actions.args()
-    args.add_all([staged], expand_directories = False)
-    for basename, lib in libs_by_basename.items():
-        args.add(lib)
-        args.add(basename)
-    ctx.actions.run_shell(
-        command = "\n".join([
-            "set -e",
-            'out="$1"',
-            "shift",
-            'mkdir -p "$out"',
-            'while [ "$#" -gt 0 ]; do cp "$1" "$out/$2"; shift 2; done',
-        ]),
-        arguments = [args],
-        inputs = libs_by_basename.values(),
-        outputs = [staged],
+    args.add("--os", "macos")
+    args.add_all("--output", [staged], expand_directories = False)
+    args.add_all(app_info.native_libs, before_each = "--library")
+    run_code_assets_tool(
+        ctx,
+        "place",
+        [args, code_assets.args],
+        depset(app_info.native_libs, transitive = [code_assets.inputs]),
+        [staged],
         mnemonic = "FlutterMacOSNativeLibs",
-        exec_group = PORTABLE,
-        execution_requirements = PATH_MAPPING,
         progress_message = "Staging native libraries for %{label}",
     )
     return [DefaultInfo(files = depset([staged]))]
@@ -252,9 +266,9 @@ flutter_macos_native_libs = rule(
             mandatory = True,
             providers = [FlutterApplicationInfo],
         ),
-    },
+    } | CODE_ASSETS_TOOL_ATTRS,
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Stages native .dylib files under their basenames for macOS bundling via additional_contents.",
+    doc = "Stages the native .dylib files that ship under their basenames for macOS bundling via additional_contents.",
 )
 
 # -- flutter_macos_privacy_manifests (xcprivacy bundling) ---------------------

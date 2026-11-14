@@ -277,18 +277,19 @@ class _ForestSampler {
     final outputBase = (info.stdout as String).trim();
     final external = Directory('$outputBase/execroot/_main/external');
     // Found rather than named: the canonical repository name carries the
-    // module-extension mangling (`rules_flutter++flutter+deps__flutter`), which
-    // is not a string this script should pretend to know.
+    // module-extension mangling
+    // (`rules_flutter++pub+flutter_pub__flutter`), which is not a
+    // string this script should pretend to know.
     final matches = external.existsSync()
         ? external
               .listSync()
               .map((e) => e.path)
-              .where((p) => p.endsWith('+deps__flutter'))
+              .where((p) => p.endsWith('+flutter_pub__flutter'))
               .toList()
         : <String>[];
     if (matches.length != 1) {
       throw StateError(
-        'expected exactly one "+deps__flutter" entry under '
+        'expected exactly one "+flutter_pub__flutter" entry under '
         '${external.path}, found ${matches.length}: $matches',
       );
     }

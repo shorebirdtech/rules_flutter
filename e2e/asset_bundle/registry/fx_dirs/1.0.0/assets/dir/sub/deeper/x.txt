@@ -1,0 +1,1 @@
+assets/dir/sub/deeper/x.txt

@@ -1,0 +1,19 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "assert_violation_dep",
+)
+
+# A library that holds a constant breaking a `const` constructor's assertion,
+# for `//:const_violation_dep_test`. Compiling a program over it must fail, and
+# so does analysing it: it stays out of `//...`, reached only by the `manual`
+# program `//:const_violation_dep`.
+flutter_library(
+    name = "asserts_violation_dep",
+    srcs = ["lib/const_violation.dart"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    visibility = ["//:__pkg__"],
+    deps = ["//asserts_dep"],
+)

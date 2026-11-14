@@ -1,0 +1,25 @@
+# The packages the generators in this workspace are built from: `package:build`
+# and the shim runner rules_dart's `builder_shim_library` compiles (`analyzer`,
+# `bazel_worker`, ...), at versions rules_dart's `dart/ext/pubspec.yaml` allows.
+# `generator_pub_deps` in MODULE.bazel reads the lock beside this file. Resolve
+# it with the Flutter toolchain, as every lock here is:
+#
+#   bazel run //flutter/pub -- get --directory e2e/codegen/tools
+name: codegen_e2e_tools
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  analyzer: ^14.5.0
+  args: ^2.5.0
+  bazel_worker: ^1.1.0
+  build: ^4.0.0
+  crypto: ^3.0.0
+  glob: ^2.1.0
+  logging: ^1.3.0
+  package_config: ^3.0.0
+  path: ^1.9.0
+  pub_semver: ^2.2.0
+  yaml: ^3.1.0

@@ -6,10 +6,10 @@
 /// It is driven by what the build declares in `_dev_config.json` — NOT by
 /// heuristics about the entrypoint scheme or the app's own `lib/`:
 ///
-///  * `sourcePackages` (`{name, libRoot}` per first-party package): a file under
-///    a package's `lib/` is `package:<name>/<rel>`. That is what lets an edit in
-///    a dependency package, an assembled (codegen) package, or the app resolve
-///    to the right library.
+///  * `sourcePackages` (`{name, packageRoot}` per first-party package): a file
+///    under a package's `lib/` is `package:<name>/<rel>`. That is what lets an
+///    edit in a dependency package, an assembled (codegen) package, or the app
+///    resolve to the right library.
 ///  * `appSources` (`{path, uri}`): the files outside every package that the app
 ///    compiles under the app scheme — a `main` outside its package's `lib/`, as
 ///    `flutter run -t test_driver/app.dart` allows, and the sources beside it.
@@ -32,7 +32,7 @@ class SourceUriResolver {
 
   SourceUriResolver({
     required String workspaceRoot,
-    required List<({String name, String libRoot})> sourcePackages,
+    required List<({String name, String packageRoot})> sourcePackages,
     List<({String path, String uri})> appSources = const [],
   }) : _entries = _build(workspaceRoot, sourcePackages),
        _appSourceUris = {
@@ -46,15 +46,15 @@ class SourceUriResolver {
 
   static List<({String libDir, String packageName})> _build(
     String workspaceRoot,
-    List<({String name, String libRoot})> sourcePackages,
+    List<({String name, String packageRoot})> sourcePackages,
   ) {
     final entries = [
       for (final pkg in sourcePackages)
         (
           libDir: p.normalize(
-            pkg.libRoot.isEmpty
+            pkg.packageRoot.isEmpty
                 ? p.join(workspaceRoot, 'lib')
-                : p.join(workspaceRoot, pkg.libRoot, 'lib'),
+                : p.join(workspaceRoot, pkg.packageRoot, 'lib'),
           ),
           packageName: pkg.name,
         ),

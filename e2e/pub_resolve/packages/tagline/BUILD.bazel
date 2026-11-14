@@ -1,0 +1,18 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "tagline",
+)
+
+# The target is not named after the package: `flutter_pub.from_lock(resolve =
+# ...)` in MODULE.bazel states which target builds it, and nothing is found by
+# name.
+dart_library(
+    name = "tagline_lib",
+    srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
+    # The hub's repository aliases this target.
+    visibility = ["//visibility:public"],
+)

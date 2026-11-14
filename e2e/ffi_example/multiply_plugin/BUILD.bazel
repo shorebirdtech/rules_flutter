@@ -1,0 +1,42 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_plugin", "flutter_plugin_platform")
+
+# Demonstrate flutter_plugin with both dart_plugin_class and native_deps (see
+# `mul_plugin` for `native_deps` alone, and `add_plugin` for Native Assets).
+# The generated registrant calls MultiplyPlugin.registerWith(null) at startup,
+# and the native shared library is bundled into the application.
+flutter_plugin(
+    name = "multiply_plugin",
+    srcs = ["lib/multiply_plugin.dart"],
+    native_deps = ["//:multiply"],
+    platforms = [
+        ":ios",
+        ":linux",
+        ":macos",
+        ":windows",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+flutter_plugin_platform(
+    name = "ios",
+    dart_plugin_class = "MultiplyPlugin",
+    platform = "ios",
+)
+
+flutter_plugin_platform(
+    name = "linux",
+    dart_plugin_class = "MultiplyPlugin",
+    platform = "linux",
+)
+
+flutter_plugin_platform(
+    name = "macos",
+    dart_plugin_class = "MultiplyPlugin",
+    platform = "macos",
+)
+
+flutter_plugin_platform(
+    name = "windows",
+    dart_plugin_class = "MultiplyPlugin",
+    platform = "windows",
+)

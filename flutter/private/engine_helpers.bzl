@@ -1,132 +1,98 @@
 """Shared engine helpers for Flutter repository rules.
 
 Centralizes engine filegroup templates, binary name detection, platform
-mapping, and macOS double-zip extraction used by repositories.bzl,
-flutter_desktop_engine_repo.bzl, flutter_cross_repo.bzl, and
-flutter_desktop_cross_repo.bzl.
+mapping, and macOS double-zip extraction used by the engine repository rules.
 """
 
 load(":versions.bzl", "flutter_has_const_finder")
 
 # -- Engine filegroup templates ------------------------------------------------
-# Each template defines a filegroup named "engine_library" for a given OS.
+# One template per OS. `{name}` is the target's name, which says the build
+# mode of the engine it holds (see `engine_filegroup_for_os`); `{dir}` is where
+# that engine was extracted.
+#
+# Each glob is strict: every pattern must match a file, so a repo that lacks a
+# download fails when its package loads, naming the pattern, instead of
+# building and failing later in a rule that finds no header or library.
 
-MACOS_ENGINE_FILEGROUP = """
+_MACOS_ENGINE_FILEGROUP = """
 filegroup(
-    name = "engine_library",
-    srcs = glob(["engine/FlutterMacOS.framework/**"], allow_empty = True),
+    name = "{name}",
+    srcs = glob(["{dir}/FlutterMacOS.framework/**"]),
     visibility = ["//visibility:public"],
 )
 """
 
-LINUX_ENGINE_FILEGROUP = """
+_LINUX_ENGINE_FILEGROUP = """
 filegroup(
-    name = "engine_library",
-    srcs = glob(
-        ["engine/libflutter_linux_gtk.so", "engine/flutter_linux/*.h"],
-        allow_empty = True,
-    ),
+    name = "{name}",
+    srcs = glob(["{dir}/libflutter_linux_gtk.so", "{dir}/flutter_linux/*.h"]),
     visibility = ["//visibility:public"],
 )
 """
 
-WINDOWS_ENGINE_FILEGROUP = """
+_WINDOWS_ENGINE_FILEGROUP = """
 filegroup(
-    name = "engine_library",
+    name = "{name}",
     srcs = glob(
         [
-            "engine/flutter_windows.dll",
-            "engine/flutter_windows.dll.lib",
-            "engine/flutter_windows.h",
-            "engine/flutter_export.h",
-            "engine/flutter_messenger.h",
-            "engine/flutter_plugin_registrar.h",
-            "engine/flutter_texture_registrar.h",
+            "{dir}/flutter_windows.dll",
+            "{dir}/flutter_windows.dll.lib",
+            "{dir}/flutter_windows.h",
+            "{dir}/flutter_export.h",
+            "{dir}/flutter_messenger.h",
+            "{dir}/flutter_plugin_registrar.h",
+            "{dir}/flutter_texture_registrar.h",
             "cpp-client-wrapper/cpp_client_wrapper/include/flutter/*.h",
             "cpp-client-wrapper/cpp_client_wrapper/*.h",
             "cpp-client-wrapper/cpp_client_wrapper/*.cc",
         ],
-        allow_empty = True,
     ),
     visibility = ["//visibility:public"],
 )
 """
 
-LINUX_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(
-        ["engine-debug/libflutter_linux_gtk.so", "engine-debug/flutter_linux/*.h"],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
-"""
+_ENGINE_FILEGROUPS = {
+    "macos": _MACOS_ENGINE_FILEGROUP,
+    "linux": _LINUX_ENGINE_FILEGROUP,
+    "windows": _WINDOWS_ENGINE_FILEGROUP,
+}
 
-WINDOWS_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(
-        [
-            "engine-debug/flutter_windows.dll",
-            "engine-debug/flutter_windows.dll.lib",
-            "engine-debug/flutter_windows.h",
-            "engine-debug/flutter_export.h",
-            "engine-debug/flutter_messenger.h",
-            "engine-debug/flutter_plugin_registrar.h",
-            "engine-debug/flutter_texture_registrar.h",
-            "cpp-client-wrapper/cpp_client_wrapper/include/flutter/*.h",
-            "cpp-client-wrapper/cpp_client_wrapper/*.h",
-            "cpp-client-wrapper/cpp_client_wrapper/*.cc",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
-"""
+ENGINE_MODES = ["release", "debug", "profile"]
 
-MACOS_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(["engine-debug/FlutterMacOS.framework/**"], allow_empty = True),
-    visibility = ["//visibility:public"],
-)
-"""
+def engine_target_name(mode):
+    """The name of the target that holds the engine of one build mode.
 
-def engine_debug_filegroup_for_os(target_os):
-    """Return the debug engine filegroup template string for the given OS.
+    A repo that holds engines names each for its mode, so a plain name never
+    stands for one mode. The plain `engine_library` is only ever the engine of
+    the build mode, chosen by a `select()`.
+
+    Args:
+        mode: One of "release", "debug" or "profile".
+
+    Returns:
+        "engine_release_library", "engine_debug_library" or "engine_profile_library".
+    """
+    if mode not in ENGINE_MODES:
+        fail("Unsupported engine mode: {}".format(mode))
+    return "engine_{}_library".format(mode)
+
+def engine_filegroup_for_os(target_os, mode, dir = "engine"):
+    """Return the filegroup of the engine of one build mode for the given OS.
 
     Args:
         target_os: One of "macos", "linux", or "windows".
+        mode: One of "release", "debug" or "profile"; names the target
+            (`engine_target_name`).
+        dir: The directory the engine archive was extracted into.
 
     Returns:
-        A BUILD file snippet defining the engine_debug_library filegroup, or empty string.
+        A BUILD file snippet defining the `engine_<mode>_library` filegroup.
     """
-    if target_os == "macos":
-        return MACOS_ENGINE_DEBUG_FILEGROUP
-    elif target_os == "linux":
-        return LINUX_ENGINE_DEBUG_FILEGROUP
-    elif target_os == "windows":
-        return WINDOWS_ENGINE_DEBUG_FILEGROUP
-    return ""
-
-def engine_filegroup_for_os(target_os):
-    """Return the engine filegroup template string for the given OS.
-
-    Args:
-        target_os: One of "macos", "linux", or "windows".
-
-    Returns:
-        A BUILD file snippet defining the engine_library filegroup.
-    """
-    if target_os == "macos":
-        return MACOS_ENGINE_FILEGROUP
-    elif target_os == "linux":
-        return LINUX_ENGINE_FILEGROUP
-    elif target_os == "windows":
-        return WINDOWS_ENGINE_FILEGROUP
-    else:
+    template = _ENGINE_FILEGROUPS.get(target_os)
+    if not template:
         fail("Unsupported target OS for engine filegroup: {}".format(target_os))
+    return template.format(name = engine_target_name(mode), dir = dir)
 
 # -- Binary name helpers -------------------------------------------------------
 
@@ -142,6 +108,19 @@ def dart_binary_name(platform):
     if platform.startswith("windows"):
         return "dart.exe"
     return "dart"
+
+def gen_snapshot_binary_name(platform):
+    """Return the gen_snapshot binary filename for the given host platform.
+
+    Args:
+        platform: Host platform string (e.g. "darwin-arm64", "windows-x64").
+
+    Returns:
+        "gen_snapshot.exe" on Windows, "gen_snapshot" otherwise.
+    """
+    if platform.startswith("windows"):
+        return "gen_snapshot.exe"
+    return "gen_snapshot"
 
 def dartaotruntime_binary_name(platform):
     """Return the dartaotruntime binary filename for the given host platform.
@@ -318,14 +297,14 @@ def find_engine_header_dir(engine_files, header_suffix):
     return None
 
 def const_finder_attr(flutter_version, path):
-    """The `const_finder` line of a generated `flutter_toolchain`/`flutter_exec_tools`.
+    """The `const_finder` line of a generated `flutter_host_tools`.
 
     Empty from Flutter 3.50 on, whose `font-subset.zip` no longer carries the
     snapshot: those toolchains shake icons from the uses the AOT kernel
     compile records instead (see `flutter_build_assets`).
 
     Args:
-        flutter_version: The Flutter release the toolchain is for.
+        flutter_version: The Flutter release the tools are for.
         path: The snapshot's label or path in the generated BUILD file.
 
     Returns:

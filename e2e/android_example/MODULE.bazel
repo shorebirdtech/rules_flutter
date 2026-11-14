@@ -1,254 +1,167 @@
 """E2e test: full Android APK via rules_flutter + rules_android composition.
 
-Build it with both Android variables set. `ANDROID_NDK_HOME` must name the
-*versioned* NDK directory; `$ANDROID_HOME/ndk` (its parent) fails inside
-rules_android_ndk with an unrelated-looking `readdir()` error:
+The one e2e workspace set up for remote execution, as the README's "Remote
+execution" describes it: the hermetic Python bootstrap in its .bazelrc, and
+the rules_go patch below. Every other workspace is set up as the README tells
+an app to be, with none of this.
 
-    ANDROID_HOME=~/Library/Android/sdk \\
-    ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/<version> \\
-      bazel build //:app_android -c dbg
+The Android SDK and NDK are hermetic_android_toolchains' downloads, as the
+README's Android section recommends, so nothing needs to be installed:
 
-In a `.bazelrc` the same two values need `--repo_env`, not `--action_env` —
-both repositories are fetched by repository rules, which never see
-`--action_env`. See the Android section of the rules_flutter README.
+    bazel build //:app_android -c dbg
 """
 
 module(name = "rules_flutter_android_example")
 
 bazel_dep(name = "rules_flutter", version = "0.0.0")
-bazel_dep(name = "rules_dart", version = "0.8.1")
-bazel_dep(name = "rules_android", version = "0.8.0")
-bazel_dep(name = "rules_android_ndk", version = "0.1.5")
-bazel_dep(name = "rules_cc", version = "0.2.26")
-bazel_dep(name = "rules_kotlin", version = "2.4.20")
+bazel_dep(name = "rules_dart", version = "0.9.1")
+bazel_dep(name = "rules_cc", version = "0.2.28")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
-bazel_dep(name = "rules_java", version = "9.9.0")
+bazel_dep(name = "rules_kotlin", version = "2.4.21")
 
 local_path_override(
     module_name = "rules_flutter",
     path = "../..",
 )
 
-# Patches for `--incompatible_auto_exec_groups`, under which each action runs
-# where the toolchain it names resolves. rules_android's runs aapt2, zipalign and
-# apksigner where the Android SDK toolchain and the JDK both resolve (the Mac,
-# whose SDK they are), and declares the JDK toolchain singlejar runs with.
-# protobuf's names the proto toolchain on protoc actions. rules_go's runs a cgo
-# link and a cgo stdlib build with the Go SDK resolved beside the C toolchain
-# they need, so the Mac never runs the Linux Go SDK's tools. An override only
-# applies in the root module: an Android app built with the flag needs these in
-# its own MODULE.bazel. Drop each patch once a release of its module declares
-# these toolchains and exec groups itself.
 single_version_override(
     module_name = "rules_android",
     patch_strip = 1,
-    patches = ["//patches:rules_android_auto_exec_groups.patch"],
+    patches = [
+        # rules_android starts its tool JVMs with an initial heap as large as
+        # the cap: -Xms3G for resource processing, -Xms8g for desugar, D8 and
+        # R8. A JVM commits its initial heap the moment it starts. Linux and
+        # macOS commit lazily and never notice; Windows charges it against the
+        # commit limit (RAM plus pagefile), and two persistent desugar workers
+        # exhaust that on a 16 GB machine. The patch keeps every cap and drops
+        # the initial sizes. Drop it once a rules_android release does.
+        "//patches:rules_android_no_initial_heap.patch",
+        # rules_android puts the -A and -R arguments of `aapt2 link` on its
+        # command line, one per library, and an app with about a hundred
+        # libraries passes Windows' 32,767-character limit. The patch writes -R
+        # to a file by length rather than only past 200 entries, and leaves out
+        # asset directories with nothing to package. Drop it once a
+        # rules_android release does.
+        "//patches:rules_android_aapt2_command_length.patch",
+    ],
 )
 
-single_version_override(
-    module_name = "protobuf",
-    patch_strip = 1,
-    patches = ["//patches:protobuf_auto_exec_groups.patch"],
-)
-
+# rules_go runs a go_proto_library's protoc step on the first execution
+# platform listed, but builds protoc and its Go plugins for the platform the
+# Go and C++ toolchains resolve to. rules_android's Go tools, built for the
+# Mac, then run Mac binaries on a Linux worker. The patch builds those tools
+# for the platform the step runs on. An override only applies in the root
+# module: an Android app built with remote execution needs it in its own
+# MODULE.bazel. Drop it once a rules_go release does this.
 single_version_override(
     module_name = "rules_go",
     patch_strip = 1,
-    patches = ["//patches:rules_go_auto_exec_groups.patch"],
-)
-
-# Pinned past the 0.1.5 release for 16KB page alignment. 0.1.5 links every
-# arm64 .so with `-Wl,-z,max-page-size=4096`; a device booted with 16KB pages
-# then refuses to load it — "ELF alignment check failed" — and nothing says so
-# at build time, because the APK builds, installs and dies on launch. Upstream
-# replaced that with 16384 for both max- and common-page-size, ungated, so it
-# applies to every ABI; no release carries it yet, which is the only reason
-# this is a commit rather than a version. Drop this override for the first
-# release that includes it.
-#
-# 16KB alignment loads on a 4KB device too, so this is wider compatibility
-# rather than a trade. The prebuilt engine libraries are unaffected —
-# libflutter.so ships at 0x10000.
-#
-# The patch declares the exec constraints of the NDK found at
-# `ANDROID_NDK_HOME`. Without them its toolchains match any execution
-# platform, and a remote Linux worker would be sent the Mac's clang. Upstream
-# sets them only for an NDK whose platform the rule is told. Once a release
-# carries the alignment fix, keep the patch on that version, and drop it once a
-# release sets exec constraints for a local NDK too.
-archive_override(
-    module_name = "rules_android_ndk",
-    patch_strip = 1,
-    patches = ["//patches:rules_android_ndk_exec_constraints.patch"],
-    sha256 = "0f566314be1257379d42630e068618169e410e4ecf964b28e0c72559e2196658",
-    strip_prefix = "rules_android_ndk-987213e7f982de48696f3b9cd031ff4e3e065c7c",
-    urls = ["https://github.com/bazelbuild/rules_android_ndk/archive/987213e7f982de48696f3b9cd031ff4e3e065c7c.tar.gz"],
+    patches = ["//patches:rules_go_go_proto_exec_group.patch"],
 )
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
-flutter.toolchain(flutter_version = "3.47.8")
-flutter.pub(
+flutter.toolchain(flutter_version = "3.47.9")
+
+flutter_pub = use_extension("@rules_flutter//flutter/pub:extensions.bzl", "pub")
+flutter_pub.from_lock(
     name = "deps",
     lock = "//:pubspec.lock",
 )
-use_repo(flutter, "deps", "flutter_android_engine_arm64", "flutter_toolchains", "flutter_web_sdk")
 
-register_toolchains("@flutter_toolchains//:all")
+use_repo(flutter, "flutter_web_sdk")
 
-# Override rules_android's Go SDK (0.7.1 pins 1.22.4, but its deps need >= 1.23).
-bazel_dep(name = "rules_go", version = "0.64.2")
+use_repo(flutter_pub, "deps")
 
-go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
-go_sdk.download(version = "1.27.3")
+# Android, as the README's Android section sets it up.
+bazel_dep(name = "rules_android", version = "0.8.1")
+bazel_dep(name = "rules_android_ndk", version = "0.1.5")
 
-# rules_android: download android build tools and discover local SDK.
-remote_android_extensions = use_extension(
-    "@rules_android//bzlmod_extensions:android_extensions.bzl",
-    "remote_android_tools_extensions",
+# rules_android_ndk 0.1.5, its newest release, links every arm64 library with
+# `-Wl,-z,max-page-size=4096`, and rules_flutter's check of an APK's native
+# libraries refuses them: a device with 16 KB pages cannot load them. Upstream
+# fixed it in efc0c191 (#121); this is a later commit of its main branch. Drop
+# the override for the first release that has the fix.
+git_override(
+    module_name = "rules_android_ndk",
+    commit = "9946c72d5b617115d34dc2efb334f829c558a87b",
+    remote = "https://github.com/bazelbuild/rules_android_ndk.git",
 )
-use_repo(remote_android_extensions, "android_tools")
 
-android_sdk_repository_extension = use_extension(
+bazel_dep(name = "rules_jvm_external", version = "7.2")
+
+# The Android SDK and NDK, downloaded at pinned versions and checked against
+# their checksums rather than found on the machine, so the build needs no
+# `ANDROID_HOME` or `ANDROID_NDK_HOME`. `.bazelrc` accepts their licences.
+bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependency = True)
+
+android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
+
+# The Android platform the app compiles against, and the build tools.
+android.sdk(
+    build_tools_version = "35.0.0",
+    version = "35",
+)
+
+# The NDK CC toolchain, used for native and FFI deps built for Android and
+# to strip the engine's native libraries, as a Gradle build does: the NDK
+# Flutter's Gradle plugin builds with. `api_level` is your app's
+# `min_sdk_version` (24 unless you set it).
+android.ndk(
+    api_level = 24,
+    version = "r28c",
+)
+use_repo(android, "androidndk", "androidsdk")
+
+# Every module's `@androidsdk` and `@androidndk` (rules_android's,
+# rules_android_ndk's, rules_flutter's) are these.
+rules_android_sdk = use_extension(
     "@rules_android//rules/android_sdk_repository:rule.bzl",
     "android_sdk_repository_extension",
+    dev_dependency = True,
 )
 
-# Pin the compile SDK so the build is hermetic instead of floating to the
-# highest platform installed on the machine (which differs between CI runners
-# and local dev). API 35 is stable and preinstalled on the GitHub images.
-android_sdk_repository_extension.configure(api_level = 35)
-use_repo(android_sdk_repository_extension, "androidsdk")
+override_repo(rules_android_sdk, "androidsdk")
 
-register_toolchains(
-    "@androidsdk//:sdk-toolchain",
-    "@androidsdk//:all",
-)
-
-# Android NDK: provides CC toolchain for Android targets (needed for --platforms=android_arm64).
-android_ndk_repository_extension = use_extension(
+rules_android_ndk = use_extension(
     "@rules_android_ndk//:extension.bzl",
     "android_ndk_repository_extension",
+    dev_dependency = True,
 )
-use_repo(android_ndk_repository_extension, "androidndk")
 
-register_toolchains("@androidndk//:all")
+override_repo(rules_android_ndk, "androidndk")
 
-# Fix protobuf version mismatch: rules_android 0.7.1 pins protobuf-java 4.33.4
-# but the resolved protobuf module is 34.0 (gencode 4.34.0).  The root module's
-# maven.install tags take precedence, so we re-declare the two affected repos
-# with bumped protobuf jars.
-bazel_dep(name = "rules_jvm_external", version = "7.1")
+register_toolchains(
+    "@androidndk//:all",
+    "@androidsdk//:all",
+    dev_dependency = True,
+)
 
+# The Maven artifacts the app's own Kotlin code compiles against. They join
+# rules_flutter's in one resolution, the app's, with a lock of this module's.
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
-    name = "android_ide_common_30_1_3",
-    aar_import_bzl_label = "@rules_android//rules:rules.bzl",
+    name = "rules_flutter_maven",
     artifacts = [
-        "com.android.tools.layoutlib:layoutlib-api:30.1.3",
-        "com.android.tools.build:manifest-merger:30.1.3",
-        "com.android.tools:common:30.1.3",
-        "com.android.tools:repository:30.1.3",
-        "com.android.tools.analytics-library:protos:30.1.3",
-        "com.android.tools.analytics-library:shared:30.1.3",
-        "com.android.tools.analytics-library:tracker:30.1.3",
-        "com.android.tools:annotations:30.1.3",
-        "com.android.tools:sdk-common:30.1.3",
-        "com.android.tools.build:builder:7.1.3",
-        "com.android.tools.build:builder-model:7.1.3",
-        "com.google.protobuf:protobuf-java:4.34.0",
-        "com.google.protobuf:protobuf-java-util:4.34.0",
-    ],
-    repositories = [
-        "https://maven.google.com",
-        "https://repo1.maven.org/maven2",
-    ],
-    use_starlark_android_rules = True,
-)
-maven.install(
-    name = "rules_android_maven",
-    aar_import_bzl_label = "@rules_android//rules:rules.bzl",
-    artifacts = [
-        # The Flutter engine's androidx runtime artifacts are inherited from
-        # rules_flutter's maven.install of the same name; declare only what
-        # this workspace's own targets reference (the custom runner).
         "androidx.annotation:annotation:1.9.1",
         "androidx.lifecycle:lifecycle-common:2.10.0",
-        "androidx.privacysandbox.tools:tools:1.0.0-alpha06",
-        "androidx.privacysandbox.tools:tools-apigenerator:1.0.0-alpha06",
-        "androidx.privacysandbox.tools:tools-apipackager:1.0.0-alpha06",
-        "androidx.test:core:1.6.0-alpha01",
-        "androidx.test.ext:junit:1.2.0-alpha01",
-        "com.android.tools.apkdeployer:apkdeployer:8.11.0-alpha10",
-        "com.android.tools.build:bundletool:1.18.2",
-        "com.android.tools:desugar_jdk_libs_minimal:2.1.5",
-        "com.android.tools:desugar_jdk_libs_configuration_minimal:2.1.5",
-        "com.android.tools:desugar_jdk_libs_nio:2.1.5",
-        "com.android.tools:desugar_jdk_libs_configuration_nio:2.1.5",
-        "com.android.tools:desugar_jdk_libs_configuration:2.1.5",
-        "com.android.tools:r8:8.9.35",
-        "org.bouncycastle:bcprov-jdk18on:1.77",
-        "org.hamcrest:hamcrest-core:2.2",
-        "org.robolectric:robolectric:4.14.1",
-        "com.google.flogger:flogger:0.8",
-        "com.google.flogger:flogger-system-backend:0.8",
-        "com.google.guava:guava:32.1.2-jre",
-        "com.google.guava:failureaccess:1.0.1",
-        "info.picocli:picocli:4.7.4",
-        "jakarta.inject:jakarta.inject-api:2.0.1",
-        "junit:junit:4.13.2",
-        "com.beust:jcommander:1.82",
-        "com.google.protobuf:protobuf-java:4.34.0",
-        "com.google.protobuf:protobuf-java-util:4.34.0",
-        "com.google.code.findbugs:jsr305:3.0.2",
-        "androidx.databinding:databinding-compiler:8.7.0",
-        "org.ow2.asm:asm:9.6",
-        "org.ow2.asm:asm-commons:9.6",
-        "org.ow2.asm:asm-tree:9.6",
-        "org.ow2.asm:asm-util:9.6",
-        "com.android:zipflinger:8.7.0",
-        "com.android.tools.build:gradle:8.7.0",
-        "com.android:signflinger:8.7.0",
-        "com.android.tools.build:aapt2-proto:8.6.1-11315950",
-        "com.android.tools.build:apksig:8.7.0",
-        "com.android.tools.build:apkzlib:8.7.0",
-        "com.google.auto.value:auto-value:1.11.0",
-        "com.google.auto.value:auto-value-annotations:1.11.0",
-        "com.google.auto:auto-common:1.2.2",
-        "com.google.auto.service:auto-service:1.1.1",
-        "com.google.auto.service:auto-service-annotations:1.1.1",
-        "com.google.errorprone:error_prone_annotations:2.33.0",
-        "com.google.errorprone:error_prone_type_annotations:2.33.0",
-        "com.google.errorprone:error_prone_check_api:2.33.0",
-        "com.google.errorprone:error_prone_core:2.33.0",
-        "com.google.guava:guava-testlib:33.2.1-jre",
-        "com.google.jimfs:jimfs:1.2",
-        "com.google.testing.compile:compile-testing:0.18",
-        "com.google.testparameterinjector:test-parameter-injector:1.16",
-        "com.google.truth:truth:1.4.0",
-        "com.google.truth.extensions:truth-java8-extension:1.4.0",
-        "com.google.truth.extensions:truth-liteproto-extension:1.4.0",
-        "com.google.truth.extensions:truth-proto-extension:1.4.0",
-        "org.mockito:mockito-core:5.4.0",
     ],
+    known_contributing_modules = ["rules_flutter"],
+    lock_file = "//:rules_flutter_maven_install.json",
     repositories = [
         "https://maven.google.com",
         "https://repo1.maven.org/maven2",
     ],
-    use_starlark_android_rules = True,
 )
-use_repo(
-    maven,
-    "android_ide_common_30_1_3",
-    "rules_android_maven",
-)
+use_repo(maven, "rules_flutter_maven")
 
 # Hermetic C++ toolchain for Linux arm64 execution platforms, so a C++ tool
 # built for the exec platform (zipper, xmllint) can be compiled when Bazel runs
 # actions on a Linux arm64 worker. Only the Linux-exec, Linux-target toolchain
 # exists: Mac and iOS builds keep apple_support's toolchain. It is registered
-# only for cloud builds, by `--extra_toolchains` in .bazelrc: registering it
-# here would make every build fetch llvm-project's sources, which toolchain
-# resolution loads the generated package from.
+# only on request, with `--extra_toolchains=@llvm_toolchains//:all` (for
+# example in .bazelrc.user, for builds that run on a Linux arm64 worker):
+# registering it here would make every build fetch llvm-project's sources,
+# which toolchain resolution loads the generated package from.
 bazel_dep(name = "llvm", version = "0.8.26", dev_dependency = True)
 
 llvm_tc = use_extension("@llvm//extensions:toolchain.bzl", "toolchain", dev_dependency = True)

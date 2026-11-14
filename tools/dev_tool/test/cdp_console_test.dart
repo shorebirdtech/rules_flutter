@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/app_log.dart';
 import 'package:flutter_bazel_dev_tool/cdp_console.dart';
 import 'package:test/test.dart';
+
+import 'fakes.dart';
 
 /// A local WebSocket server standing in for the browser's CDP endpoint, so a
 /// test can hand the client a live connection and then take it away.
@@ -351,23 +354,35 @@ void main() {
       );
     });
 
-    test('gives up at the timeout rather than polling on', () async {
-      final cdp = await serveCdpJson((_) => const <dynamic>[]);
-      final stopwatch = Stopwatch()..start();
-      await expectLater(
-        resolveCdpPageTarget(
-          cdp.port,
-          appUrl: appUrl,
-          timeout: const Duration(milliseconds: 80),
-          pollInterval: const Duration(milliseconds: 5),
-        ),
-        throwsA(isA<StateError>()),
-      );
-      expect(
-        stopwatch.elapsed,
-        lessThan(const Duration(seconds: 5)),
-        reason: 'a page that never appears must not be waited on forever',
-      );
+    test('gives up at the timeout rather than polling on', () {
+      fakeAsync((async) {
+        final asked = <Duration>[];
+        final outcome = track(
+          resolveCdpPageTarget(
+            1234,
+            appUrl: appUrl,
+            timeout: const Duration(milliseconds: 80),
+            pollInterval: const Duration(milliseconds: 5),
+            fetchTargets: (_) async {
+              asked.add(async.elapsed);
+              return const <dynamic>[];
+            },
+          ),
+        );
+
+        // Asks at 0, 5, 15, 35, 75 ms (the interval doubling), all inside the
+        // 80 ms; the next is at 155 ms, and that one is told it is too late.
+        async.elapse(const Duration(milliseconds: 154));
+        expect(outcome.done, isFalse);
+        async.elapse(const Duration(milliseconds: 1));
+
+        expect(outcome.done, isTrue);
+        expect(outcome.error, isA<StateError>());
+        expect(
+          asked.map((d) => d.inMilliseconds),
+          [0, 5, 15, 35, 75, 155],
+        );
+      });
     });
 
     test('fails immediately when the browser is gone, without waiting out '
@@ -380,7 +395,7 @@ void main() {
       final port = dead.port;
       await dead.close(force: true);
 
-      final stopwatch = Stopwatch()..start();
+      // Retried until the timeout, this would end in a StateError instead.
       await expectLater(
         resolveCdpPageTarget(
           port,
@@ -389,13 +404,27 @@ void main() {
         ),
         throwsA(isA<SocketException>()),
       );
-      expect(
-        stopwatch.elapsed,
-        lessThan(const Duration(seconds: 5)),
-        reason:
-            'a refused connection must surface at once, not after the '
-            'page-not-listed timeout',
-      );
+    });
+
+    test('a failed listing is answered at once, with no time spent', () {
+      fakeAsync((async) {
+        final outcome = track(
+          resolveCdpPageTarget(
+            1234,
+            appUrl: appUrl,
+            timeout: const Duration(seconds: 30),
+            fetchTargets: (_) async =>
+                throw const SocketException('Connection refused'),
+          ),
+        );
+
+        // Microtasks only: the clock has not moved.
+        async.flushMicrotasks();
+
+        expect(outcome.done, isTrue);
+        expect(outcome.error, isA<SocketException>());
+        expect(async.elapsed, Duration.zero);
+      });
     });
 
     test('a null app URL is a caller bug, not something to poll for', () async {

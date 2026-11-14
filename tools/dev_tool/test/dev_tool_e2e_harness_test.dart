@@ -14,6 +14,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -39,6 +40,19 @@ Map<String, dynamic> _progress(String method, {required bool finished}) => {
     'finished': finished,
   },
 };
+
+/// The compiled stand-in for `adb` (`fake_adb.dart`), from the runfiles.
+String _fakeAdb() {
+  const key = 'rules_flutter/tools/dev_tool/fake_adb';
+  final path = resolveRunfile(key);
+  if (path == null) {
+    throw StateError(
+      'Could not resolve $key from runfiles. Run this with '
+      '`bazel test //tools/dev_tool:dev_tool_e2e_harness_test`.',
+    );
+  }
+  return path;
+}
 
 void main() {
   // Every case waits one of these out, so it is as short as the work allows.
@@ -359,13 +373,20 @@ void main() {
 
       test('a connection that is refused says so, and quotes the run', () async {
         // Nothing is listening on that port from here on, so the request stops
-        // before it is ever sent.
+        // before it is ever sent. Windows reports the refusal only after it
+        // has retried the connection, about two seconds in, so the bound is
+        // one that a refusal beats on every host; a bound that expired first
+        // would test the timeout message instead.
         await server.close(force: true);
         process.emitStderr('dev tool: the session is still up\n');
         await tool.waitForStderr('the session is still up');
 
         await expectLater(
-          tool.httpCommand('app.getText', {'appId': 'app-1'}, timeout: bound),
+          tool.httpCommand(
+            'app.getText',
+            {'appId': 'app-1'},
+            timeout: const Duration(seconds: 30),
+          ),
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
@@ -650,14 +671,11 @@ void main() {
       String stderr = '',
       int exitCode = 0,
     }) {
-      final path = p.join(dir.path, 'adb');
-      File(path).writeAsStringSync(
-        '#!/bin/sh\n'
-        "cat <<'STDOUT_EOF'\n$stdout\nSTDOUT_EOF\n"
-        "cat >&2 <<'STDERR_EOF'\n$stderr\nSTDERR_EOF\n"
-        'exit $exitCode\n',
+      final path = p.join(dir.path, Platform.isWindows ? 'adb.exe' : 'adb');
+      File(_fakeAdb()).copySync(path);
+      File('$path.json').writeAsStringSync(
+        jsonEncode({'stdout': stdout, 'stderr': stderr, 'exitCode': exitCode}),
       );
-      Process.runSync('chmod', ['+x', path]);
       return path;
     }
 
@@ -671,15 +689,27 @@ void main() {
         stubAdb(stdout: 'List of devices attached\nemulator-5554\tdevice\n'),
       );
       expect(probe, isA<AndroidDeviceFound>());
-      expect((probe as AndroidDeviceFound).serial, 'emulator-5554');
-      expect(probe.skipReason, isNull);
+      expect(probe.require().serial, 'emulator-5554');
     });
 
-    // The one legitimate skip: adb worked, and there is nothing plugged in.
-    test('an empty bench skips, and the reason says the list was empty', () {
+    // adb worked and there is nothing plugged in. Not a skip: a run that
+    // selected Android must say so, and how to provide a device or opt out.
+    test('an empty bench fails, saying how to provide or exclude Android', () {
       final probe = detect(stubAdb(stdout: 'List of devices attached\n'));
       expect(probe, isA<NoAndroidDevice>());
-      expect(probe.skipReason, contains('no Android device attached'));
+      expect(
+        probe.require,
+        throwsA(
+          isA<TestFailure>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('no Android device attached'),
+              contains('--exclude-tags android'),
+            ),
+          ),
+        ),
+      );
     });
 
     // Each of the next four cases has to be told apart from the empty bench
@@ -691,11 +721,9 @@ void main() {
       expect(probe, isA<AndroidProbeFailed>());
       expect((probe as AndroidProbeFailed).reason, contains(missing));
       expect(
-        probe.skipReason,
-        isNull,
-        reason:
-            'a broken detector must not present itself as an empty '
-            'bench — the group has to run so the failure is reported',
+        probe.require,
+        throwsA(isA<TestFailure>()),
+        reason: 'a broken detector fails the run, naming what it could not do',
       );
     });
 
@@ -711,7 +739,7 @@ void main() {
         (probe as AndroidProbeFailed).reason,
         allOf(contains('exited 1'), contains('cannot connect to daemon')),
       );
-      expect(probe.skipReason, isNull);
+      expect(probe.require, throwsA(isA<TestFailure>()));
     });
 
     test(
@@ -727,7 +755,7 @@ void main() {
           (probe as AndroidProbeFailed).reason,
           allOf(contains('58051JEBF01271'), contains('unauthorized')),
         );
-        expect(probe.skipReason, isNull);
+        expect(probe.require, throwsA(isA<TestFailure>()));
       },
     );
 
@@ -814,7 +842,7 @@ void main() {
           (probe as AndroidProbeFailed).reason,
           allOf(contains('emulator-5554'), contains('58051JEBF01271')),
         );
-        expect(probe.skipReason, isNull);
+        expect(probe.require, throwsA(isA<TestFailure>()));
       });
 
       test('its being listed unusable fails, naming the state', () {

@@ -57,6 +57,11 @@ def _strict_add_test_impl(ctx):
         "merge_plists.dart" in input_basenames,
         "the merger tool must be an action input",
     )
+    asserts.true(
+        env,
+        "plist_binary.dart" in input_basenames,
+        "the binary plist reader the merger imports must be an action input",
+    )
 
     outputs = action.outputs.to_list()
     asserts.equals(env, 1, len(outputs))

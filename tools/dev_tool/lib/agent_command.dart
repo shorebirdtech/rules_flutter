@@ -6,8 +6,10 @@
 /// registers before `main()` — from the engine's plugin-registrant hook on
 /// native, and from the dev tool's synthetic entrypoint on web (see
 /// `flutter/private/agent_extensions/agent.dart`). `app.dumpWidgetTree`
-/// goes to the built-in inspector RPC and works against any debug Flutter
-/// app without app-side cooperation.
+/// goes to the framework's inspector RPC. The calls travel over an
+/// [AppExtensionChannel]: the VM service for native and the DDC dev loop, the
+/// page's agent bridge over the DevTools protocol for a debug dart2wasm or
+/// dart2js bundle.
 library;
 
 import 'dart:async';
@@ -15,13 +17,13 @@ import 'dart:io';
 
 import 'package:vm_service/vm_service.dart';
 
+import 'app_extension_channel.dart';
 import 'command_failure.dart';
 import 'command_runner.dart';
 import 'device.dart';
 import 'key_press.dart';
 import 'semantics_dump.dart';
 import 'session.dart';
-import 'vm_service_client.dart';
 
 /// Register the `app.*` AI-agent commands on [cr].
 ///
@@ -191,10 +193,11 @@ bool controlOrMetaIsMetaFor(Device device, {required bool browserHostIsMac}) =>
 /// Offer `app.pressKey`.
 ///
 /// Registered with the rest of the agent surface for every run that has one,
-/// and on its own for a web run that does not (`--wasm`, `--profile`): the
-/// browser route needs no VM service, so a keyboard is the one thing those
-/// runs can be driven with. [canSettle] says whether the app can be asked to
-/// go idle afterwards, which only a run with a VM service can answer.
+/// and on its own for a web run that does not (a non-debug bundle): the
+/// browser route needs nothing from the app, so a keyboard is the one thing
+/// those runs can be driven with. [canSettle] says whether the app can be
+/// asked to go idle afterwards, which only a run whose app carries the agent
+/// extensions can answer.
 ///
 /// [browserHostIsMac] decides whether browser key events carry the Cocoa
 /// editing commands a Mac browser attaches (see `macEditingCommandsFor`); a
@@ -323,8 +326,9 @@ Future<Map<String, dynamic>> _pressKeyInBrowser(
     ),
     _ when settle == null => (
       'skipped',
-      'this run has no VM service, so the app cannot be asked whether it is '
-          'idle; take a screenshot to see what the key did',
+      'this run\'s app carries no agent extensions (it is not a debug '
+          'build), so it cannot be asked whether it is idle; take a '
+          'screenshot to see what the key did',
     ),
     _ => await _settleAfterKeys(settle),
   };
@@ -449,17 +453,6 @@ const _defaultAppDeadline = Duration(seconds: 10);
 /// unbounded read here would wedge the command pool.
 const _pauseReadBound = Duration(seconds: 10);
 
-/// The extension whose presence means the Flutter binding exists.
-///
-/// Registered by `BindingBase.initServiceExtensions`, so it appears exactly
-/// when `WidgetsFlutterBinding.ensureInitialized()` runs — which is what every
-/// handler in the agent needs and what the inspector RPCs are registered
-/// alongside. The agent's own extensions are registered *earlier* than this on
-/// web (pre-`bootstrapEngine`, deliberately, so the startup window is covered),
-/// so their presence alone does not mean the app can answer: dispatching in
-/// between gets `Binding has not yet been initialized` from inside the handler.
-const _bindingExtension = 'ext.flutter.reassemble';
-
 /// How long to wait for [params]' dispatch: the deadline the app was given,
 /// plus the margin that keeps this bound off a legitimately slow answer.
 ///
@@ -470,27 +463,6 @@ Duration _dispatchBound(Map<String, dynamic> params, Duration margin) {
   final asked = int.tryParse('${params['timeoutMs']}');
   return (asked == null ? _defaultAppDeadline : Duration(milliseconds: asked)) +
       margin;
-}
-
-/// What the app's isolate looked like when a dispatch gave up on it.
-///
-/// Three states, kept apart, because they send the reader to three different
-/// places: a pause names itself and a debugger resumes it; no pause means the
-/// app was running and simply never returned from the handler; and a read that
-/// did not answer either says the VM service is the problem, not the app.
-Future<String> _pauseNote(VmServiceClient client, Duration bound) async {
-  try {
-    final reason = await client.pausedReason().timeout(bound);
-    return reason == null
-        ? 'Its isolate reported no pause, so the app was running and the '
-              'handler never returned — a backgrounded app stops producing '
-              'frames, and any unbounded wait for one never ends.'
-        : 'Its isolate is paused: $reason';
-  } on TimeoutException {
-    return 'Its isolate\'s pause state could not be read within '
-        '${bound.inSeconds}s either, so the VM service connection '
-        'is no longer answering.';
-  }
 }
 
 /// Resolve the session, invoke [extensionMethod], strip framework noise
@@ -531,21 +503,22 @@ Future<Map<String, dynamic>> _call(
       '--profile, or --no-hot without `-c dbg`.',
     );
   }
-  var vm = session.vmClient;
-  if (vm == null) {
-    // Only web ever gets here. A native session owns its VM service from the
-    // moment it exists; a browser's is handed over by DWDS when the page
-    // connects, which is after `app.started` — so an agent acting on that event
-    // finds the field null through no fault of its own. `debugReady` is the
+  var channel = session.extensionChannel;
+  if (channel == null) {
+    // Only the DDC dev loop gets here. A native session owns its VM service
+    // from the moment it exists, and a bundled web build's channel is the
+    // browser's; a DDC browser's VM service is handed over by DWDS when the
+    // page connects, which is after `app.started` — so an agent acting on that
+    // event finds it missing through no fault of its own. `debugReady` is the
     // session's own signal for exactly this, and waiting on it is what the run
     // is already doing to decide where to point DevTools.
     await session.debugReady.timeout(_debugConnectTimeout, onTimeout: () {});
-    vm = session.vmClient;
+    channel = session.extensionChannel;
   }
-  if (vm == null) {
+  if (channel == null) {
     throw CommandFailure.failed('no VM service for ${session.appId}');
   }
-  final client = vm;
+  final client = channel;
 
   /// The pause that will stop this command from ever being answered, if any.
   ///
@@ -598,7 +571,7 @@ Future<Map<String, dynamic>> _call(
   // with app code in between, on native they are already there together.
   for (final rpc in {
     extensionMethod,
-    if (waitForBinding) _bindingExtension,
+    if (waitForBinding) bindingServiceExtension,
   }) {
     // Two different failures, kept apart. `false` is the app answering that it
     // has not registered the extension. A throw is the question not getting
@@ -607,7 +580,11 @@ Future<Map<String, dynamic>> _call(
     // strength of an RPC that failed names the wrong cause. Both become a
     // [CommandFailure], which is the one way this surface says no.
     try {
-      if (await client.waitForServiceExtension(rpc)) continue;
+      if (await (rpc == bindingServiceExtension
+          ? client.waitForBinding()
+          : client.waitForServiceExtension(rpc))) {
+        continue;
+      }
       throw CommandFailure.failed(
         '$rpc is not registered. The app never brought it up — if '
         'the run is --start-paused, resume it from a debugger first.',
@@ -617,6 +594,8 @@ Future<Map<String, dynamic>> _call(
         'could not tell whether $rpc is registered: '
         '${e.details ?? e.message}',
       );
+    } on AppChannelException catch (e) {
+      throw CommandFailure.failed(e.message);
     } on TimeoutException catch (e) {
       // The read that answers this question expiring, which is not the same as
       // the app never registering — that one comes back as `false` above. A
@@ -663,8 +642,10 @@ Future<Map<String, dynamic>> _call(
     // `Completer` nobody reads, or never completes at all.
     throw CommandFailure.failed(
       '$extensionMethod did not answer within '
-      '${bound.inSeconds}s. ${await _pauseNote(client, pauseReadBound)}',
+      '${bound.inSeconds}s. ${await client.unansweredNote(pauseReadBound)}',
     );
+  } on AppChannelException catch (e) {
+    throw CommandFailure.failed(e.message);
   } on RPCError catch (e) {
     // The app refusing is an answer, not a fault. Every `_err` in
     // `agent_extensions/agent.dart` — "no widget matching ... found", "timed

@@ -1,0 +1,176 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
+load(":icon_font_test.bzl", "icon_font_test")
+
+# Web apps that a release build must handle, whatever they import.
+#
+# `flutter build web` compiles a release app for the web and nothing else, so
+# an app may import `dart:js_interop`, `package:web` and `dart:ui_web` freely,
+# may pick an icon behind `if (dart.library.js_interop)`, and may get one from
+# a web plugin that only the plugin registrant reaches. A release build here
+# has to accept the same apps and keep the same icons. These targets build in
+# the default (release) configuration.
+
+_SRCS = glob(["lib/**/*.dart"])
+
+_DEPS = [
+    "@deps//:flutter",
+    "@deps//:web",
+    "@rules_flutter//flutter:material_icons",
+]
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "web_interop",
+)
+
+# The programs import web-only libraries, which the Dart VM has not got, so
+# they are compatible with web platforms alone: `bazel build //...` skips them
+# in its own configuration, and each web app builds them for its compilers.
+_WEB_ONLY = select({
+    "@rules_dart//dart/constraints:vm": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
+flutter_application(
+    name = "interop",
+    srcs = _SRCS,
+    main = "lib/interop_main.dart",
+    package = ":pubspec-metadata",
+    target_compatible_with = _WEB_ONLY,
+    deps = _DEPS,
+)
+
+# An app whose own code imports `dart:js_interop`, `package:web` and
+# `dart:ui_web`, with icon tree shaking off so nothing but the two compilers
+# stands between the source and a bundle. The defaults: dart2wasm, with dart2js
+# beside it for browsers that cannot run WebAssembly, so one build covers both.
+flutter_application(
+    name = "interop_no_icon_shaking",
+    srcs = _SRCS,
+    main = "lib/interop_main.dart",
+    package = ":pubspec-metadata",
+    target_compatible_with = _WEB_ONLY,
+    tree_shake_icons = False,
+    deps = _DEPS,
+)
+
+flutter_web_app(
+    name = "interop_app_no_icon_shaking",
+    app_name = "Interop (all icons)",
+    application = ":interop_no_icon_shaking",
+)
+
+build_test(
+    name = "compilers_build_test",
+    targets = [":interop_app_no_icon_shaking"],
+)
+
+# An app that picks an icon behind a web-only conditional import and gets
+# another from a web plugin; see `lib/glyph_main.dart`.
+flutter_application(
+    name = "glyph",
+    srcs = _SRCS,
+    main = "lib/glyph_main.dart",
+    package = ":pubspec-metadata",
+    target_compatible_with = _WEB_ONLY,
+    deps = _DEPS + ["//web_interop/icon_plugin"],
+)
+
+flutter_web_app(
+    name = "glyph_app",
+    app_name = "Glyphs",
+    application = ":glyph",
+)
+
+# What the shipped icon font holds, by reading its character map. The code
+# points are `Icons.home` (e318), the stub branch's `Icons.computer` (e185),
+# the web branch's `Icons.language` (e366), the plugin's `Icons.bolt` (e0ee),
+# `Icons.ac_unit` (e037, which nothing draws), and the space (20).
+# The icon drawn straight from `main` is kept, and the font is a subset: an
+# unshaken font would keep `Icons.ac_unit` too, and pass every other check.
+icon_font_test(
+    name = "main_icon_kept",
+    bundle = "glyph_app",
+    keeps = ["e318"],
+    lacks = ["e037"],
+)
+
+# =============================================================================
+# Properties a release build does not hold today. Each target below fails on
+# the code it was written against; the comment on it says what must be true.
+# =============================================================================
+
+# Any app that `flutter build web` builds in release builds here in release,
+# with either compiler. The same app as `interop_app_no_icon_shaking`, with the
+# icon tree shaking a release build runs by default: the compilers accept it
+# (that target builds), so what fails is the step that finds the app's icons,
+# which compiles `main` for the Dart VM, where `dart:js_interop` does not exist.
+flutter_web_app(
+    name = "interop_app",
+    app_name = "Interop",
+    application = ":interop",
+)
+
+flutter_web_app(
+    name = "interop_app_wasm_only",
+    app_name = "Interop (WASM only)",
+    application = ":interop",
+    js_fallback = False,
+)
+
+flutter_web_bundle(
+    name = "interop_app_dart2js",
+    application = ":interop",
+    compiler = "dart2js",
+    renderer = "canvaskit",
+    title = "Interop (dart2js)",
+)
+
+build_test(
+    name = "release_build_wasm_with_js_fallback_test",
+    targets = [":interop_app"],
+)
+
+build_test(
+    name = "release_build_wasm_only_test",
+    targets = [":interop_app_wasm_only"],
+)
+
+build_test(
+    name = "release_build_dart2js_test",
+    targets = [":interop_app_dart2js"],
+)
+
+# The release bundle's icon font keeps every icon the app can render on web.
+# `glyph_app` draws `Icons.language` only where `dart.library.js_interop` holds
+# (it draws `Icons.computer` elsewhere), and a web plugin's `Icons.bolt` is
+# reached only through the plugin registrant.
+icon_font_test(
+    name = "web_conditional_import_icon_kept",
+    bundle = "glyph_app",
+    keeps = ["e366"],
+)
+
+icon_font_test(
+    name = "web_plugin_icon_kept",
+    bundle = "glyph_app",
+    keeps = ["e0ee"],
+)
+
+# An app that builds in release keeps its icon as well.
+icon_font_test(
+    name = "interop_app_icon_kept",
+    bundle = "interop_app",
+    keeps = ["e318"],
+    lacks = ["e037"],
+)
+
+# Flutter adds the space to every icon font subset it makes for the web, because
+# the engine measures the font's height with it (`icon_tree_shaker.dart`).
+icon_font_test(
+    name = "web_space_glyph_kept",
+    bundle = "glyph_app",
+    keeps = ["20"],
+)

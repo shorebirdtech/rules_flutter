@@ -6,7 +6,7 @@ extend-ignore-re = [
   # real ones out of it — `537e8ba` reports `ba`.
   "\\b[0-9a-f]{7,40}\\b",
   # A line that misspells on purpose, e.g. a test that feeds in a typo.
-  "(?Rm)^.*//\\s*typos:ignore-line$",
+  "(?Rm)^.*(//|#)\\s*typos:ignore-line$",
 ]
 
 [default.extend-words]
@@ -40,7 +40,12 @@ Paeth = "Paeth"
 #
 # tls_fixture.dart is a PEM certificate and key inlined as base64, for the same
 # reason: no prose in it to check.
+#
+# The Maven lock files (`*_install.json`) are rules_jvm_external's output: they
+# list Java package names, and typos "corrects" some of them (`oer` to `over`,
+# `gost` to `ghost`), which a pin then undoes and the next commit redoes.
 extend-exclude = [
+  "**/*_install.json",
   "**/*.storyboard",
   "**/*.xib",
   "**/*.pbxproj",

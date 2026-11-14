@@ -15,7 +15,7 @@ green. The assertion has to start at the rule's attr and end at the bytes.
 
 Both failure modes are covered by the same assertion:
 
-  * `flutter_kernel_target` and `flutter_aot_target` never declared the attr
+  * `flutter_kernel` and `flutter_aot_snapshot` never declared the attr
     while `flutter_compile_kernel` read it off their `ctx`, so they failed at
     analysis — `//:hello_world` and `//:hello_world_aot` in `e2e/hello_world`
     could not be built at all;
@@ -24,7 +24,7 @@ Both failure modes are covered by the same assertion:
     quietly compiled under the SDK's version.
 
 The two analyzer-side rules get a second assertion. They also publish a
-package record through `dart_analyzable_info_with_package`, and that call
+package record through `dart_analyzable_info`, and that call
 drops the value independently of the compile path's — `flutter_test` dropped
 it in both places, and fixing only the one the config test catches would
 leave `dart analyze` running against a different language version than the
@@ -33,18 +33,18 @@ compiler.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
-load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter:web.bzl", "flutter_web_bundle")
+load("//flutter/private:flutter_aot_snapshot.bzl", "flutter_aot_snapshot")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
-load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
+load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load("//flutter/private:flutter_web_branch.bzl", "web_branches_target")
 load(":action_content.bzl", "package_entry", "written_json")
+load(":tests_package.bzl", "TESTS_LANGUAGE_VERSION", "TESTS_PACKAGE")
 
-# The version the fixtures state. Deliberately not the SDK's own: a fixture
-# pinning the current version would pass whether or not the value was ever
-# forwarded, because the absent-key default is that same version.
-_LANGUAGE_VERSION = "3.12"
-_PACKAGE = "lv_fixture"
+# The version the fixtures' package states, deliberately not the SDK's own.
+_LANGUAGE_VERSION = TESTS_LANGUAGE_VERSION
+_PACKAGE = TESTS_PACKAGE
 _MAIN = "lib/language_version_main.dart"
 
 def _assert_config_states_version(env):
@@ -96,8 +96,14 @@ def _flutter_test_test_impl(ctx):
 
 def _web_test_impl(ctx):
     env = analysistest.begin(ctx)
-    _assert_config_states_version(env)
     _assert_provider_states_version(env)
+    return analysistest.end(env)
+
+def _web_branch_test_impl(ctx):
+    # The bundle's package config is written by its branch target, one per
+    # compiler, so that is where the version has to arrive.
+    env = analysistest.begin(ctx)
+    _assert_config_states_version(env)
     return analysistest.end(env)
 
 def _kernel_test_impl(ctx):
@@ -113,6 +119,7 @@ def _aot_test_impl(ctx):
 _application_test = analysistest.make(_application_test_impl)
 _flutter_test_test = analysistest.make(_flutter_test_test_impl)
 _web_test = analysistest.make(_web_test_impl)
+_web_branch_test = analysistest.make(_web_branch_test_impl)
 _kernel_test = analysistest.make(_kernel_test_impl)
 _aot_test = analysistest.make(_aot_test_impl)
 
@@ -125,8 +132,7 @@ def _setup_fixtures():
     """
     flutter_application(
         name = "_lv_application",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
@@ -136,36 +142,37 @@ def _setup_fixtures():
     # generated bootstrap it would emit has something to import.
     flutter_test(
         name = "_lv_flutter_test",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
         deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
     )
 
+    flutter_application(
+        name = "_lv_web_app",
+        main = _MAIN,
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_lv_web",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
-        main = _MAIN,
+        application = ":_lv_web_app",
         tags = ["manual"],
     )
 
     # The two low-level rules. Both build a narrowed attr surface of their own,
     # and both failed at analysis rather than silently — declaring the fixture
     # is most of the test.
-    flutter_kernel_target(
+    flutter_kernel(
         name = "_lv_kernel",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
 
-    flutter_aot_target(
+    flutter_aot_snapshot(
         name = "_lv_aot",
-        package_name = _PACKAGE,
-        language_version = _LANGUAGE_VERSION,
+        package = ":pubspec-metadata",
         main = _MAIN,
         tags = ["manual"],
     )
@@ -184,11 +191,15 @@ def language_version_test_suite(name):
     )
     _flutter_test_test(
         name = name + "_flutter_test",
-        target_under_test = ":_lv_flutter_test",
+        target_under_test = ":_lv_flutter_test.program",
     )
     _web_test(
         name = name + "_web",
         target_under_test = ":_lv_web",
+    )
+    _web_branch_test(
+        name = name + "_web_branch",
+        target_under_test = ":" + web_branches_target("_lv_web"),
     )
     _kernel_test(
         name = name + "_kernel",
@@ -205,6 +216,7 @@ def language_version_test_suite(name):
             ":" + name + "_application",
             ":" + name + "_flutter_test",
             ":" + name + "_web",
+            ":" + name + "_web_branch",
             ":" + name + "_kernel",
             ":" + name + "_aot",
         ],

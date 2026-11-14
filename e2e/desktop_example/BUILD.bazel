@@ -1,0 +1,339 @@
+# Tier-2 desktop apps, a Linux one and a Windows one, from one Flutter project.
+# Like a `flutter create` project, it has `linux/` and `windows/` runners side
+# by side under one pubspec and one `lib/`. Each platform's app is built three
+# ways, from the one a user starts with to the one that leaves the most to them:
+#
+#   1. the runner `flutter create` made (`flutter_linux_app`,
+#      `flutter_windows_app`), the macro most users want,
+#   2. a runner Bazel generates (`flutter_*_runner_lib_gen`), for a project
+#      with no `flutter create` output, wired to a bundle by hand,
+#   3. a runner of one's own, a `cc_binary` over the engine's `CcInfo`
+#      (Windows only here).
+#
+# Every target of a platform is `target_compatible_with` that platform's OS, so
+# `bazel test //...` on any host builds and runs its own platform's targets and
+# skips the other's: on Linux the Windows section is skipped, and the reverse.
+# Neither platform's rules can be analysed on the other's host, because the
+# toolchain has no engine library for it.
+
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
+load(
+    "@rules_flutter//flutter:linux.bzl",
+    "flutter_linux_app",
+    "flutter_linux_bundle",
+    "flutter_linux_engine",
+    "flutter_linux_registrant_gen",
+    "flutter_linux_runner_lib_gen",
+)
+load(
+    "@rules_flutter//flutter:windows.bzl",
+    "flutter_windows_app",
+    "flutter_windows_bundle",
+    "flutter_windows_engine",
+    "flutter_windows_registrant_gen",
+    "flutter_windows_runner_lib_gen",
+)
+
+exports_files(["pubspec.lock"])
+
+# =============================================================================
+# The app, shared by both platforms
+# =============================================================================
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "desktop_example",
+)
+
+# An application only a test may depend on, as one an integration test builds for
+# itself is. Everything `flutter_linux_app` and `flutter_windows_app` declare
+# around the app has to be `testonly` too: see `:linux_testonly_app_build_test`
+# and `:windows_testonly_app_build_test`.
+flutter_application(
+    name = "testonly_flutter",
+    testonly = True,
+    main = "lib/testonly_main.dart",
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+# =============================================================================
+# Linux
+# =============================================================================
+
+flutter_application(
+    name = "linux_flutter",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# Shared Tier 2 targets (used by approach 2).
+#
+# Marked Linux-only like every other target of this platform: on a non-Linux
+# host the resolved toolchain has no libflutter_linux_gtk.so and the rule
+# hard-fails during analysis, which makes `bazel test //...` on macOS an error
+# rather than a skip.
+flutter_linux_engine(
+    name = "linux_engine",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+flutter_linux_registrant_gen(
+    name = "linux_registrant",
+    application = ":linux_flutter",
+)
+
+# Approach 1: the runner `flutter create` made (`flutter_linux_app`).
+#
+# Recommended for most users. Requires linux/runner/ from `flutter create`.
+# The macro auto-discovers C++ runner files, uses the flutter create
+# registrant, and assembles the bundle automatically.
+flutter_linux_app(
+    name = "linux_app",
+    application = ":linux_flutter",
+    application_id = "com.example.desktopexample.linux",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+flutter_linux_app(
+    name = "linux_testonly_app",
+    testonly = True,
+    application = ":testonly_flutter",
+    application_id = "com.example.desktopexample.linux.testonly",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+# Approach 2: a Bazel-generated runner (`flutter_linux_runner_lib_gen`).
+#
+# For users without `flutter create` output. Uses template runner from
+# rules_flutter. No C++ code needed. User wires runner + bundle manually.
+flutter_linux_runner_lib_gen(
+    name = "linux_bazel_runner",
+    application_id = "com.example.desktopexample.linux.bazelrunner",
+    engine = ":linux_engine",
+    registrant = ":linux_registrant",
+    window_title = "Desktop Example",
+)
+
+flutter_linux_bundle(
+    name = "linux_bazel_runner_app",
+    application = ":linux_flutter",
+    runner = ":linux_bazel_runner",
+    tags = ["manual"],
+)
+
+build_test(
+    name = "linux_app_build_test",
+    target_compatible_with = ["@platforms//os:linux"],
+    targets = [":linux_app"],
+)
+
+# A `testonly` app builds: every target `flutter_linux_app` declares around it
+# is `testonly` too, so none is a non-test target depending on a `testonly`
+# application.
+build_test(
+    name = "linux_testonly_app_build_test",
+    target_compatible_with = ["@platforms//os:linux"],
+    targets = [":linux_testonly_app"],
+)
+
+build_test(
+    name = "linux_bazel_runner_build_test",
+    target_compatible_with = ["@platforms//os:linux"],
+    targets = [":linux_bazel_runner_app"],
+)
+
+dart_test(
+    name = "verify_linux_bundle_test",
+    data = [":linux_app"],
+    main = "test/verify_linux_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+dart_test(
+    name = "verify_linux_window_title_test",
+    data = [":linux_bazel_runner_app"],
+    main = "test/verify_linux_window_title_test.dart",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# =============================================================================
+# Windows
+# =============================================================================
+
+flutter_application(
+    name = "windows_flutter",
+    # Not the default, and the same as `:windows_app`'s, whose bundle and
+    # program must agree.
+    build_name = "2.3.4",
+    build_number = "56",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# Shared Tier 2 targets (used by approaches 2 and 3).
+#
+# Marked Windows-only like every other target of this platform: on a
+# non-Windows host the resolved toolchain has no flutter_windows.dll and the
+# rule hard-fails during analysis, which makes `bazel test //...` on macOS an
+# error rather than a skip.
+flutter_windows_engine(
+    name = "windows_engine",
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+flutter_windows_registrant_gen(
+    name = "windows_registrant",
+    application = ":windows_flutter",
+)
+
+# Approach 1: the runner `flutter create` made (`flutter_windows_app`).
+#
+# Recommended for most users. Requires windows/runner/ from `flutter create`.
+# A version other than the default, so the test can tell it reached the
+# executable's version information.
+flutter_windows_app(
+    name = "windows_app",
+    application = ":windows_flutter",
+    build_name = "2.3.4",
+    build_number = 56,
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+flutter_windows_app(
+    name = "windows_testonly_app",
+    testonly = True,
+    application = ":testonly_flutter",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+# Approach 2: a Bazel-generated runner (`flutter_windows_runner_lib_gen`).
+flutter_windows_runner_lib_gen(
+    name = "windows_bazel_runner",
+    engine = ":windows_engine",
+    registrant = ":windows_registrant",
+)
+
+flutter_windows_bundle(
+    name = "windows_bazel_runner_app",
+    application = ":windows_flutter",
+    runner = ":windows_bazel_runner",
+    tags = ["manual"],
+)
+
+# Approach 3: a custom runner (a `cc_binary` from rules_cc).
+#
+# flutter_windows_engine provides CcInfo so cc_binary can depend on it. The
+# runner uses the engine's C API: it makes the top-level window, parents the
+# Flutter view in it and calls the registrant, which `flutter create`'s runner
+# does through the C++ client wrapper. System libs (user32.lib, ole32.lib) come
+# from the CC toolchain (MSVC).
+cc_binary(
+    name = "windows_custom_runner_bin",
+    srcs = [
+        "custom_runner/windows.cc",
+        ":windows_registrant",
+    ],
+    linkopts = [
+        "/SUBSYSTEM:WINDOWS",
+        "user32.lib",
+        "ole32.lib",
+    ],
+    tags = ["manual"],
+    deps = [":windows_engine"],
+)
+
+flutter_windows_bundle(
+    name = "windows_custom_runner_app",
+    application = ":windows_flutter",
+    runner = ":windows_custom_runner_bin",
+    tags = ["manual"],
+)
+
+build_test(
+    name = "windows_app_build_test",
+    target_compatible_with = ["@platforms//os:windows"],
+    targets = [":windows_app"],
+)
+
+# A `testonly` app builds: every target `flutter_windows_app` declares around it
+# is `testonly` too, so none is a non-test target depending on a `testonly`
+# application.
+build_test(
+    name = "windows_testonly_app_build_test",
+    target_compatible_with = ["@platforms//os:windows"],
+    targets = [":windows_testonly_app"],
+)
+
+build_test(
+    name = "windows_bazel_runner_build_test",
+    target_compatible_with = ["@platforms//os:windows"],
+    targets = [":windows_bazel_runner_app"],
+)
+
+build_test(
+    name = "windows_custom_runner_build_test",
+    target_compatible_with = ["@platforms//os:windows"],
+    targets = [":windows_custom_runner_app"],
+)
+
+dart_test(
+    name = "verify_windows_bundle_test",
+    data = [
+        "windows/runner/resources/app_icon.ico",
+        ":windows_app",
+    ],
+    main = "test/verify_windows_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# =============================================================================
+# Static analysis
+# =============================================================================
+
+# The workspace's lint ruleset, bundled with the pub package whose YAML its
+# `include:` resolves against. Named here rather than in a library's `deps`: a
+# lint ruleset is not a dependency of the code it lints, and listing it there
+# carries it into the `DartInfo` of every binary and test downstream.
+dart_analysis_options(
+    name = "options",
+    src = "analysis_options.yaml",
+    deps = ["@deps//:very_good_analysis"],
+)
+
+# Every `analysis_options.yaml` in this workspace, for the `dart_analyze`
+# aspect `.bazelrc` enables: each Dart file is checked against the nearest
+# listed one above it.
+dart_analysis_config(
+    name = "analysis_config",
+    options = [":options"],
+)
+
+# Static analysis over this example's Dart. The app rule is a bundle and
+# carries no DartInfo, so the sources are declared once more as a library for
+# the analyzer to stage.
+flutter_library(
+    name = "app_lib",
+    srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)

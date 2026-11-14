@@ -4,27 +4,11 @@ import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
+import 'package:flutter_bazel_dev_tool/web_bundle_facts.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
-  group('ToolchainPaths', () {
-    test('constructor holds all fields', () {
-      final paths = ToolchainPaths(
-        dart: '/sdk/bin/dart',
-        dartaotruntime: '/sdk/bin/dartaotruntime',
-        frontendServer: '/tools/frontend_server_aot.dart.snapshot',
-        platformDill: '/patched-sdk/platform_strong.dill',
-        patchedSdkRoot: '/patched-sdk/flutter_patched_sdk',
-      );
-      expect(paths.dart, '/sdk/bin/dart');
-      expect(paths.dartaotruntime, '/sdk/bin/dartaotruntime');
-      expect(paths.frontendServer, '/tools/frontend_server_aot.dart.snapshot');
-      expect(paths.platformDill, '/patched-sdk/platform_strong.dill');
-      expect(paths.patchedSdkRoot, '/patched-sdk/flutter_patched_sdk');
-    });
-  });
-
   group('flutterToolchainRepoNames', () {
     test('is the two module positions rules_flutter can occupy', () {
       // Not a search list. A module extension's repos are named
@@ -73,7 +57,7 @@ void main() {
 
     ProcessResult ok(String stdout) => ProcessResult(0, 0, stdout, '');
 
-    test('resolves the five paths out of the repo that exists', () async {
+    test('resolves dart out of the repo that exists', () async {
       final platform = detectHostPlatform();
       final base = outputBaseWith('rules_flutter++flutter+flutter_$platform');
       final bazel = fakeBazel({'info': ok('$base\n')});
@@ -84,37 +68,18 @@ void main() {
         runBazel: bazel.run,
       );
 
-      final repo = p.join(
-        base,
-        'external',
-        'rules_flutter++flutter+flutter_$platform',
-      );
       expect(
-        p.split(paths.dartaotruntime),
+        p.split(paths.dart),
         p.split(
           p.join(
-            repo,
+            base,
+            'external',
+            'rules_flutter++flutter+flutter_$platform',
             'dart-sdk',
             'bin',
-            Platform.isWindows ? 'dartaotruntime.exe' : 'dartaotruntime',
+            Platform.isWindows ? 'dart.exe' : 'dart',
           ),
         ),
-      );
-      expect(
-        p.split(paths.frontendServer),
-        p.split(
-          p.join(
-            repo,
-            'dart-sdk',
-            'bin',
-            'snapshots',
-            'frontend_server_aot.dart.snapshot',
-          ),
-        ),
-      );
-      expect(
-        p.split(paths.patchedSdkRoot),
-        p.split(p.join(repo, 'patched-sdk', 'flutter_patched_sdk')),
       );
       // The repo was already there, so nothing had to be fetched.
       expect(bazel.calls.map((c) => c.first), ['info']);
@@ -258,7 +223,7 @@ void main() {
               .having(
                 (e) => e.message,
                 'message',
-                contains('register_toolchains'),
+                contains('rules_flutter is a dependency'),
               )
               .having(
                 (e) => e.message,
@@ -330,7 +295,7 @@ void main() {
     test('fromJson parses all fields', () {
       final config = DevConfig.fromJson({
         'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
+        'flutterVersion': '3.47.2',
         'dartSdkRoot': '/ext/dart-sdk',
         'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
         'frontendServer': '/ext/host-tools/frontend_server_aot.dart.snapshot',
@@ -338,7 +303,7 @@ void main() {
         'appEntrypoint': 'package:my_app/main.dart',
       });
       expect(config.engineRevision, 'abc123');
-      expect(config.flutterVersion, '3.41.2');
+      expect(config.flutterVersion, '3.47.2');
       expect(config.dartSdkRoot, '/ext/dart-sdk');
       expect(config.dartaotruntime, '/ext/dart-sdk/bin/dartaotruntime');
       expect(
@@ -352,7 +317,7 @@ void main() {
     test('fromJson parses dartDefines', () {
       final config = DevConfig.fromJson({
         'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
+        'flutterVersion': '3.47.2',
         'dartSdkRoot': '/ext/dart-sdk',
         'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
         'frontendServer': '/ext/host-tools/frontend_server_aot.dart.snapshot',
@@ -366,7 +331,7 @@ void main() {
     test('fromJson parses dartPluginRegistrants, defaults empty', () {
       Map<String, dynamic> base() => {
         'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
+        'flutterVersion': '3.47.2',
         'dartSdkRoot': '/ext/dart-sdk',
         'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
         'frontendServer': '/ext/host-tools/fs.snapshot',
@@ -396,7 +361,7 @@ void main() {
       // the platform the app is actually running on — not the host's.
       final config = DevConfig(
         engineRevision: 'abc',
-        flutterVersion: '3.41.2',
+        flutterVersion: '3.47.2',
         dartSdkRoot: '/sdk',
         dartaotruntime: '/bin/dartaotruntime',
         frontendServer: '/tools/fs.snapshot',
@@ -419,7 +384,7 @@ void main() {
       // set gets registered silently.
       final config = DevConfig(
         engineRevision: 'abc',
-        flutterVersion: '3.41.2',
+        flutterVersion: '3.47.2',
         dartSdkRoot: '/sdk',
         dartaotruntime: '/bin/dartaotruntime',
         frontendServer: '/tools/fs.snapshot',
@@ -444,7 +409,7 @@ void main() {
       // plugins and no agent to register. Distinct from a missing key.
       final config = DevConfig(
         engineRevision: 'abc',
-        flutterVersion: '3.41.2',
+        flutterVersion: '3.47.2',
         dartSdkRoot: '/sdk',
         dartaotruntime: '/bin/dartaotruntime',
         frontendServer: '/tools/fs.snapshot',
@@ -458,7 +423,7 @@ void main() {
     test('fromJson defaults dartDefines to empty when absent', () {
       final config = DevConfig.fromJson({
         'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
+        'flutterVersion': '3.47.2',
         'dartSdkRoot': '/ext/dart-sdk',
         'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
         'frontendServer': '/ext/host-tools/frontend_server_aot.dart.snapshot',
@@ -474,7 +439,7 @@ void main() {
       // adds the flag spelling.
       Map<String, dynamic> base() => {
         'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
+        'flutterVersion': '3.47.2',
         'dartSdkRoot': '/ext/dart-sdk',
         'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
         'frontendServer': '/ext/host-tools/fs.snapshot',
@@ -494,7 +459,7 @@ void main() {
     test('fromJson parses appSources, defaults empty', () {
       Map<String, dynamic> base() => {
         'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
+        'flutterVersion': '3.47.2',
         'dartSdkRoot': '/ext/dart-sdk',
         'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
         'frontendServer': '/ext/host-tools/fs.snapshot',
@@ -530,7 +495,7 @@ void main() {
       // the app runs with assertions the build said not to emit.
       Map<String, dynamic> base() => {
         'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
+        'flutterVersion': '3.47.2',
         'dartSdkRoot': '/ext/dart-sdk',
         'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
         'frontendServer': '/ext/host-tools/fs.snapshot',
@@ -603,7 +568,7 @@ void main() {
       configFile.writeAsStringSync(
         jsonEncode({
           'engineRevision': 'rev123',
-          'flutterVersion': '3.41.2',
+          'flutterVersion': '3.47.2',
           'dartSdkRoot': '/sdk',
           'dartaotruntime': '/bin/dartaotruntime',
           'frontendServer': '/tools/fs.snapshot',
@@ -641,7 +606,7 @@ void main() {
       configFile.writeAsStringSync(
         jsonEncode({
           'engineRevision': 'abc',
-          'flutterVersion': '3.41.2',
+          'flutterVersion': '3.47.2',
           'dartSdkRoot': 'external/flutter/dart-sdk',
           'dartaotruntime': 'external/flutter/dart-sdk/bin/dartaotruntime',
           'frontendServer': 'external/flutter/fs.snapshot',
@@ -699,7 +664,7 @@ void main() {
       configFile.writeAsStringSync(
         jsonEncode({
           'engineRevision': 'abc',
-          'flutterVersion': '3.41.2',
+          'flutterVersion': '3.47.2',
           'dartSdkRoot': '/sdk',
           'dartaotruntime': '/bin/dartaotruntime',
           'frontendServer': '/tools/fs.snapshot',
@@ -742,7 +707,7 @@ void main() {
       configFile.writeAsStringSync(
         jsonEncode({
           'engineRevision': 'abc',
-          'flutterVersion': '3.41.2',
+          'flutterVersion': '3.47.2',
           'dartSdkRoot': '/sdk',
           'dartaotruntime': '/bin/dartaotruntime',
           'frontendServer': '/tools/fs.snapshot',
@@ -777,7 +742,7 @@ void main() {
       configFile.writeAsStringSync(
         jsonEncode({
           'engineRevision': 'abc',
-          'flutterVersion': '3.41.2',
+          'flutterVersion': '3.47.2',
           'dartSdkRoot': '/sdk',
           'dartaotruntime': '/bin/dartaotruntime',
           'frontendServer': '/tools/fs.snapshot',
@@ -810,7 +775,7 @@ void main() {
       configFile.writeAsStringSync(
         jsonEncode({
           'engineRevision': 'abc',
-          'flutterVersion': '3.44.0',
+          'flutterVersion': '3.47.5',
           'dartSdkRoot': 'external/flutter/dart-sdk',
           'dartaotruntime': 'external/flutter/dart-sdk/bin/dartaotruntime',
           'frontendServer': 'external/flutter/fs.snapshot',
@@ -928,7 +893,7 @@ void main() {
 
       final devConfig = DevConfig(
         engineRevision: 'abc',
-        flutterVersion: '3.41.2',
+        flutterVersion: '3.47.2',
         dartSdkRoot: '/ext/dart-sdk',
         dartaotruntime: '/bin/dartaotruntime',
         frontendServer: '/tools/fs.snapshot',
@@ -953,7 +918,7 @@ void main() {
     test('throws when DDC files missing', () {
       final devConfig = DevConfig(
         engineRevision: 'abc',
-        flutterVersion: '3.41.2',
+        flutterVersion: '3.47.2',
         dartSdkRoot: '/ext/dart-sdk',
         dartaotruntime: '/bin/dartaotruntime',
         frontendServer: '/tools/fs.snapshot',
@@ -986,7 +951,7 @@ void main() {
     test('throws when no _web directory found', () {
       expect(
         () => findWebOutputDir(['/some/file.json']),
-        throwsStateError,
+        throwsA(isA<NotAWebBundle>()),
       );
     });
   });

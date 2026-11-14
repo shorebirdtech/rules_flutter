@@ -21,7 +21,8 @@
 ///   bazel test :verify_ios_simulator_test --test_tag_filters=
 ///
 /// Pass criteria: after launch the app writes
-/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2` to
+/// `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2
+/// negate(5)=-5 kept(20)=21` to
 /// `tmp/ffi_result.txt` in its sandbox — written in main() only if all three
 /// calls succeeded via the bundled native libraries. The test reads the file
 /// back through `simctl get_app_container` (a deterministic signal that
@@ -36,44 +37,34 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:rules_flutter_e2e_testing/ios_bundle.dart';
+
 const _bundleId = 'com.example.ffi';
 const _marker =
-    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2';
+    'ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO shared=2 '
+    'negate(5)=-5 kept(20)=21';
 const _resultFile = 'tmp/ffi_result.txt';
 const _timeout = Duration(seconds: 60);
 
 void main() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
-  final testWorkspace = Platform.environment['TEST_WORKSPACE'];
-  if (testSrcDir == null || testWorkspace == null) {
-    stderr.writeln('Missing TEST_SRCDIR or TEST_WORKSPACE env vars');
-    exit(1);
-  }
-
-  final ipaPath = '$testSrcDir/$testWorkspace/ffi_ios.ipa';
-  if (!File(ipaPath).existsSync()) {
-    stderr.writeln('iOS app not found at $ipaPath');
-    exit(1);
-  }
-
   if (Process.runSync('xcrun', ['--find', 'simctl']).exitCode != 0) {
     stderr.writeln('xcrun simctl not available');
     exit(1);
   }
 
-  // Extract Payload/<app>.app from the .ipa.
-  final tmp = Directory.systemTemp.createTempSync('ffi_ios_sim');
-  final unzip = Process.runSync('unzip', ['-q', ipaPath, '-d', tmp.path]);
-  if (unzip.exitCode != 0) {
-    stderr.writeln('Failed to unzip ipa: ${unzip.stderr}');
-    exit(1);
+  // The only `.app` in the .ipa's Payload/.
+  final bundle = IosBundle.fromRunfiles('ffi_ios.ipa', prefix: 'ffi_ios_sim');
+  try {
+    print('App: ${bundle.path}');
+    _runOnSimulator(bundle.path);
+  } finally {
+    bundle.dispose();
   }
-  final payload = Directory('${tmp.path}/Payload');
-  final appDir = payload.listSync().whereType<Directory>().firstWhere(
-    (d) => d.path.endsWith('.app'),
-  );
-  print('App: ${appDir.path}');
+}
 
+/// Installs the app at [appPath] on a simulator, launches it and checks the
+/// marker it writes.
+void _runOnSimulator(String appPath) {
   final udid = _ensureBootedSimulator();
   print('Simulator: $udid');
 
@@ -85,7 +76,7 @@ void main() {
     'simctl',
     'install',
     udid,
-    appDir.path,
+    appPath,
   ]);
   if (install.exitCode != 0) {
     stderr.writeln('Install failed: ${install.stderr}');
@@ -93,10 +84,13 @@ void main() {
   }
 
   print('Launching $_bundleId ...');
-  final launch = Process.runSync(
-    'xcrun',
-    ['simctl', 'launch', '--terminate-running-process', udid, _bundleId],
-  );
+  final launch = Process.runSync('xcrun', [
+    'simctl',
+    'launch',
+    '--terminate-running-process',
+    udid,
+    _bundleId,
+  ]);
   if (launch.exitCode != 0) {
     stderr.writeln('Launch failed: ${launch.stderr}');
     exit(1);
@@ -140,8 +134,9 @@ void main() {
     exit(1);
   }
   print(
-    'PASS: @Native asset bind (add), raw framework open (mul) and '
-    'the curated sqlite3 code asset all worked at runtime.',
+    'PASS: @Native asset bind (add), raw framework open (mul), '
+    'the curated sqlite3 code asset and the prebuilt one (negate) all '
+    'worked at runtime.',
   );
 }
 

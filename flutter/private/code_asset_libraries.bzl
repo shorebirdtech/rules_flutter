@@ -3,9 +3,10 @@
 A library in `native_deps` is a target the application names, so the
 application reads its `flutter_native_library` wrapper and its sources straight
 off that edge. A code asset is not named by the application at all: it rides
-`DartPackageInfo.code_assets` up from whichever package owns it — a
+`DartPackageInfo.code_assets` up from whichever package owns it. The package's
+`dart_package_metadata` states it, and any target of the package carries it: a
 `flutter_plugin`, a `flutter_library`, or a plain `dart_library` written by a
-rule set that knows nothing of Flutter — and that record holds only the
+rule set that knows nothing of Flutter. That record holds only the
 `DartCodeAssetInfo`, not the target that declared it.
 
 This aspect goes back to the targets. Applied to an application's `deps` and
@@ -84,7 +85,7 @@ def _below(ctx, skip):
 
 def _code_asset_libraries_aspect_impl(target, ctx):
     asset = target[DartCodeAssetInfo] if DartCodeAssetInfo in target else None
-    if asset != None and asset.dynamic_library == None:
+    if asset != None and asset.file == None:
         asset = None
     wrapper = target[FlutterNativeLibraryInfo] if asset != None and FlutterNativeLibraryInfo in target else None
 
@@ -108,7 +109,7 @@ def _code_asset_libraries_aspect_impl(target, ctx):
         sources = tuple(target[NativeSourcesInfo].sources.to_list())
     record = struct(
         asset_id = asset.asset_id,
-        library = asset.dynamic_library,
+        library = asset.file,
         contract = contract,
         sources = sources,
         hot_patch = hot_patch,
@@ -197,8 +198,7 @@ def describe_code_asset_libraries(label, assets, records, binding_contracts, nat
 
     Args:
         label: The application's label, for error messages.
-        assets: The `FlutterNativeAssetInfo` the application staged from code
-            assets.
+        assets: The assets `resolve_native_assets` staged.
         records: From `code_asset_libraries`.
         binding_contracts: dict[str, list[File]], bundled path to contract
             Files; updated in place.

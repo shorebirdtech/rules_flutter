@@ -1,0 +1,26 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "int64_ids_select",
+)
+
+# `package:int64_ids` as the app's compiler sees it. The variants are separate
+# libraries with one package name, so the app imports it the same way whichever
+# is picked, and the `select()` is in the `deps` of a library: the bundle
+# builds its `deps` once per web platform, but resolves a `select()` among its
+# own in its own configuration, which is not a web platform's.
+#
+# The default covers dart2wasm and a build for no web platform (`bazel build
+# //...` reaches this library that way), which takes the typed variant, as the
+# VM would.
+flutter_library(
+    name = "ids",
+    srcs = [],
+    package = ":pubspec-metadata",
+    visibility = ["//int64:__pkg__"],
+    deps = select({
+        "@rules_dart//dart/constraints:js": ["//int64/ids_js:ids"],
+        "//conditions:default": ["//int64/ids_typed:ids"],
+    }),
+)

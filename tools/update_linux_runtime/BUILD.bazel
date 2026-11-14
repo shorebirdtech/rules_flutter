@@ -1,0 +1,14 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+
+dart_binary(
+    name = "update_linux_runtime",
+    srcs = ["debian_packages.dart"],
+    main = "main.dart",
+)
+
+dart_test(
+    name = "debian_packages_test",
+    srcs = ["debian_packages.dart"],
+    main = "test/debian_packages_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)

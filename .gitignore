@@ -1,10 +1,7 @@
 bazel-*
+.bazel_env
 .DS_Store
 .bazelrc.user
-# Local Claude Code state (settings, other sessions' worktrees), except the
-# project's shared skills.
-.claude/*
-!.claude/skills/
 .dart_tool/
 .idea/
 .ijwb/
@@ -19,3 +16,7 @@ local.properties
 # Throwaway measurement probes written while diagnosing. Never committed:
 # an agent staged this tree once with `git add -A` and had to rewrite history.
 .probes/
+
+# The release archive e2e/external_module depends on; //tools/consumer_archive
+# extracts it.
+e2e/external_module/rules_flutter/

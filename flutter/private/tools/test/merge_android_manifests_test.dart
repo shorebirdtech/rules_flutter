@@ -460,4 +460,208 @@ void main() {
       expect(out, contains('package="com.example.app.second"'));
     });
   });
+
+  group('uncompressed native libraries', () {
+    String marked(String base) => mergeManifests(
+      baseXml: base,
+      basePath: 'out/base/AndroidManifest.xml',
+      uncompressedNativeLibs: true,
+    );
+
+    test('marks the application not to extract them', () {
+      final out = marked(_base);
+      expect(
+        out,
+        contains(
+          '<application android:extractNativeLibs="false"\n'
+          '        android:label="example"',
+        ),
+      );
+      // Nothing else of the base changes.
+      expect(out.replaceFirst(' android:extractNativeLibs="false"', ''), _base);
+    });
+
+    test('keeps a base that says so already', () {
+      const declaring = '''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:extractNativeLibs='false' android:label="example"/>
+</manifest>
+''';
+      expect(marked(declaring), declaring);
+    });
+
+    test('a comment naming the element changes nothing', () {
+      const commented = '''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- <application android:label="old"> -->
+    <application android:label="example"/>
+</manifest>
+''';
+      expect(
+        marked(commented),
+        contains(
+          '<application android:extractNativeLibs="false" '
+          'android:label="example"/>',
+        ),
+      );
+      expect(
+        marked(commented),
+        contains('<!-- <application android:label="old"> -->'),
+      );
+    });
+
+    test('refuses a base that asks for them to be extracted', () {
+      expect(
+        () => marked('''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:extractNativeLibs="true"/>
+</manifest>
+'''),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('android:extractNativeLibs="true"'),
+              contains('uncompressed'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('refuses a base with no application', () {
+      expect(
+        () => marked(
+          '<manifest xmlns:android="http://schemas.android.com/apk/res/android"/>',
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('leaves the base alone unless asked', () {
+      expect(
+        mergeManifests(
+          baseXml: _base,
+          basePath: 'out/base/AndroidManifest.xml',
+        ),
+        _base,
+      );
+    });
+  });
+
+  group('version', () {
+    String withVersion(String base, {String? code, String? name}) =>
+        mergeManifests(
+          baseXml: base,
+          basePath: 'out/base/AndroidManifest.xml',
+          versionCode: code,
+          versionName: name,
+        );
+
+    test('sets both attributes on the root manifest', () {
+      final out = withVersion(_base, code: '42', name: '2.1.0');
+      expect(
+        out,
+        contains(
+          '<manifest xmlns:android="http://schemas.android.com/apk/res/android"'
+          ' android:versionCode="42" android:versionName="2.1.0">',
+        ),
+      );
+      // Nothing else of the base changes.
+      expect(
+        out.replaceFirst(
+          ' android:versionCode="42" android:versionName="2.1.0"',
+          '',
+        ),
+        _base,
+      );
+    });
+
+    test('escapes the version name', () {
+      final out = withVersion(_base, name: '1.0 "beta" <&>');
+      expect(
+        out,
+        contains('android:versionName="1.0 &quot;beta&quot; &lt;&amp;&gt;"'),
+      );
+    });
+
+    const declaring = '''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="7"
+    android:versionName="3.0 &amp; up">
+    <application android:label="example"/>
+</manifest>
+''';
+
+    test("keeps the base's own version when it is the app's", () {
+      expect(withVersion(declaring, code: '7', name: '3.0 & up'), declaring);
+    });
+
+    test('keeps the placeholders manifest_values fills', () {
+      const placeholders = '''
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="\${versionCode}"
+    android:versionName="\${versionName}">
+</manifest>
+''';
+      expect(withVersion(placeholders, code: '7', name: '3.0'), placeholders);
+    });
+
+    test("refuses a version the base declares that is not the app's", () {
+      // The defaults too: the program reports them.
+      expect(
+        () => withVersion(declaring, code: '1', name: '3.0 & up'),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('android:versionCode="7"'),
+              contains('the app\'s version is "1"'),
+              contains('`build_number`'),
+              contains('`build_number` on the flutter_application to "7"'),
+            ),
+          ),
+        ),
+      );
+      expect(
+        () => withVersion(declaring, code: '7', name: '4.0'),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('`build_name`'),
+          ),
+        ),
+      );
+    });
+
+    test('names the build setting that gave the version', () {
+      expect(
+        () => mergeManifests(
+          baseXml: declaring,
+          basePath: 'out/base/AndroidManifest.xml',
+          versionCode: '123',
+          versionName: '3.0 & up',
+          versionSettings: {
+            'build_number': '--@rules_flutter//flutter:build_number',
+          },
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('android:versionCode="7"'),
+              contains('the app\'s version is "123"'),
+              contains('`--@rules_flutter//flutter:build_number` gives it'),
+              contains('remove the attribute from the manifest'),
+              isNot(contains('on the flutter_application')),
+            ),
+          ),
+        ),
+      );
+    });
+  });
 }

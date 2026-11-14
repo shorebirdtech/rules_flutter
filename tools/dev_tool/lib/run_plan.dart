@@ -14,14 +14,41 @@ import 'dart:async';
 
 import 'package:args/args.dart';
 
+import 'android_sdk.dart';
 import 'bazel.dart';
 import 'dev_tool_exception.dart';
 import 'device.dart';
 import 'device_id.dart';
 import 'logging.dart';
+import 'native_libs_fingerprint.dart';
 import 'toolchain_info.dart';
+import 'web_bundle_facts.dart';
 import 'web_mode.dart';
 import 'web_options.dart';
+
+/// Refuses [devices] that cannot be built by one `bazel build`.
+///
+/// A run launches every device from a single build of the launch target, and
+/// the build's flags are the first device's. Devices that need different ones
+/// (an x86_64 emulator and an arm64 phone: another ABI means other native
+/// libraries, another native-assets table) would each get the wrong build
+/// facts for all but the first, silently, so they are refused before anything
+/// is built.
+void assertDevicesShareOneBuild(List<Device> devices) {
+  final distinctBuildArgs = devices.map((d) => d.buildArgs.join(' ')).toSet();
+  if (distinctBuildArgs.length > 1) {
+    final details = devices
+        .where((d) => d.buildArgs.isNotEmpty)
+        .map((d) => '  ${d.name}: ${d.buildArgs.join(' ')}')
+        .join('\n');
+    throw DevToolException(
+      'Cannot build for multiple platforms in one invocation.\n$details\n'
+      'A run launches every device from one build, so devices that need '
+      'different flags (another Android ABI, say) cannot share a run: start '
+      'one run per build configuration.',
+    );
+  }
+}
 
 /// Refuses a compilation mode no device in [devices] can actually run.
 ///
@@ -54,18 +81,18 @@ class RunPlan {
   /// Every extra bazel argument, platform flags included. One list, because a
   /// build and the cquery that reads its outputs have to agree exactly.
   ///
-  /// The `--dart-define` flags live here and nowhere else. This is the build
-  /// that bakes them into the app; every later invocation of the run reads them
-  /// back off the running app instead of being told a second time.
+  /// [sessionBuildArgs], then the device's flags.
   final List<String> extraArgs;
 
-  /// The user's raw `--build-arg` values.
+  /// Every bazel flag of the run but the device's: the user's `--config` and
+  /// `--build-arg` values, the `--dart-define`s and the mode's flags.
   ///
   /// Kept apart from [extraArgs] because the dev-loop builds need them without
   /// the device flags: a bare build of the flutter_application resolves in the
-  /// host configuration, while these change it wherever they are applied. Only
-  /// the user knows they were passed, and nothing in the app records them.
-  final List<String> userBuildArgs;
+  /// host platform's configuration, while these change it wherever they are
+  /// applied. The dev loop builds in exactly these, so Bazel keeps the analysis
+  /// of the build that launched the app.
+  final List<String> sessionBuildArgs;
 
   /// `opt` in profile mode, `dbg` with hot reload, else whatever `-c` said.
   /// An explicit `-c` naming any other mode is refused, not overridden.
@@ -82,7 +109,6 @@ class RunPlan {
   final bool startPaused;
   final bool isMachine;
   final bool watchEnabled;
-  final bool wasmMode;
   final bool devToolsEnabled;
   final bool httpChannelEnabled;
   final bool allowNoVmService;
@@ -105,7 +131,7 @@ class RunPlan {
   RunPlan._({
     required this.target,
     required this.extraArgs,
-    required this.userBuildArgs,
+    required this.sessionBuildArgs,
     required this.compilationMode,
     required this.devices,
     required this.workspace,
@@ -117,7 +143,6 @@ class RunPlan {
     required this.startPaused,
     required this.isMachine,
     required this.watchEnabled,
-    required this.wasmMode,
     required this.devToolsEnabled,
     required this.httpChannelEnabled,
     required this.allowNoVmService,
@@ -169,15 +194,17 @@ class RunPlan {
   /// Whether this run's app carries the `ext.rules_flutter.*` extensions the
   /// `app.*` agent surface proxies to.
   ///
-  /// They are registered with `dart:developer` and reached over a VM service,
-  /// so a native run has them and, on a browser, only the DDC dev loop does —
-  /// see [DdcWebMode], which is where that fact is written down. A `--wasm` or
-  /// `--profile` web run serves a bundle compiled by dart2wasm or dart2js,
-  /// where `registerExtension` is a no-op stub, to a page with no VM service
-  /// behind it. Decided here so such a run stops advertising commands it can
-  /// only refuse.
-  bool get hasAgentSurface =>
-      hasAgentSurfaceFor(isWebDevice: isWebDevice, isDdcWeb: isDdcWeb);
+  /// A native run and the DDC dev loop reach them over a VM service. A bundled
+  /// web run (`--wasm`, `--profile`, `--no-hot`) has none, but a debug bundle
+  /// has the extensions compiled in with a JavaScript bridge the dev tool
+  /// drives over the DevTools protocol (see `BrowserExtensionChannel`); a
+  /// non-debug bundle compiles them out. Decided here so a run stops
+  /// advertising commands it can only refuse.
+  bool get hasAgentSurface => hasAgentSurfaceFor(
+    isWebDevice: isWebDevice,
+    isDdcWeb: isDdcWeb,
+    buildMode: buildMode,
+  );
 
   /// The same run, in the vocabulary upstream's daemon protocol uses for
   /// `app.start`'s `mode` field.
@@ -214,7 +241,7 @@ class RunPlan {
   /// I/O — `bazel info`, toolchain resolution, device preflight — which a test
   /// of a three-way conditional has no business standing up.
   static String? compilationModeFor(ArgResults results) {
-    final config = results['config'] as String?;
+    final config = results['compilation_mode'] as String?;
     final profileMode = results['profile'] as bool;
     final hotReloadEnabled = results['hot'] as bool;
 
@@ -234,7 +261,7 @@ class RunPlan {
     // Only an explicit `-c` can contradict anything. `wasParsed` is what
     // separates one from the default, and so is what makes refusing possible
     // at all rather than silently substituting.
-    if (results.wasParsed('config') && config != required) {
+    if (results.wasParsed('compilation_mode') && config != required) {
       throw DevToolException(
         '`-c $config` contradicts $asked: $why, which only `-c $required` '
         'produces.\n'
@@ -315,28 +342,56 @@ class RunPlan {
     // info` spawns and a toolchain resolution have been spent on it.
     final compilationMode = compilationModeFor(results);
 
-    // Devices FIRST — they dictate the platform build flags — and before any
-    // `bazel` spawn, so an id that names no device is refused at once.
-    final devices = await resolveDevices(
-      results['device'] as List<String>,
-    );
-
     // Resolve the workspace root once rather than per callsite: it avoids
     // redundant `bazel info` spawns and gives every consumer the same answer.
+    // Under `bazel run` it spawns nothing.
     final workspace = await bazel.findWorkspaceRoot();
-    // The native pipeline needs the frontend server and dartaotruntime out of
-    // this, and DevTools needs the toolchain's `dart` on every platform —
-    // including web, which otherwise never resolves a toolchain at all.
+    final userBuildArgs = userBazelFlags(
+      configs: results['config'] as List<String>,
+      buildArgs: results['build-arg'] as List<String>,
+    );
+
+    // Every option the build takes but the device's own, which only the
+    // device can say.
+    final runFlags = [
+      ...userBuildArgs,
+      ...defineFlags,
+      ...modeBuildFlags(profileMode: profileMode),
+    ];
+
+    // Devices next — they dictate the platform build flags. Only an Android
+    // device builds anything here (the workspace's adb and aapt2), so an id
+    // that names no device is refused at once. The tools build in the run's
+    // own options so that the app's build after it keeps Bazel's analysis
+    // cache: they differ only by the device's flags, and by none at all when
+    // the workspace already builds for the device's ABI.
+    final configFlags = bazelConfigFlags(results['config'] as List<String>);
+    final devices = await resolveDevices(
+      results['device'] as List<String>,
+      androidSdk: WorkspaceAndroidSdk(
+        workspace: workspace,
+        runBazel: bazel.run,
+        configFlags: configFlags,
+        buildFlags: [
+          if (compilationMode != null) ...['-c', compilationMode],
+          ...runFlags,
+        ],
+      ),
+    );
+
+    // The flags a device builds with can depend on the device itself (an
+    // Android device's ABI), so it is asked before anything reads them.
+    for (final device in devices) {
+      await device.resolveBuildArgs();
+    }
+
+    // DevTools needs the toolchain's `dart` on every platform. The compilers
+    // take nothing from here: they run what the app's dev config names.
     //
     // With the flags the run will build with, because the fetch analyses the
     // target: see [resolveToolchainPaths]. The profile flag is among them, so
     // the toolchain is resolved in the configuration the build will use.
-    final extraArgs = [
-      ...(results['build-arg'] as List<String>),
-      ...defineFlags,
-      ...devices.first.buildArgs,
-      ...modeBuildFlags(profileMode: profileMode),
-    ];
+    final extraArgs = [...runFlags, ...devices.first.buildArgs];
     final toolchain = await resolveToolchainPaths(
       target,
       workspace: workspace,
@@ -350,15 +405,44 @@ class RunPlan {
     // What shape of web run this is, and what the web flags mean for it —
     // both before the host is probed, because a `--web-port` that is not a
     // number is a typo to report at once rather than after a preflight.
-    // `resolveWebMode` refuses `--wasm` and `--hot` combinations that cannot
-    // hold; `WebOptions.resolve` refuses every web flag on a native run.
+    // `selectWasm` and `resolveWebMode` refuse `--wasm` and `--hot`
+    // combinations that cannot hold; `WebOptions.resolve` refuses every web
+    // flag on a native run.
+    final isWebDevice = devices.first is WebDevice;
+    final wasmFlag = results['wasm'] as bool?;
+
+    // Whether the app ships WebAssembly only decides the dev loop of a run
+    // that would otherwise be DDC, so only that run asks, and before any build
+    // is spent on the wrong loop. The question is a bazel query because the
+    // build's own description of the bundle (`<bundle>.serving.json`,
+    // `_dev_config.json`) does not exist until the build has run.
+    final targetWasmOnly =
+        needsWasmOnlyFact(
+          isWebDevice: isWebDevice,
+          wasmFlag: wasmFlag,
+          profileMode: profileMode,
+          hotReloadEnabled: hotReloadEnabled,
+        )
+        ? (await bazel.cqueryWebBundleFacts(
+            target,
+            workspace: workspace,
+            compilationMode: compilationMode,
+            extraArgs: extraArgs,
+          ))?.wasmOnly
+        : null;
+    final wasm = selectWasm(
+      isWebDevice: isWebDevice,
+      wasmFlag: wasmFlag,
+      targetWasmOnly: targetWasmOnly,
+    );
     final webMode = resolveWebMode(
-      isWebDevice: devices.first is WebDevice,
-      wasmMode: results['wasm'] as bool,
+      isWebDevice: isWebDevice,
+      wasm: wasm,
       profileMode: profileMode,
       hotReloadEnabled: hotReloadEnabled,
       hotExplicit: results.wasParsed('hot'),
     );
+    announceWasmSelection(wasm, target, logger);
     final webOptions = WebOptions.resolve(results, webMode);
 
     logger.fine({
@@ -369,16 +453,7 @@ class RunPlan {
 
     // All devices must agree on platform build args: one invocation is one
     // build, and a build cannot be for two platforms at once.
-    final distinctBuildArgs = devices.map((d) => d.buildArgs.join(' ')).toSet();
-    if (distinctBuildArgs.length > 1) {
-      final details = devices
-          .where((d) => d.buildArgs.isNotEmpty)
-          .map((d) => '  ${d.name}: ${d.buildArgs.join(' ')}')
-          .join('\n');
-      throw DevToolException(
-        'Cannot build for multiple platforms in one invocation.\n$details',
-      );
-    }
+    assertDevicesShareOneBuild(devices);
 
     // Before the preflight: the mode decides which host tools a launch needs
     // (an iOS device attaches lldb to a debug app only), as well as how it
@@ -445,7 +520,7 @@ class RunPlan {
     return RunPlan._(
       target: target,
       extraArgs: extraArgs,
-      userBuildArgs: results['build-arg'] as List<String>,
+      sessionBuildArgs: runFlags,
       compilationMode: compilationMode,
       devices: devices,
       workspace: workspace,
@@ -459,7 +534,6 @@ class RunPlan {
       // Terminal: watch by default. Machine: don't — a client that drives
       // reloads itself does not want the filesystem doing it too.
       watchEnabled: watchEnabledFor(results, isMachine: isMachine),
-      wasmMode: results['wasm'] as bool,
       devToolsEnabled: results['devtools'] as bool,
       httpChannelEnabled: results['http-control-channel'] as bool,
       allowNoVmService: allowNoVmService,
@@ -471,7 +545,15 @@ class RunPlan {
   }
 
   /// Build the target and pick the artifact to launch from.
-  Future<({String appFile, List<String> outputFiles})> buildApp() async {
+  Future<
+    ({
+      String appFile,
+      List<String> outputFiles,
+      Map<String, String>? partsNativeLibs,
+    })
+  >
+  buildApp() async {
+    final parts = devices.first.launchBundleParts;
     logger.fine({
       'message': 'compilation_config',
       'text': 'Compilation mode: $compilationMode, extra args: $extraArgs',
@@ -490,6 +572,9 @@ class RunPlan {
       workspace: workspace,
       compilationMode: compilationMode,
       extraArgs: extraArgs,
+      // Built with the launch and read as it returns, so a restart's baseline
+      // is what the launched artifact was made from.
+      parts: parts,
     );
     if (!result.success) {
       throw DevToolException(
@@ -502,13 +587,68 @@ class RunPlan {
         'Build succeeded but cquery returned no output files for $target.',
       );
     }
-    final appFile = devices.first.pickArtifact(result.outputFiles);
+    final String appFile;
+    try {
+      appFile = devices.first.pickArtifact(result.outputFiles);
+    } on NotAWebBundle {
+      throw DevToolException(
+        notAWebBundleMessage(
+          target,
+          await bazel.queryWebBundlesOver(target, workspace: workspace),
+        ),
+      );
+    }
     logger.fine({
       'message': 'build_outputs',
       'text': 'Launch artifact: $appFile',
       'outputs': result.outputFiles,
     });
-    return (appFile: appFile, outputFiles: result.outputFiles);
+    return (
+      appFile: appFile,
+      outputFiles: result.outputFiles,
+      // Read before anything else builds: a later build of the parts may hold
+      // an edit the launched artifact does not.
+      partsNativeLibs: parts == null
+          ? null
+          : await nativeLibsFingerprintOfBuiltFiles(
+              result.partsFiles[parts.nativeLibsGroup]!,
+            ),
+    );
+  }
+}
+
+/// Says, at the start of the run, when the dev loop is not the one the user
+/// would have guessed from the flags they typed.
+///
+/// A WebAssembly-only app gets the dart2wasm loop without asking, which has no
+/// hot reload: a run that quietly lacked it would read as a broken one. And
+/// `--no-wasm` on such an app is honoured, but the DDC loop compiles for
+/// JavaScript, which the app never ships.
+void announceWasmSelection(WasmSelection wasm, String target, Logger logger) {
+  switch (wasm) {
+    case WasmSelection.wasmOnlyTarget:
+      logger.info({
+        'message': 'wasm_only_target_runs_wasm',
+        'text':
+            '$target ships WebAssembly only (js_fallback = False), so this '
+            'run uses the dart2wasm dev loop, not DDC (JavaScript): there is '
+            'no hot reload, and a restart is a bazel rebuild plus a page '
+            'reload. Pass --no-wasm for the DDC loop.',
+        'target': target,
+      });
+    case WasmSelection.ddcDespiteWasmOnlyTarget:
+      logger.warning({
+        'message': 'ddc_for_wasm_only_target',
+        'text':
+            '$target ships WebAssembly only (js_fallback = False), but --no-wasm '
+            'runs it under DDC, which compiles JavaScript. Code that only '
+            'works under dart2wasm (an Int64List, say) will fail here and not '
+            'in the app you ship.',
+        'target': target,
+      });
+    case WasmSelection.notWasm:
+    case WasmSelection.requested:
+      break;
   }
 }
 
@@ -558,8 +698,13 @@ bool carriesBuildInfoFor({
 
 /// Whether a run with these properties can answer the `app.*` agent surface.
 ///
+/// Native and the DDC dev loop always can. A bundled web run can exactly when
+/// it is a debug build: the extensions and their page bridge are compiled into
+/// debug bundles only.
+///
 /// Pulled out of [RunPlan] for the same reason [carriesBuildInfoFor] is.
 bool hasAgentSurfaceFor({
   required bool isWebDevice,
   required bool isDdcWeb,
-}) => !isWebDevice || isDdcWeb;
+  required BuildMode buildMode,
+}) => !isWebDevice || isDdcWeb || buildMode == BuildMode.debug;

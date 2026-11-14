@@ -162,6 +162,36 @@ void main() {
       expect(File(declared).readAsStringSync(), '{}');
     });
 
+    test('extracts with no output_dir', () async {
+      final srcDir = Directory('${tempDir.path}/srcdir')..createSync();
+      File(
+        '${srcDir.path}/main.dart.js.resources.json',
+      ).writeAsStringSync('{}');
+      final declared = '${tempDir.path}/declared/recorded_uses.json';
+
+      await run({
+        'extracts': [
+          {
+            'src': '${srcDir.path}/main.dart.js.resources.json',
+            'dst': declared,
+          },
+        ],
+      });
+
+      expect(File(declared).readAsStringSync(), '{}');
+    });
+
+    test('refuses files to place with no output_dir', () async {
+      await expectLater(
+        run({
+          'copies': [
+            {'src': '${tempDir.path}/a', 'dst': 'a'},
+          ],
+        }),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
     test('names the missing file when an extract source is absent', () async {
       await expectLater(
         run({

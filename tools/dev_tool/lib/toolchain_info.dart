@@ -3,12 +3,15 @@
 /// Two sources, answering two different questions:
 ///
 ///  * [resolveToolchainPaths] finds the Flutter host toolchain repo in a
-///    workspace's Bazel output base and builds the five paths a run needs out
-///    of it — `dart`, `dartaotruntime`, `frontend_server_aot.dart.snapshot`,
-///    `platform_strong.dill` and the patched SDK root. It answers before
-///    anything is built, which is why it is here and not read off a build.
+///    workspace's Bazel output base and takes the `dart` a run starts DevTools
+///    and the e2e harness with out of it. It answers before anything is built,
+///    which is why it is here and not read off a build.
 ///  * [parseDevConfig] reads the `_dev_config.json` a `flutter_application` or
-///    `flutter_web_bundle` emits, which is what the *build* resolved.
+///    `flutter_web_bundle` emits, which is what the *build* resolved. Every
+///    compiler input — `dartaotruntime`, the frontend server snapshot, the
+///    patched SDK — comes from there and never from the output base: a
+///    workspace can declare several SDKs and custom engines, and only the
+///    build knows which one an app is compiled with.
 import 'dart:convert';
 import 'dart:ffi' show Abi;
 import 'dart:io';
@@ -16,22 +19,13 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'dev_tool_exception.dart';
+import 'web_bundle_facts.dart' show NotAWebBundle;
 
 /// Toolchain paths resolved from Bazel.
 class ToolchainPaths {
   final String dart;
-  final String dartaotruntime;
-  final String frontendServer;
-  final String platformDill;
-  final String patchedSdkRoot;
 
-  ToolchainPaths({
-    required this.dart,
-    required this.dartaotruntime,
-    required this.frontendServer,
-    required this.platformDill,
-    required this.patchedSdkRoot,
-  });
+  ToolchainPaths({required this.dart});
 }
 
 /// How [resolveToolchainPaths] reaches bazel.
@@ -70,8 +64,8 @@ List<String> flutterToolchainRepoNames(String platform) => [
 /// bazel process's `workingDirectory` so the call works under `bazel run`
 /// (where `Directory.current` is the runfiles execroot).
 ///
-/// Runs before anything is built, because the frontend server and the
-/// dartaotruntime that drives it are needed to assemble a run at all. That is
+/// Runs before anything is built, because the run needs its `dart` before the
+/// build has said anything. That is
 /// what makes the fetch below load-bearing rather than incidental: on a
 /// workspace whose output base has never been built there is no external repo
 /// to find yet, and this is the call that creates it.
@@ -132,33 +126,13 @@ Future<ToolchainPaths> resolveToolchainPaths(
       '$externalBase.\n'
       'Looked for: ${candidates.join(', ')}.\n'
       'That means $target resolves no rules_flutter toolchain — check that '
-      'the workspace registers one (`register_toolchains`) and that $target '
+      'rules_flutter is a dependency of the workspace and that $target '
       'is a Flutter target.',
     );
   }
 
-  final isWindows = Platform.isWindows;
-  final dartBin = isWindows ? 'dart.exe' : 'dart';
-  final dartaotruntimeBin = isWindows ? 'dartaotruntime.exe' : 'dartaotruntime';
-
-  return ToolchainPaths(
-    dart: p.join(externalDir, 'dart-sdk', 'bin', dartBin),
-    dartaotruntime: p.join(externalDir, 'dart-sdk', 'bin', dartaotruntimeBin),
-    frontendServer: p.join(
-      externalDir,
-      'dart-sdk',
-      'bin',
-      'snapshots',
-      'frontend_server_aot.dart.snapshot',
-    ),
-    platformDill: p.join(
-      externalDir,
-      'patched-sdk',
-      'flutter_patched_sdk',
-      'platform_strong.dill',
-    ),
-    patchedSdkRoot: p.join(externalDir, 'patched-sdk', 'flutter_patched_sdk'),
-  );
+  final dartBin = Platform.isWindows ? 'dart.exe' : 'dart';
+  return ToolchainPaths(dart: p.join(externalDir, 'dart-sdk', 'bin', dartBin));
 }
 
 /// Whichever of [candidates] exists under [externalBase], or null.
@@ -261,11 +235,11 @@ class DevConfig {
   /// Deliberately a second field rather than a second use of
   /// [devPackageConfig]. The two answer different questions and a
   /// source-assembled app is where they diverge: the dev config's `rootUri` is
-  /// `<filesystemScheme>:///<lib_root>`, which the frontend_server resolves
-  /// through `--filesystem-root` and `Uri.toFilePath()` refuses outright. The
-  /// compiler wants the dev one (live sources); DWDS wants this one, because
-  /// its job is to read the source off disk and show it. Handed the dev one it
-  /// throws `Cannot extract a file path from a org-dartlang-app URI` on every
+  /// `<filesystemScheme>:///<package_root>`, which the frontend_server
+  /// resolves through `--filesystem-root` and `Uri.toFilePath()` refuses
+  /// outright. The compiler wants the dev one (live sources); DWDS wants this
+  /// one, because its job is to read the source off disk and show it. Handed
+  /// the dev one it throws `Cannot extract a file path from a org-dartlang-app URI` on every
   /// first-party library and the debugger shows a blank pane.
   final String buildPackageConfig;
 
@@ -287,6 +261,16 @@ class DevConfig {
   /// [generatedSourcePaths] (so the dev tool invalidates the right library
   /// without inferring a URI from a path).
   final List<String> generatedSourceUris;
+
+  /// The workspace-relative directory each package's first-party assets come
+  /// from, by the archive path prefix they are bundled under: `''` for the
+  /// application, `packages/<name>/` for a library.
+  ///
+  /// Declared by the build: an asset is bundled under its path in its package
+  /// (`assets/a.png`), which says nothing of where in the workspace the
+  /// package is. Pub packages' and the SDK's assets are not here: no workspace
+  /// file feeds them.
+  final Map<String, String> assetRoots;
 
   /// Every shader the bundle carries, by archive path, with the
   /// workspace-relative files it is compiled from (the shader and what it may
@@ -324,11 +308,11 @@ class DevConfig {
   /// pub package's prebuilt — which no edit between reloads can move.
   final Map<String, List<String>> nativeLibSources;
 
-  /// First-party source packages (app + local deps) as `{name, libRoot}`, where
-  /// `libRoot` is workspace-relative. Drives the [SourceUriResolver] so a live
-  /// edit in any of these packages maps to its `package:` URI. Empty for web
-  /// dev configs only if the build emitted none.
-  final List<({String name, String libRoot})> sourcePackages;
+  /// First-party source packages (app + local deps) as `{name, packageRoot}`,
+  /// where `packageRoot` is workspace-relative. Drives the [SourceUriResolver]
+  /// so a live edit in any of these packages maps to its `package:` URI. Empty
+  /// for web dev configs only if the build emitted none.
+  final List<({String name, String packageRoot})> sourcePackages;
 
   /// The sources outside every package that the app compiles under
   /// [filesystemScheme], as `{path, uri}` with `path` workspace-relative: a
@@ -378,11 +362,11 @@ class DevConfig {
   /// (`registerRulesFlutterAgentExtensions()`), or `''` for a config that
   /// predates them.
   ///
-  /// Web only, and dev-loop only. The native rules compile the same source into
-  /// the app's kernel and let the engine's pre-main registrant hook call it;
-  /// the web bundle cannot, because dart2wasm/dart2js stub out
-  /// `registerExtension`. So the DDC dev loop is the one place it can run, and
-  /// the dev tool imports it from the synthetic entrypoint it generates.
+  /// Web only, and for the DDC dev loop: the dev tool imports it from the
+  /// synthetic entrypoint it generates and reaches it through DWDS. The native
+  /// rules compile the same source into the app's kernel; a debug web bundle
+  /// compiles it in too, behind the bridge that serves it without a VM service
+  /// (`agent_extensions/web_bridge.dart`), and needs nothing from this field.
   final String agentExtensions;
 
   /// Absolute path to the bootstrap the dev server answers
@@ -435,6 +419,7 @@ class DevConfig {
     this.filesystemScheme = '',
     this.generatedSourcePaths = const [],
     this.generatedSourceUris = const [],
+    this.assetRoots = const {},
     this.shaders = const {},
     this.nativeLibs = const [],
     this.nativeLibContracts = const {},
@@ -502,6 +487,11 @@ class DevConfig {
       filesystemScheme: (json['filesystemScheme'] as String?) ?? '',
       generatedSourcePaths: strList('generatedSourcePaths'),
       generatedSourceUris: strList('generatedSourceUris'),
+      assetRoots: {
+        for (final MapEntry(:key, :value)
+            in ((json['assetRoots'] as Map?) ?? const {}).entries)
+          key as String: value as String,
+      },
       shaders: {
         for (final MapEntry(:key, :value)
             in ((json['shaders'] as Map?) ?? const {}).entries)
@@ -535,7 +525,7 @@ class DevConfig {
         for (final e in (json['sourcePackages'] as List?) ?? const [])
           (
             name: (e as Map)['name'] as String,
-            libRoot: e['libRoot'] as String,
+            packageRoot: e['packageRoot'] as String,
           ),
       ],
       appSources: [
@@ -761,17 +751,16 @@ WebToolchainPaths buildWebToolchainFromOutputs(
 
 /// Find the web output directory in build outputs.
 ///
-/// The web output dir ends with `_web` and is a directory.
+/// The web output dir ends with `_web` and is a directory. Outputs without one
+/// are not a web bundle's: [NotAWebBundle], which the run turns into the
+/// answer naming the web targets over the application.
 String findWebOutputDir(List<String> outputFiles) {
   for (final f in outputFiles) {
     if (f.endsWith('_web') && FileSystemEntity.isDirectorySync(f)) {
       return f;
     }
   }
-  throw StateError(
-    'No web output directory found in build outputs.\n'
-    'Expected a directory ending with _web.',
-  );
+  throw NotAWebBundle();
 }
 
 /// Resolve a build output to the path the DDC toolchain is handed.

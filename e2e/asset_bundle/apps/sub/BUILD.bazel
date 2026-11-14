@@ -1,0 +1,16 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+load("//tools:bundle.bzl", "bundled_app")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "sub_app",
+)
+
+bundled_app(
+    name = "app",
+    assets = glob(
+        ["assets/**"],
+        exclude = ["assets/extra/**"],
+    ) + ["//apps/sub/assets/extra:x.txt"],
+    package = ":pubspec-metadata",
+)

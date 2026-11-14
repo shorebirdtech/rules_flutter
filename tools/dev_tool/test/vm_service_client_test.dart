@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:path/path.dart' as p;
 import 'package:vm_service/vm_service.dart';
@@ -102,6 +103,110 @@ void main() {
         );
       },
     );
+
+    group('a devFS left for the caller to delete', () {
+      // The layout the VM makes: `<temp>/<fsName><random>/<fsName>/`.
+      late Directory outer;
+      late FakeDevFS vmDevFS;
+
+      setUp(() async {
+        outer = Directory(p.join(tmp.path, 'flutter_bazelAb12Cd'))
+          ..createSync();
+        vmDevFS = await FakeDevFS.start(
+          Directory(p.join(outer.path, 'flutter_bazel'))..createSync(),
+        );
+        File(p.join(outer.path, 'flutter_bazel', 'app.dill')).writeAsBytesSync([
+          1,
+        ]);
+      });
+
+      tearDown(() => vmDevFS.close());
+
+      Future<(VmServiceClient, FakeVmService)> connectedTo(
+        FakeDevFS fs,
+      ) async {
+        final fake = FakeVmService(
+          isolates: [IsolateRef(id: 'iso-main', name: 'main', number: '1')],
+        )..devFSUri = fs.uri;
+        final client = VmServiceClient(connector: (_) async => fake);
+        await client.connect(fs.serviceUri);
+        return (client, fake);
+      }
+
+      test(
+        'is not deleted by the app, and goes once the app has exited',
+        () async {
+          final (client, fake) = await connectedTo(vmDevFS);
+
+          await client.disconnect(leaveDevFS: true);
+
+          expect(
+            fake.extensionCalls.map((c) => c.method),
+            isNot(contains('_deleteDevFS')),
+            reason:
+                'the running app may hold files open, which Windows refuses',
+          );
+          expect(outer.existsSync(), isTrue, reason: 'nothing is deleted yet');
+
+          await client.removeAbandonedDevFS();
+
+          expect(
+            outer.existsSync(),
+            isFalse,
+            reason: 'the directory the VM made, not only its inner one',
+          );
+        },
+      );
+
+      test('is deleted once, and a second call is a no-op', () async {
+        final (client, _) = await connectedTo(vmDevFS);
+        await client.disconnect(leaveDevFS: true);
+        await client.removeAbandonedDevFS();
+
+        await client.removeAbandonedDevFS();
+      });
+
+      test('is left alone when the VM did not make it', () async {
+        // `devfs` is the setUp one: not `flutter_bazel<random>/flutter_bazel`.
+        final (client, _) = await connectedTo(devFS);
+
+        await client.disconnect(leaveDevFS: true);
+        await client.removeAbandonedDevFS();
+
+        expect(
+          Directory(devFS.root.path).existsSync(),
+          isTrue,
+          reason: 'a directory of unknown shape is never deleted recursively',
+        );
+      });
+
+      test('retire passes the choice on', () async {
+        final (client, fake) = await connectedTo(vmDevFS);
+
+        await client.retire(leaveDevFS: true);
+        await client.removeAbandonedDevFS();
+
+        expect(
+          fake.extensionCalls.map((c) => c.method),
+          isNot(contains('_deleteDevFS')),
+        );
+        expect(outer.existsSync(), isFalse);
+      });
+
+      test(
+        'a client that was not told to leave it still asks the app',
+        () async {
+          final (client, fake) = await connectedTo(vmDevFS);
+
+          await client.disconnect();
+
+          expect(
+            fake.extensionCalls.map((c) => c.method),
+            contains('_deleteDevFS'),
+          );
+        },
+      );
+    });
 
     // After a deliberate teardown the client must stay retired. An in-flight
     // caller coming back to a client with no service would otherwise dial a
@@ -389,12 +494,12 @@ void main() {
             // Long enough that waiting it out could not pass for an answer.
             client.frameTimeout = const Duration(seconds: 30);
 
-            final took = Stopwatch()..start();
+            // Waiting out the 30 s would answer with "none came within 30s"
+            // instead of the app's own reason, which is what is asserted.
             final verdict = verb == 'restart'
                 ? await client.hotRestart(dillPath)
                 : await client.hotReload(dillPath);
 
-            expect(took.elapsed, lessThan(const Duration(seconds: 5)));
             expect(verdict, isA<VerdictApplied>());
             expect(
               (verdict as VerdictApplied).notShown,
@@ -584,15 +689,13 @@ void main() {
       );
       final client = await connected(fakeService);
 
-      final tmpFile = File('${Directory.systemTemp.path}/test_screenshot.png');
-      try {
-        await client.screenshot(tmpFile.path);
-        expect(tmpFile.existsSync(), isTrue);
-        expect(tmpFile.readAsBytesSync(), pngBytes);
-        expect(fakeService.lastExtensionMethod, '_flutter.screenshot');
-      } finally {
-        if (tmpFile.existsSync()) tmpFile.deleteSync();
-      }
+      final scratch = Directory.systemTemp.createTempSync('vm_screenshot_');
+      addTearDown(() => scratch.deleteSync(recursive: true));
+      final tmpFile = File('${scratch.path}/test_screenshot.png');
+      await client.screenshot(tmpFile.path);
+      expect(tmpFile.existsSync(), isTrue);
+      expect(tmpFile.readAsBytesSync(), pngBytes);
+      expect(fakeService.lastExtensionMethod, '_flutter.screenshot');
     });
 
     test('screenshot throws when _flutter.screenshot returns no data', () async {
@@ -896,6 +999,32 @@ void main() {
         expect(
           (verdict as VerdictAppErrored).error.renderedText,
           contains('Lookup failed'),
+        );
+      },
+    );
+
+    test(
+      'hotRestart reports a main() that threw before runApp, without waiting',
+      () async {
+        // No framework yet, so no Flutter.Error, and no frame ever. Before the
+        // agent posted the error, this was a ten-second wait and then a
+        // success "the app gave no reason" for.
+        final fake = FakeVmService(
+          isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
+          uncaughtErrorOnRestart:
+              "Invalid argument(s): Couldn't resolve native function "
+              "'counter_bump'",
+        );
+        final client = await connected(fake);
+        // Long enough that a verdict reached by waiting it out is unmistakable:
+        // the regression answers VerdictApplied after it, not an error.
+        client.frameTimeout = const Duration(seconds: 30);
+
+        final verdict = await client.hotRestart(dillPath);
+        expect(verdict, isA<VerdictAppErrored>());
+        expect(
+          (verdict as VerdictAppErrored).error.description,
+          contains("Couldn't resolve native function 'counter_bump'"),
         );
       },
     );
@@ -2644,16 +2773,30 @@ void main() {
         final client = await connected(fake);
         fake.callServiceExtensionGate = Completer<void>();
 
-        final elapsed = Stopwatch()..start();
-        final answer = await client.waitForFirstFrame(
-          timeout: const Duration(milliseconds: 200),
+        final async = FakeAsync();
+        final answer = async.run(
+          (_) => track(
+            client.waitForFirstFrame(
+              timeout: const Duration(milliseconds: 200),
+            ),
+          ),
         );
-        elapsed.stop();
 
-        expect(answer, isFalse);
+        async.elapse(const Duration(milliseconds: 199));
+        expect(answer.done, isFalse);
+        async.elapse(const Duration(milliseconds: 1));
+
+        // The wait ends by cancelling a stream subscription, and that future
+        // completes on the real microtask queue, which `fakeAsync` does not
+        // drive. Let it run (this moves no time), then hand the wait back.
+        await pumpEventQueue();
+        async.flushMicrotasks();
+
+        expect(answer.done, isTrue);
+        expect(answer.error, isNull);
         expect(
-          elapsed.elapsed,
-          lessThan(const Duration(seconds: 2)),
+          answer.value,
+          isFalse,
           reason:
               'the bound is the bound: a query the app never answers must not '
               'hold the wait open past it, or the caller that sized the budget '

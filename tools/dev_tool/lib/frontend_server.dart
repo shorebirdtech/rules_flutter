@@ -150,13 +150,14 @@ class FrontendServer {
   /// has already produced. It does not work, and the reason is in the kernel
   /// itself.
   ///
-  /// `flutter_kernel_compile_action` runs in a Bazel sandbox, so every
-  /// `package:` library in the dill records a `fileUri` under that action's
-  /// sandbox exec root — `…/<output-base>/sandbox/darwin-sandbox/<n>/execroot/…`
-  /// — a directory deleted the moment the action finished. Seeding from it
-  /// makes the front end compare each library's recorded `fileUri` against what
-  /// this compiler's package config resolves the same import URI to, find every
-  /// one different, and throw `PackageChangedError`
+  /// The build's compile (`flutter_kernel_compile`) reads every source under
+  /// `org-dartlang-app:`, rooted at the exec root and the output directories,
+  /// so every `package:` library in the dill records a `fileUri` under that
+  /// scheme, while this compiler reads a package where the dev package config
+  /// points it: the live source tree. Seeding from it makes the front end
+  /// compare each library's recorded `fileUri` against what this compiler's
+  /// package config resolves the same import URI to, find them different, and
+  /// throw `PackageChangedError`
   /// (`front_end`'s `_InitializationFromUri._initializeFromDill`). That error is
   /// on the list the catch block deliberately reports nothing for, so the seed
   /// is discarded whole and the compile restarts from the SDK summary.

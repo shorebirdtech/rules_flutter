@@ -1,0 +1,74 @@
+load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app", "flutter_linux_engine", "flutter_linux_registrant_gen", "flutter_linux_runner_lib_gen")
+
+# What Flutter's own build (CMake) gives the Linux runner that `flutter create`
+# writes, which the runner relies on without saying so: the engine's headers and
+# library, GTK, and the project's `linux/` directory on the include path (for
+# `flutter/generated_plugin_registrant.h`). The targets here compile and link
+# small programs that use the runner's includes and calls, so each one names the
+# part of that contract it observes. Nothing runs: build with `bazel build //...`
+# (see docs/TESTING.md, "cross_compile_example").
+
+flutter_linux_engine(name = "engine")
+
+# The registrant `flutter create` leaves in `linux/flutter/`, as for an app with
+# no native plugins; `flutter_linux_app` uses such files when the package has them.
+filegroup(
+    name = "committed_registrant",
+    srcs = glob(["linux/flutter/generated_plugin_registrant.*"]),
+)
+
+# The engine calls and includes of the runner, against the committed registrant.
+flutter_linux_runner_lib_gen(
+    name = "probe_engine_api",
+    srcs = ["probes/engine_api.cc"],
+    application = "//:cross_app",
+    application_id = "com.example.stock_runner.probe_engine_api",
+    engine = ":engine",
+    registrant = ":committed_registrant",
+)
+
+# The X11 headers GTK's `gdkx.h` includes, which the runner pulls in on X11.
+flutter_linux_runner_lib_gen(
+    name = "probe_gdk_x11",
+    srcs = ["probes/gdk_x11.cc"],
+    application = "//:cross_app",
+    application_id = "com.example.stock_runner.probe_gdk_x11",
+    engine = ":engine",
+    registrant = ":committed_registrant",
+)
+
+# The registrant rules_flutter generates, for a project that does not check
+# `linux/flutter/generated_plugin_registrant.*` in, reached by the name the
+# runner includes it under.
+flutter_linux_registrant_gen(
+    name = "generated_registrant",
+    application = "//:cross_app",
+)
+
+flutter_linux_runner_lib_gen(
+    name = "probe_generated_registrant",
+    srcs = ["probes/generated_registrant.cc"],
+    application = "//:cross_app",
+    application_id = "com.example.stock_runner.probe_generated_registrant",
+    engine = ":engine",
+    registrant = ":generated_registrant",
+)
+
+# `flutter create`'s runner, byte for byte: the 3.47.9 template with only the
+# project name filled in. It also reads `APPLICATION_ID`, which Flutter's
+# CMake defines from the project's GTK application id.
+flutter_linux_app(
+    name = "stock_runner_linux",
+    application = "//:cross_app",
+    application_id = "com.example.stock_runner.stock_runner_linux",
+)
+
+flutter_linux_runner_lib_gen(
+    name = "stock_runner_generated_registrant",
+    srcs = glob(["linux/runner/*.cc"]),
+    hdrs = glob(["linux/runner/*.h"]),
+    application = "//:cross_app",
+    application_id = "com.example.stock_runner.stock_runner_generated_registrant",
+    engine = ":engine",
+    registrant = ":generated_registrant",
+)

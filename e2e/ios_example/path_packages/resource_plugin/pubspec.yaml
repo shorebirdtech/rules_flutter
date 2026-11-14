@@ -1,0 +1,20 @@
+# A `path` package with no Bazel build: an iOS plugin whose Swift package has
+# a resource, which its code reads from `Bundle.module`.
+name: resource_plugin
+description: An iOS plugin whose Swift package has resources.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: ResourcePlugin

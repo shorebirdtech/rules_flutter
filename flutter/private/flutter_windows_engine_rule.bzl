@@ -25,7 +25,7 @@ def _flutter_windows_engine_impl(ctx):
             "@rules_flutter//flutter/platforms:windows_x64 as a convenience).",
         )
 
-    engine_files = flutter_sdk_info.engine_library.files.to_list()
+    engine_files = flutter_sdk_info.engine_library[DefaultInfo].files.to_list()
 
     # Separate engine files into DLL, import lib, headers, and wrapper sources.
     engine_dll = None
@@ -96,7 +96,7 @@ def _flutter_windows_engine_impl(ctx):
     )
 
     return [
-        DefaultInfo(files = flutter_sdk_info.engine_library.files),
+        DefaultInfo(files = flutter_sdk_info.engine_library[DefaultInfo].files),
         cc_info,
     ]
 

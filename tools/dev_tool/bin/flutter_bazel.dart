@@ -8,18 +8,33 @@
 ///   dart run tools/dev_tool/bin/flutter_bazel.dart run --target //:my_app
 ///   dart run tools/dev_tool/bin/flutter_bazel.dart build --target //:my_app
 ///   dart run tools/dev_tool/bin/flutter_bazel.dart attach --debug-url http://...
+///   dart run tools/dev_tool/bin/flutter_bazel.dart devices
+import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
 
 import '../lib/attach_command.dart';
 import '../lib/build_command.dart';
+import '../lib/chrome_profile.dart';
 import '../lib/cli_args.dart';
+import '../lib/devices_command.dart';
 import '../lib/logging.dart';
 import '../lib/run_command.dart' show RunCommand, DevToolException;
 import '../lib/runfiles_helper.dart' show pinProcessLocation;
 
-void main(List<String> args) async {
+void main(List<String> args) {
+  // The VM ends the process on an error nothing caught, and nothing between
+  // that error and the exit stops the browsers a run has started or deletes
+  // their profiles. The exit is the same one the VM would have made.
+  runZonedGuarded(() => _run(args), (error, stack) {
+    ChromeProfile.releaseAllNow();
+    stderr.writeln('Unhandled exception:\n$error\n$stack');
+    exit(255);
+  });
+}
+
+Future<void> _run(List<String> args) async {
   // Before anything can move the path this was launched through.
   pinProcessLocation();
   initLogging();
@@ -28,6 +43,7 @@ void main(List<String> args) async {
     ..addCommand('build', BuildCommand.parser)
     ..addCommand('run', RunCommand.parser)
     ..addCommand('attach', AttachCommand.parser)
+    ..addCommand('devices', DevicesCommand.parser)
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show help.');
 
   try {
@@ -52,6 +68,8 @@ void main(List<String> args) async {
         await RunCommand(command).execute();
       case 'attach':
         await AttachCommand(command).execute();
+      case 'devices':
+        await DevicesCommand(command).execute();
       default:
         stderr.writeln('Unknown command: ${command.name}');
         _printUsage(parser);

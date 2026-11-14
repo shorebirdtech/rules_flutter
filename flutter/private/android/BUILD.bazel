@@ -1,0 +1,14 @@
+load("//flutter:android.bzl", "flutter_android_engine")
+
+# The engine every plugin's Android library compiles against: the
+# FlutterPlugin SPI and the embedding's androidx classes on the compile
+# classpath, as Gradle gives a plugin the embedding with `compileOnly`.
+# neverlink, so an APK carries only the app's own engine, of each of its
+# ABIs; the arm64 one whatever the app's ABI, as the classes are the same.
+# One target for every plugin, in a package of its own so that only an
+# Android build loads rules_android and rules_kotlin.
+flutter_android_engine(
+    name = "plugin_engine",
+    neverlink = True,
+    visibility = ["//visibility:public"],
+)

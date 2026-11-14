@@ -1,0 +1,254 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_asset_bundle")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+load("//tools:bundle.bzl", "bundled_app", "tree_of")
+
+exports_files(["pubspec.lock"])
+
+# The workspace's own package, which the applications here are built in.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "asset_bundle",
+)
+
+# -- First-party assets of an application at the workspace root ---------------
+
+bundled_app(
+    name = "app_root",
+    assets = glob(["assets/**"]),
+)
+
+# -- The Material icon font -----------------------------------------------------
+
+bundled_app(
+    name = "app_with_material_icons",
+    deps = ["@rules_flutter//flutter:material_icons"],
+)
+
+# -- File names the engine URI-encodes -----------------------------------------
+
+bundled_app(
+    name = "app_scales",
+    assets = glob(["scales/**"]),
+)
+
+bundled_app(
+    name = "app_names",
+    assets = glob(["names/**"]),
+)
+
+# -- Assets of a library --------------------------------------------------------
+
+bundled_app(
+    name = "app_with_subdir_lib",
+    deps = ["//libs/lib_assets"],
+)
+
+bundled_app(
+    name = "app_with_deep_lib",
+    deps = ["//libs/team/deep_lib"],
+)
+
+# A library built from a BUILD file inside its package's `lib/`.
+bundled_app(
+    name = "app_with_split_lib",
+    deps = ["//split/lib/src/deep"],
+)
+
+bundled_app(
+    name = "app_with_external_lib",
+    deps = ["@ext_assets"],
+)
+
+# -- Assets of a pub package ------------------------------------------------------
+
+[
+    bundled_app(
+        name = "app_with_" + package,
+        deps = ["@%s" % package],
+    )
+    for package in [
+        "fx_dirs",
+        "fx_extra",
+        "fx_flavors",
+        "fx_names",
+        "fx_platforms",
+        "fx_shader_flavors",
+        "fx_variants",
+    ]
+]
+
+# -- The same package, bundled for each platform ----------------------------------
+
+platform(
+    name = "android_arm64",
+    constraint_values = [
+        "@platforms//os:android",
+        "@platforms//cpu:arm64",
+    ],
+)
+
+[
+    bundled_app(
+        name = "app_with_fx_platforms_" + os,
+        platform = platform,
+        deps = ["@fx_platforms"],
+    )
+    for os, platform in {
+        "android": ":android_arm64",
+        "ios": "@rules_flutter//flutter/platforms:ios_arm64",
+        "linux": "@rules_flutter//flutter/platforms:linux_x64",
+        "macos": "@rules_flutter//flutter/platforms:macos_arm64",
+        "windows": "@rules_flutter//flutter/platforms:windows_x64",
+    }.items()
+]
+
+flutter_web_app(
+    name = "web_with_fx_platforms",
+    application = ":app_with_fx_platforms",
+    js_fallback = False,
+)
+
+tree_of(
+    name = "web_with_fx_platforms_bundle",
+    src = ":web_with_fx_platforms",
+    visibility = ["//visibility:public"],
+)
+
+# -- The same packages, bundled for each flavor ------------------------------------
+
+[
+    bundled_app(
+        name = "app_with_fx_flavors_" + flavor,
+        flavor = flavor,
+        deps = ["@fx_flavors"],
+    )
+    for flavor in [
+        "paid",
+        "premium",
+        "free",
+        "other",
+    ]
+]
+
+[
+    bundled_app(
+        name = "app_with_fx_shader_flavors_" + flavor,
+        flavor = flavor,
+        deps = ["@fx_shader_flavors"],
+    )
+    for flavor in [
+        "paid",
+        "free",
+    ]
+]
+
+# The platform and the flavor are independent filters: one Android build.
+bundled_app(
+    name = "app_with_fx_flavors_paid_android",
+    flavor = "paid",
+    platform = ":android_arm64",
+    deps = ["@fx_flavors"],
+)
+
+# Web selects flavored assets like the other platforms.
+flutter_web_app(
+    name = "web_with_fx_flavors_paid",
+    application = ":app_with_fx_flavors_paid",
+    js_fallback = False,
+)
+
+tree_of(
+    name = "web_with_fx_flavors_paid_bundle",
+    src = ":web_with_fx_flavors_paid",
+    visibility = ["//visibility:public"],
+)
+
+# A package whose font is a file of another package it depends on.
+bundled_app(
+    name = "app_with_font_of_other_package",
+    deps = ["@fx_font_borrower"],
+)
+
+# A package that ships shaders is bundled the same way.
+
+[
+    bundled_app(
+        name = "app_with_fx_shaders_" + os,
+        platform = platform,
+        deps = ["@fx_shaders"],
+    )
+    for os, platform in {
+        "android": ":android_arm64",
+        "ios": "@rules_flutter//flutter/platforms:ios_arm64",
+        "linux": "@rules_flutter//flutter/platforms:linux_x64",
+        "macos": "@rules_flutter//flutter/platforms:macos_arm64",
+        "windows": "@rules_flutter//flutter/platforms:windows_x64",
+    }.items()
+]
+
+flutter_application(
+    name = "web_with_fx_shaders_application",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@fx_shaders",
+    ],
+)
+
+flutter_web_app(
+    name = "web_with_fx_shaders",
+    application = ":web_with_fx_shaders_application",
+    js_fallback = False,
+)
+
+tree_of(
+    name = "web_with_fx_shaders_bundle",
+    src = ":web_with_fx_shaders",
+    visibility = ["//visibility:public"],
+)
+
+# -- Licences ---------------------------------------------------------------------
+
+# An application's own licence: see //apps/licensed.
+
+# Packages of every kind of licence file: pure Dart and Flutter, one text shared
+# by two, `NOTICES` beside a `LICENSE`, none. `@fx_dev_only` is in the hub and
+# no program depends on it.
+bundled_app(
+    name = "app_with_licence_fixtures",
+    deps = [
+        "@fx_licence_dart",
+        "@fx_licence_shared",
+        "@fx_nolicence",
+        "@fx_notices",
+    ],
+)
+
+tree_of(
+    name = "web_with_licence_fixtures_bundle",
+    src = ":web_with_licence_fixtures",
+    visibility = ["//visibility:public"],
+)
+
+flutter_web_app(
+    name = "web_with_licence_fixtures",
+    application = ":app_with_licence_fixtures",
+    # As `bundled_app`'s: the program imports none of the packages whose
+    # licences are under test.
+    features = ["-dart_unused_deps"],
+    js_fallback = False,
+)
+
+# -- Two files for one key ----------------------------------------------------------
+
+# This package's `fonts/MaterialIcons-Regular.otf` and the one the Material
+# icon font brings are two files for one key. Tagged manual: it is not meant
+# to build, `//tests:two_files_claiming_one_asset_key_fail_the_build_test` analyses it and expects the failure.
+flutter_asset_bundle(
+    name = "two_files_one_key",
+    assets = ["fonts/MaterialIcons-Regular.otf"],
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+    deps = ["@rules_flutter//flutter:material_icons"],
+)

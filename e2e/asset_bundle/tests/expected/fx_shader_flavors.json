@@ -1,0 +1,27 @@
+{
+  "assets": {
+    "shaders/all.frag": {
+      "variants": [
+        {
+          "asset": "shaders/all.frag"
+        }
+      ]
+    },
+    "shaders/free.frag": {
+      "variants": [
+        {
+          "asset": "shaders/free.frag"
+        }
+      ],
+      "flavors": ["free"]
+    },
+    "shaders/paid.frag": {
+      "variants": [
+        {
+          "asset": "shaders/paid.frag"
+        }
+      ],
+      "flavors": ["paid", "premium"]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+name: fx_extra
+version: 1.0.0
+environment:
+  sdk: ^3.13.0
+flutter:
+  licenses:
+    - THIRD_PARTY.txt

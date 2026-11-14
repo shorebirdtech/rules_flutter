@@ -9,8 +9,10 @@ import 'package:test/test.dart';
 /// produces.
 ///
 /// Mirrors what `flutter_asset_bundle_action` writes: every first-party asset
-/// is copied into the tree under its workspace-relative path, alongside the
-/// generated manifests, which have no source file behind them.
+/// is copied into the tree under its key, alongside the generated manifests,
+/// which have no source file behind them; the build says which workspace
+/// directory the keys come from. Here the application is at the workspace
+/// root, so a key is its source's path.
 class _Fixture {
   final Directory root;
   late final String workspace = p.join(root.path, 'ws');
@@ -18,6 +20,7 @@ class _Fixture {
   late final AssetBundle bundle = AssetBundle(
     directory: bundleDir,
     workspaceRoot: workspace,
+    assetRoots: {'': '.'},
   );
 
   _Fixture() : root = Directory.systemTemp.createTempSync('asset_bundle_');
@@ -146,6 +149,46 @@ void main() {
         fixture.bundle.sourceOf('assets/logo.png'),
         p.join(fixture.workspace, 'assets', 'logo.png'),
       );
+    });
+
+    test(
+      'resolves a key to the file in the package directory the build names',
+      () {
+        // An application below the workspace root bundles `assets/a.png`, which
+        // is `apps/sub/assets/a.png` in the workspace; a library's asset is
+        // under `packages/<name>/`. Neither path is a workspace path.
+        final app = p.join('apps', 'sub', 'assets', 'a.png');
+        final lib = p.join('libs', 'ui', 'assets', 'b.png');
+        fixture.edit(app, 'a');
+        fixture.edit(lib, 'b');
+        final bundle = AssetBundle(
+          directory: fixture.bundleDir,
+          workspaceRoot: fixture.workspace,
+          assetRoots: {'': 'apps/sub', 'packages/ui/': 'libs/ui'},
+        );
+
+        expect(
+          bundle.sourceOf('assets/a.png'),
+          p.join(fixture.workspace, app),
+        );
+        expect(
+          bundle.sourceOf('packages/ui/assets/b.png'),
+          p.join(fixture.workspace, lib),
+        );
+      },
+    );
+
+    test('a workspace file at a key\'s own path is not its source', () {
+      // Only the build says where a key's file is; one that merely sits at
+      // the same path from the workspace root is not it.
+      fixture.edit(p.join('assets', 'a.png'), 'not the app\'s');
+      final bundle = AssetBundle(
+        directory: fixture.bundleDir,
+        workspaceRoot: fixture.workspace,
+        assetRoots: {'': 'apps/sub'},
+      );
+
+      expect(bundle.sourceOf('assets/a.png'), isNull);
     });
 
     test('an entry with no workspace file behind it resolves to null', () {

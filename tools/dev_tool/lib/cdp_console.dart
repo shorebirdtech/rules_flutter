@@ -13,7 +13,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clock/clock.dart';
+
 import 'app_log.dart';
+import 'logging.dart';
+
+final _logger = Logger('dev_tool.cdp_console');
 
 /// Choose the WebSocket debugger URL for the app's page from a CDP
 /// `/json` target listing.
@@ -35,9 +40,9 @@ import 'app_log.dart';
 /// string prefix of `http://localhost:52341`, so a stale browser on a
 /// neighbouring port could be picked.
 ///
-/// Returns null when the page is not listed (yet) — at launch that means the
-/// tab has not navigated and the caller should poll, see
-/// [ChromeSession.resolveAppPage].
+/// Returns null when the page is not listed (yet). At launch that means the
+/// tab has not navigated, which [waitForAppPage] waits out; a consumer of a
+/// running session polls for it, see [resolveCdpPageTarget].
 String? pickCdpPageTarget(List<dynamic> targets, {required String appUrl}) {
   final wanted = originOf(appUrl);
   if (wanted == null) return null;
@@ -86,10 +91,13 @@ const maxCdpPollInterval = Duration(milliseconds: 500);
 /// Resolve the app page's CDP WebSocket URL, or throw with a usable message.
 ///
 /// Polled rather than sampled once, and this is the only place that poll
-/// exists — every CDP consumer here (the console forwarder, the WASM page
-/// reload, screenshots, and the launch's own readiness check via
-/// [ChromeSession.resolveAppPage]) asks the same question and needs the same
-/// patience for it.
+/// exists — every CDP consumer of a running session (the console forwarder,
+/// the WASM page reload, screenshots, key presses) asks the same question and
+/// needs the same patience for it. A page that is not there within [timeout]
+/// is an error here because these callers act on a session that was launched
+/// with its page up; the launch itself, which has no such page yet and no
+/// business failing on a slow machine, waits on the browser's own events
+/// instead ([waitForAppPage]).
 ///
 /// The listing is not a settled fact at any instant. A page target exists from
 /// launch, but its URL is not continuously the app's: cross-origin isolation
@@ -107,19 +115,24 @@ const maxCdpPollInterval = Duration(milliseconds: 500);
 /// [appUrl] is typed nullable only because callers hold it in nullable
 /// fields populated at launch; passing null is a caller bug and throws
 /// immediately rather than degrading into driving an arbitrary page.
+///
+/// Time is the ambient `package:clock` and the waits are the zone's timers;
+/// [fetchTargets] is the listing request. A test that fakes the second runs
+/// the whole poll under `fakeAsync`.
 Future<String> resolveCdpPageTarget(
   int cdpPort, {
   String? appUrl,
   Duration timeout = const Duration(seconds: 15),
   Duration pollInterval = const Duration(milliseconds: 50),
+  Future<List<dynamic>> Function(int cdpPort) fetchTargets = fetchCdpTargets,
 }) async {
   if (appUrl == null) {
     throw ArgumentError.notNull('appUrl');
   }
-  final stopwatch = Stopwatch()..start();
+  final stopwatch = clock.stopwatch()..start();
   var delay = pollInterval;
   while (true) {
-    final targets = await fetchCdpTargets(cdpPort);
+    final targets = await fetchTargets(cdpPort);
     final ws = pickCdpPageTarget(targets, appUrl: appUrl);
     if (ws != null) return ws;
     if (stopwatch.elapsed >= timeout) {
@@ -193,8 +206,17 @@ void handleCdpConsoleMessage(Map<String, dynamic> message, AppLogStream logs) {
           isError: true,
         );
     }
-  } catch (_) {
-    // A console line is never worth failing a run over.
+  } catch (e) {
+    // A console line is never worth failing a run over, but dropping it is
+    // recorded: output that goes missing from the app log has its reason here.
+    _logger.fine({
+      'message': 'cdp_console_message_dropped',
+      'text':
+          'Dropped a ${message['method']} message from the page console that '
+          'could not be read: $e',
+      'method': '${message['method']}',
+      'error': '$e',
+    });
   }
 }
 

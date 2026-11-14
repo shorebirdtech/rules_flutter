@@ -1,8 +1,8 @@
 """Analysis tests for `web_dir`, the directory served at a web bundle's root."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("//flutter:web.bzl", "flutter_web_app")
-load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle")
 load(":action_content.bzl", "action_config")
 
 def _sources_by_dst(env):
@@ -89,32 +89,52 @@ def web_dir_test_suite(name):
     Args:
         name: Prefix for the generated test targets.
     """
+    dart_package_metadata(
+        name = "pubspec-metadata",
+        package_name = "web_dir",
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_bundle_app",
+        main = "main.dart",
+        package = ":pubspec-metadata",
+        tags = ["manual"],
+    )
     flutter_web_bundle(
         name = "_bundle",
-        package_name = "web_dir",
-        main = "main.dart",
-        web_dir = "web_apps/second",
+        application = ":_bundle_app",
+        tags = ["manual"],
         web_assets = [
             "web/favicon.png",
             "web_apps/second/favicon.png",
             "web_apps/second/icons/icon-192.png",
         ],
+        web_dir = "web_apps/second",
+    )
+    flutter_application(
+        name = "_app_program",
+        main = "main.dart",
+        package = ":pubspec-metadata",
         tags = ["manual"],
+        deps = [],
     )
     flutter_web_app(
         name = "_app",
-        package_name = "web_dir",
-        main = "main.dart",
-        deps = [],
+        application = ":_app_program",
+        tags = ["manual"],
         web_dir = "web_apps/second",
+    )
+    flutter_application(
+        name = "_trailing_slash_app",
+        main = "main.dart",
+        package = ":pubspec-metadata",
         tags = ["manual"],
     )
     flutter_web_bundle(
         name = "_trailing_slash",
-        package_name = "web_dir",
-        main = "main.dart",
-        web_dir = "web_apps/second/",
+        application = ":_trailing_slash_app",
         tags = ["manual"],
+        web_dir = "web_apps/second/",
     )
 
     _bundle_strips_web_dir_test(

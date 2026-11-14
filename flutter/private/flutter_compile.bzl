@@ -1,182 +1,115 @@
-"""Flutter kernel compilation action using the frontend_server.
+"""A Flutter program's kernel: rules_dart's whole-program compile, given Flutter's platform."""
 
-Flutter compilation differs from vanilla Dart in that it uses:
-- Flutter's patched SDK (platform_strong.dill) instead of the standard Dart SDK
-- The frontend_server_aot.dart.snapshot instead of `dart compile kernel`
-"""
-
+load("@rules_dart//dart:utils.bzl", "dart_whole_program_kernel_action")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME")
-load("//flutter/private:exec_groups.bzl", "PORTABLE")
-load("//flutter/private:path_mapping.bzl", "dirname", "output_root", "sdk_action")
+load("//flutter/private:flutter_module.bzl", "flutter_kernel_sdk_info")
 
-# frontend_server stays within about one core. The memory covers a small app;
-# a larger program needs more.
-def _kernel_compile_resources(_os, _inputs):
-    return {"memory": 600}
+def flutter_kernel_resources(_os, inputs_size):
+    """What a Flutter kernel compile uses, for Bazel's local scheduler.
 
-def flutter_kernel_compile_action(
-        ctx,
-        dartaotruntime,
-        dart,
-        kernel_filter_tool,
-        flutter_sdk_files,
-        frontend_server,
-        platform_dill,
-        main,
-        srcs,
-        package_config,
-        output,
-        entrypoint_uri = None,
-        aot = False,
-        defines = [],
-        extra_flags = [],
-        target = "flutter",
-        native_assets_manifest = None,
-        dart_plugin_registrant_uri = None,
-        filesystem_root_files = [],
-        recorded_uses = None):
-    """Creates a Flutter kernel compilation action.
-
-    Invokes the frontend_server via dartaotruntime to compile Dart sources
-    to a kernel .dill file using Flutter's patched platform SDK.
+    The front end holds the whole program in memory and stays within about
+    one core. Its peak grows with the program: measured from about 0.7 GB for
+    an app of 2,000 inputs to 1.6 GB for one of 4,100, under half a megabyte
+    per input, which this declares with headroom for programs that reach more
+    code per file.
 
     Args:
-        ctx: The rule context.
-        dartaotruntime: The dartaotruntime executable File (from FlutterSdkInfo).
-        dart: The Dart executable File that runs [kernel_filter_tool].
-        kernel_filter_tool: `kernel_filter.dart`, which runs the
-            frontend_server and drops its batch-protocol lines from the
-            output so a successful compile prints nothing.
-        flutter_sdk_files: All Flutter SDK files needed (for action inputs).
-        frontend_server: The frontend_server_aot.dart.snapshot File.
-        platform_dill: The platform_strong.dill File (debug or product).
-        main: The entrypoint .dart source File. Always an action input and
-            used for the progress message; it is *not* automatically the
-            string handed to frontend_server — see [entrypoint_uri].
-        srcs: List of all source Files (direct + transitive).
-        package_config: The package_config.json File.
-        output: The output .dill File to produce.
-        entrypoint_uri: The string frontend_server compiles as the root
-            library, which fixes that library's `importUri` in the kernel.
-            Pass a `package:` URI (resolved via [package_config]) so the
-            URI is identical regardless of where the kernel was built —
-            this is required for hot reload, because `reloadSources` only
-            applies a delta when the dev tool's incremental dill keys the
-            library by the *same* URI as the running program. When None,
-            frontend_server is given [main]'s exec path, so the root
-            library's URI is a sandbox-specific `file://` path, which also
-            makes the kernel's bytes depend on the sandbox it was built in.
-            Every caller supplies one.
-        aot: If True, compile for AOT (adds --aot --tfa flags).
-        defines: Environment declarations; each entry becomes a -D flag.
-        extra_flags: Additional frontend_server flags.
-        target: Frontend server target model ("flutter" or "dartdevc" for web).
-        native_assets_manifest: Optional `native_assets.json` File. Passed
-            to the frontend_server via `--native-assets`. The frontend
-            server embeds the manifest into the resulting kernel so the
-            engine can resolve `package:` Native Assets at runtime.
-        dart_plugin_registrant_uri: Optional `APP_SCHEME` URI of the
-            generated plugin registrant (`app_scheme_location`). When set, the
-            registrant is compiled into the kernel as an extra source and
-            advertised via `-Dflutter.dart_plugin_registrant=` so the
-            engine invokes `_PluginRegistrant.register()` before main() on
-            every root-isolate launch (including hot restart). The
-            multi-root scheme keeps the library's importUri identical to
-            the define regardless of sandbox location — the engine matches
-            them by exact string equality.
-        filesystem_root_files: Files whose roots (`output_root`: the exec
-            root for a source file, `bazel-out/<config>/bin` for a generated
-            one) are mounted under `APP_SCHEME`, for every `APP_SCHEME` URI
-            above — the registrant's and, for a `main` with no `package:`
-            URI, [entrypoint_uri]'s. Files rather than directory strings, so
-            the roots are path-mapped with the rest of the command line.
-        recorded_uses: Optional declared File the compiler writes the
-            `@RecordUse` uses that survive tree-shaking to (`--recorded-uses`),
-            the input of package link hooks. Only an AOT compile records; a
-            JIT compile writes an empty file.
+        _os: The execution OS.
+        inputs_size: The number of the action's inputs.
+
+    Returns:
+        The resource set: one core, and half a megabyte per input but at
+        least 800 MB.
     """
-    args = ctx.actions.args()
-    args.add(kernel_filter_tool)
-    args.add("--")
-    args.add(dartaotruntime)
-    args.add(frontend_server)
+    return {"cpu": 1, "memory": max(800, inputs_size // 2)}
 
-    # --sdk-root points to the directory containing the platform dill.
-    # --platform-dill specifies the exact filename when it's not the
-    # default "platform_strong.dill" (e.g. web's dart2wasm_platform.dill).
-    args.add_all("--sdk-root", [platform_dill], map_each = dirname, format_each = "%s/")
-    if platform_dill.basename != "platform_strong.dill":
-        args.add("--platform", platform_dill)
+def flutter_kernel_compile(
+        ctx,
+        tools,
+        runtime,
+        main,
+        srcs,
+        packages,
+        output,
+        entrypoint_uri,
+        aot = False,
+        target_os = None,
+        defines = [],
+        track_widget_creation = False,
+        native_assets_manifest = None,
+        dart_plugin_registrant_uri = None,
+        recorded_uses = None):
+    """Compiles a Flutter program from source into one kernel `.dill`.
 
-    args.add("--target", target)
-    args.add("--packages", package_config)
-    args.add("--output-dill", output)
+    The compile is rules_dart's `dart_whole_program_kernel_action`, given the
+    selected SDK's platform (`flutter_kernel_sdk_info`). It reads every source
+    under `APP_SCHEME`, rooted at the exec root and the output directories the
+    sources are in, so each library outside a package is named by its path in
+    the workspace, as the dev loop's compiler names it, and the kernel holds
+    no path of the machine or the sandbox.
 
-    # Suppress frontend_server's `+file://...` dependency lines and info-level
-    # messages. Bazel surfaces all action stdout on success; without these, a
-    # successful compile produces dozens of `INFO: From Compiling Flutter
-    # kernel` lines. The boundary-key framing has no flag; kernel_filter.dart
-    # drops it.
-    args.add("--no-print-incremental-dependencies")
-    args.add("--verbosity=error")
-
+    Args:
+        ctx: The rule context; the rule declares `PORTABLE_EXEC_GROUPS` and
+            merges rules_dart's `KERNEL_TOOL_ATTR`.
+        tools: The `FlutterExecToolsInfo` of the `PORTABLE` group
+            (`portable_tools`), whose SDK the program compiles with.
+        runtime: The build mode the kernel is for (`debug`, `profile`,
+            `release`), which fixes the platform dill and `dart.vm.*`.
+        main: The entrypoint `.dart` File.
+        srcs: Depset of every other source File the program reads, the
+            registrant's among them.
+        packages: The `DartPackageInfo` records the program compiles against,
+            the app's own included.
+        output: The `.dill` File to produce.
+        entrypoint_uri: The URI the front end compiles as the root library:
+            the app's `package:` URI, or its `APP_SCHEME` one. The running
+            program keys the library by it, and a hot reload's delta applies
+            only when the dev tool's compiler keys it the same.
+        aot: Whether to compile for AOT (`--aot --tfa`).
+        target_os: The OS an AOT kernel runs on (`android`, `ios`, `linux`,
+            `macos`, `windows`), which `flutter build` passes as
+            `--target-os` so the front end folds what `dart:io`'s `Platform`
+            says about it; None for a kernel that runs on any (a test's).
+        defines: Environment declarations beyond the runtime's.
+        track_widget_creation: Whether to apply the widget-creation transform.
+        native_assets_manifest: Optional `native_assets.json` File, embedded
+            in the kernel so the engine resolves `@Native(assetId:)` bindings.
+        dart_plugin_registrant_uri: Optional `APP_SCHEME` URI of the generated
+            plugin registrant (`app_scheme_location`). It is compiled into the
+            kernel beside the program and named by
+            `-Dflutter.dart_plugin_registrant=`, which the engine looks up by
+            exact string to call `_PluginRegistrant.register()` before `main()`
+            on every root-isolate launch, hot restart included.
+        recorded_uses: Optional File the compiler writes the `@RecordUse` uses
+            that survive tree-shaking to, the input of package link hooks. Only
+            an AOT compile records any.
+    """
+    flags = []
     if aot:
-        args.add("--aot")
-        args.add("--tfa")
-
-    # Compilation mode flags
-    bazel_mode = ctx.var["COMPILATION_MODE"]
-    if bazel_mode == "dbg":
-        args.add("--enable-asserts")
-
-    for d in defines:
-        args.add("-D" + d)
-
-    if filesystem_root_files:
-        args.add_all(
-            filesystem_root_files,
-            map_each = output_root,
-            before_each = "--filesystem-root",
-            uniquify = True,
-        )
-        args.add("--filesystem-scheme", APP_SCHEME)
-
+        flags += ["--aot", "--tfa"]
+        if target_os:
+            flags += ["--target-os", target_os]
+    if ctx.var["COMPILATION_MODE"] == "dbg":
+        flags.append("--enable-asserts")
+    sources = []
     if dart_plugin_registrant_uri:
-        args.add("--source", dart_plugin_registrant_uri)
-        args.add("--source", "package:flutter/src/dart_plugin_registrant.dart")
-        args.add("-Dflutter.dart_plugin_registrant=" + dart_plugin_registrant_uri)
-
-    args.add_all(extra_flags)
-
-    if native_assets_manifest != None:
-        args.add("--native-assets", native_assets_manifest)
-
-    if recorded_uses != None:
-        args.add("--recorded-uses", recorded_uses)
-
-    if entrypoint_uri:
-        args.add(entrypoint_uri)
-    else:
-        args.add(main)
-
-    direct_inputs = [main, package_config, frontend_server, platform_dill] + srcs
-    if native_assets_manifest != None:
-        direct_inputs.append(native_assets_manifest)
-    outputs = [output]
-    if recorded_uses != None:
-        outputs.append(recorded_uses)
-
-    ctx.actions.run(
-        executable = dart,
-        arguments = [args],
-        inputs = depset(
-            direct = direct_inputs + [kernel_filter_tool, dartaotruntime],
-            transitive = [flutter_sdk_files],
-        ),
-        outputs = outputs,
-        mnemonic = "FlutterKernelCompile",
-        exec_group = PORTABLE,
-        resource_set = _kernel_compile_resources,
-        progress_message = "Compiling Flutter kernel %s" % ctx.label,
-        **sdk_action()
+        sources = [dart_plugin_registrant_uri, "package:flutter/src/dart_plugin_registrant.dart"]
+        defines = defines + ["flutter.dart_plugin_registrant=" + dart_plugin_registrant_uri]
+    dart_whole_program_kernel_action(
+        ctx,
+        kernel_sdk = flutter_kernel_sdk_info(tools),
+        runtime = runtime,
+        main = main,
+        srcs = srcs,
+        packages = packages,
+        output_dill = output,
+        entrypoint_uri = entrypoint_uri,
+        sources = sources,
+        filesystem_scheme = APP_SCHEME,
+        defines = defines,
+        flags = flags,
+        native_assets = native_assets_manifest,
+        track_creation_locations = track_widget_creation,
+        outputs = {"--recorded-uses": recorded_uses} if recorded_uses != None else {},
+        resource_set = flutter_kernel_resources,
     )

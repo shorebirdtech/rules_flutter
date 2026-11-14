@@ -1,49 +1,64 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 
-# An analysis handle for the VM provisioning scripts. Nothing else in the build
-# compiles them, and the only way to run one is to create a cloud VM and wait on
-# it. `docs/TESTING.md` drives all four by `dart run tools/vm/<script>.dart`, so
-# they are live code, not dead weight.
+# The test VMs, on overhead's VM tooling (`@overhead//vm`): what is particular
+# to rules_flutter is here, and creating, reaching and running on a VM is
+# overhead's. docs/TESTING.md drives them.
 #
-# They cannot be `bazel run` targets: each shells out to the `gcloud` CLI and
-# reads project and zone from `gcloud config` defaults, and `deploy_bundle`
-# resolves paths relative to its own script location in the source tree. That
-# is a reason they cannot be *run* by Bazel. It is not a reason they cannot be
-# *analyzed*: the analysis aspect reads `DartAnalyzableInfo` and stages
-# sources, and never asks the target for compiled output, so a handle that is
-# never run still carries them to the analyzer. `//flutter/private/tools` and
-# `//tools/dev_tool:loose_sources` already make this move.
+#   bazel run //tools/vm:create_linux_vm -- <vm-name>
+#   bazel run //tools/vm:create_windows_vm -- <vm-name>
+#   bazel run //tools/vm:run_e2e -- <vm-name> [--windows] [--folders=a,b]
+#   bazel run //tools/vm:deploy_bundle -- <vm-name> <bundle_path> [--windows]
 #
-# `main` has to be one of them and the four entrypoints are coequal —
-# `run_e2e.dart` roots the handle because it is the largest and mirrors the CI
-# matrix, but nothing turns on that choice. The `glob` is what carries
-# coverage: `DartAnalyzableInfo` is `[main] + srcs`, and the analyzer reports
-# on every file staged into the project whether or not `main` imports it, so
-# the three unimported entrypoints are analyzed exactly as thoroughly as
-# `run_e2e.dart` is.
-#
-# `glob`, not a hand-list. A hand-list is load-bearing where a file does not
-# run until someone adds it to one; these run by `dart run` against a path in
-# the source tree, so nothing would ever force a new script into a list here —
-# a list could only fall behind in exactly the way this target exists to
-# prevent. Flat, because the directory is: `tools/vm/` has no subdirectories.
-# Adding one means widening this to `**/*.dart` *and* dropping a fresh probe at
-# the new depth — this target's non-vacuity probe went in at the top level, so
-# it answers only for the flat shape (see docs/TESTING.md § 1).
-#
-# `compile_mode = "kernel"`: the compile is a byproduct nobody consumes, and
-# only `run_e2e.dart`'s own closure is compiled — the other three entrypoints
-# are unimported. No `deps`: every file here imports `dart:*` and its
-# siblings, nothing from pub. A script that grows a pub import fails this
-# target loudly, as an unresolved import, which is the intended way to learn it
-# needs one.
+# `//tools/ci_matrix:e2e_matrix.dart` is imported by relative path, as the
+# workflow's plan job runs it with plain `dart run`.
+
+_VM_DEPS = ["@overhead//vm"]
+
 dart_binary(
-    name = "vm_scripts",
-    srcs = glob(
-        ["*.dart"],
-        exclude = ["run_e2e.dart"],
-    ),
-    compile_mode = "kernel",
+    name = "create_linux_vm",
+    srcs = ["hermetic_dart.dart"],
+    main = "create_linux_vm.dart",
+    deps = _VM_DEPS,
+)
+
+dart_binary(
+    name = "create_windows_vm",
+    srcs = [
+        "hermetic_dart.dart",
+        "vm_constants.dart",
+    ],
+    main = "create_windows_vm.dart",
+    deps = _VM_DEPS,
+)
+
+dart_binary(
+    name = "run_e2e",
+    srcs = [
+        "e2e_items.dart",
+        "//tools/ci_matrix:e2e_matrix.dart",
+    ],
     main = "run_e2e.dart",
-    visibility = ["//visibility:private"],
+    deps = _VM_DEPS,
+)
+
+dart_binary(
+    name = "deploy_bundle",
+    srcs = ["vm_constants.dart"],
+    main = "deploy_bundle.dart",
+    deps = _VM_DEPS,
+)
+
+dart_test(
+    name = "vm_test",
+    size = "small",
+    srcs = [
+        "create_linux_vm.dart",
+        "create_windows_vm.dart",
+        "e2e_items.dart",
+        "hermetic_dart.dart",
+        "vm_constants.dart",
+        "//tools/ci_matrix:e2e_matrix.dart",
+    ],
+    main = "test/vm_test.dart",
+    deps = _VM_DEPS + ["@dev_tool_deps//:test"],
 )

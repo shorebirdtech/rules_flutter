@@ -8,6 +8,7 @@ libraries.json can resolve its `include` references to the base
 Dart SDK libraries (dart:core, dart:async, etc.).
 """
 
+load("//flutter/private:pinned.bzl", "pinned")
 load(":artifact_urls.bzl", "dart_sdk_artifact_path", "engine_artifact_url")
 
 def _detect_host_platform(repository_ctx):
@@ -38,7 +39,7 @@ def _flutter_web_sdk_repo_impl(repository_ctx):
 
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, "flutter-web-sdk.zip"),
-        sha256 = repository_ctx.attr.sha256 if repository_ctx.attr.sha256 else "",
+        sha256 = pinned("flutter-web-sdk.zip", repository_ctx.attr.sha256),
         output = "web-sdk",
     )
 
@@ -49,7 +50,7 @@ def _flutter_web_sdk_repo_impl(repository_ctx):
     dart_sdk_zip = dart_sdk_artifact_path(host_platform)
     repository_ctx.download_and_extract(
         url = engine_artifact_url(engine_revision, dart_sdk_zip),
-        sha256 = "",
+        sha256 = pinned(dart_sdk_zip, repository_ctx.attr.dart_sdk_sha256s.get(host_platform, "")),
         stripPrefix = "dart-sdk",
         output = "dart-sdk",
     )
@@ -76,5 +77,6 @@ flutter_web_sdk_repo = repository_rule(
     attrs = {
         "engine_revision": attr.string(mandatory = True),
         "sha256": attr.string(doc = "Expected SHA-256 of flutter-web-sdk.zip."),
+        "dart_sdk_sha256s": attr.string_dict(doc = "Host platform to the SHA-256 of its Dart SDK archive."),
     },
 )

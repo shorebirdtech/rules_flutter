@@ -40,6 +40,7 @@ import 'web_options.dart';
 import 'session.dart';
 import 'session_host.dart';
 import 'temp_dir.dart';
+import 'tooling_daemon.dart';
 import 'web_pipeline_assembler.dart';
 
 export 'dev_tool_exception.dart' show DevToolException;
@@ -52,7 +53,21 @@ class RunCommand {
       help: 'Bazel target to build and run.',
       mandatory: true,
     )
-    ..addOption('config', abbr: 'c', help: 'Bazel config to use.')
+    ..addOption(
+      'compilation_mode',
+      abbr: 'c',
+      help:
+          "Bazel's compilation mode (`-c`): dbg, opt or fastbuild. "
+          '`--hot` builds dbg and `--profile` builds opt; naming another is '
+          'refused.',
+    )
+    ..addMultiOption(
+      'config',
+      help:
+          'Bazel config from the workspace .bazelrc, passed as '
+          '--config=<name> to every bazel command of the run, reloads '
+          'included. Repeat for several.',
+    )
     ..addMultiOption(
       'build-arg',
       // A bazel flag's value can hold a comma (`--copt=-Wl,-rpath`), and the
@@ -65,7 +80,7 @@ class RunCommand {
       splitCommas: false,
       help:
           'Dart environment define (KEY=VALUE) forwarded to the build '
-          'as --@rules_flutter//flutter:extra_dart_defines and replayed '
+          'as --@rules_dart//dart:extra_dart_defines and replayed '
           'on hot reload/restart recompiles. Repeat for multiple defines.',
     )
     ..addMultiOption(
@@ -74,8 +89,9 @@ class RunCommand {
       help:
           'Device to run on: ${acceptedDeviceIdForms.join(', ')}. An id '
           'must name its kind, so a bare UDID or serial is refused: '
-          '-d android:emulator-5554, not -d emulator-5554. Repeat for '
-          'multi-device.',
+          '-d android:emulator-5554, not -d emulator-5554. '
+          '`flutter_bazel devices` lists each device with its id. Repeat '
+          'for multi-device.',
     )
     ..addFlag(
       'hot',
@@ -128,9 +144,29 @@ class RunCommand {
       help: 'Launch DevTools for each connected device.',
     )
     ..addFlag(
-      'wasm',
+      'print-dtd',
       defaultsTo: false,
-      help: 'Run web app in WASM mode (no hot reload, uses bazel rebuild + page reload).',
+      negatable: false,
+      help:
+          'Print the address of the Dart Tooling Daemon the app is '
+          'registered with. A --machine client reads it from app.dtd.',
+    )
+    // No `defaultsTo`, for the reason `cross-origin-isolation` has none: the
+    // default depends on the target. A web app that ships WebAssembly only
+    // (`js_fallback = False`) runs the dart2wasm loop unless told otherwise;
+    // any other runs the DDC loop. Null is "not asked for", and `--no-wasm`
+    // asks for DDC.
+    ..addFlag(
+      'wasm',
+      defaultsTo: null,
+      help:
+          'Run web app compiled with dart2wasm. The app.* agent commands '
+          'work (over the DevTools protocol, in a debug build); there is no '
+          'hot reload, and a restart is a bazel rebuild plus a page reload. '
+          'On by default for an app that ships WebAssembly only '
+          '(js_fallback = False), which never ships the JavaScript the DDC '
+          'loop runs; --no-wasm runs the DDC loop for it anyway, with a '
+          'warning. Off by default for any other app.',
     )
     ..addOption(
       'web-port',
@@ -165,7 +201,7 @@ class RunCommand {
           'Repeat for multiple headers. A header the response itself sets '
           '(content-type, say) wins over this.',
     )
-    // No `defaultsTo`: the default really is mode-dependent (on with --wasm,
+    // No `defaultsTo`: the default really is mode-dependent (on in the wasm loop,
     // off elsewhere), and declaring one here would make `--help` print
     // "(defaults to on)" for every run while the code did something else.
     // Null is the honest "not asked for".
@@ -175,7 +211,7 @@ class RunCommand {
       help:
           'Add the Cross-Origin-Opener-Policy and '
           'Cross-Origin-Embedder-Policy headers, which make '
-          'SharedArrayBuffer available. On by default only with --wasm, '
+          'SharedArrayBuffer available. On by default only in the dart2wasm loop, '
           'whose skwasm renderer needs it for multi-threading; turning it '
           'off there costs the app its render threads. Off elsewhere '
           'because an isolated page cannot load a cross-origin subresource '
@@ -364,6 +400,18 @@ class RunCommand {
       // launch-time engine arguments, so there is no later moment at which they
       // could be applied.
       final plan = await RunPlan.resolve(_results, logger, bazel: host.bazel);
+      // Started only when the first app registers, so a run that never gets a
+      // VM service never starts one.
+      host.toolingDaemon = RunToolingDaemon(
+        start: () => ToolingDaemon.start(
+          dartExecutable: plan.toolchain.dart,
+          workingDirectory: plan.workspace,
+        ),
+        teardown: host.teardown,
+        protocol: host.protocol,
+        logger: logger,
+        printUri: _results['print-dtd'] as bool,
+      );
       // The first things the plan settles that the command surface depends on.
       // Only a `-c dbg` native build carries the record `app.buildInfo` reads,
       // and only a run with a VM service can reach the `ext.rules_flutter.*`
@@ -373,8 +421,8 @@ class RunCommand {
       if (plan.hasAgentSurface) {
         host.registerAgentCommands();
       } else {
-        // Keys go to the browser over CDP, which needs no VM service, so a
-        // run without the agent surface still has a keyboard.
+        // Keys go to the browser over CDP, so a run without the agent surface
+        // still has a keyboard.
         host.registerPressKey();
         // Said once, at the top of the run, rather than left to be discovered
         // one refused command at a time. The absence is structural and known
@@ -385,14 +433,14 @@ class RunCommand {
         logger.info({
           'message': 'agent_surface_unavailable',
           'text':
-              'This run has no VM service, so the app.* agent commands (tap, '
-              'enterText, getText, waitFor, dumpWidgetTree, …) are not offered: '
-              '${absent.because} What still works: app.pressKey (real key '
-              'events in the browser), the app console '
+              'This run is a ${plan.buildMode.name} build, so the app.* agent '
+              'commands (tap, enterText, getText, waitFor, dumpWidgetTree, …) '
+              'are not offered: ${absent.because} What still works: '
+              'app.pressKey (real key events in the browser), the app console '
               '(GET /sessions/{appId}/logs), a browser screenshot '
               '(GET /sessions/{appId}/screenshot/native) and app.restart. To '
-              'drive the widget tree, run the DDC dev loop instead — the same '
-              'target with neither --wasm nor --profile.',
+              'drive the widget tree, run a debug build: the same target '
+              'without --profile, and with -c dbg when --no-hot is given.',
           'reason': absent.reason,
         });
       }
@@ -410,7 +458,6 @@ class RunCommand {
       // wall clock's: see [fileClockNow].
       final builtBefore = await fileClockNow();
       final build = await plan.buildApp();
-      final launchBuilt = await fileClockNow();
       final appFile = build.appFile;
       final outputFiles = build.outputFiles;
 
@@ -486,6 +533,9 @@ class RunCommand {
           webSession.complete(deviceSession);
         }
       }
+      // An app that ends while the steps below are still setting up its
+      // reload pipeline ends the run there, with the build it was waiting on.
+      host.endWhenEveryAppHasEnded();
 
       // `app.setViewport` exists only where it can work. It is registered here,
       // for any web run, rather than always with a handler that refuses on
@@ -549,15 +599,17 @@ class RunCommand {
       if (!isWebDevice && hasVmClient && plan.hotReloadOff == null) {
         await NativePipelineAssembler(
           workspace: workspace,
-          toolchain: toolchain,
           target: target,
           configDevice: devices.first,
-          userBuildArgs: plan.userBuildArgs,
+          sessionBuildArgs: plan.sessionBuildArgs,
           host: host,
           pipeline: pipeline,
           logger: logger,
           builtBefore: builtBefore,
-          launch: NativeLaunch(appFile: appFile, builtAt: launchBuilt),
+          launch: NativeLaunch(
+            appFile: appFile,
+            partsNativeLibs: build.partsNativeLibs,
+          ),
         ).assemble();
       }
 
@@ -639,6 +691,10 @@ class RunCommand {
           await sessions.first.terminated;
         }
       }
+    } on LaunchAbandoned {
+      // The launch counterpart of the case below: the teardown that abandoned
+      // it signals once everything is released.
+      await host.shutdownRequested.future;
     } on BazelCancelled {
       // Only a shutdown stops a bazel command (see [Bazel.close]), and before
       // the session loop the shutdown that does is `performCleanup` — which
@@ -675,22 +731,24 @@ class RunCommand {
 /// One switch for both, so the tag a client matches on and the sentence a
 /// person reads cannot come to describe different runs.
 ///
-/// Only ever asked of a web run — [RunPlan.hasAgentSurface] is true for every
-/// native one — and the switch is exhaustive over [WebMode] so a fourth shape
-/// cannot be added without answering here.
+/// Only ever asked of a bundled web run in a non-debug mode —
+/// [RunPlan.hasAgentSurface] is true for every other run — and the switch is
+/// exhaustive over [WebMode] so a fourth shape cannot be added without
+/// answering here.
 ({String reason, String because}) _noAgentSurface(RunPlan plan) =>
     switch (plan.webMode) {
       WasmWebMode() => (
-        reason: 'wasm',
+        reason: 'wasm_${plan.buildMode.name}',
         because:
-            'dart2wasm compiles the app to a bundle with no VM service '
-            'behind it, and no flag changes that.',
+            'the agent extensions are compiled into debug builds only, and '
+            'this --wasm run is a ${plan.buildMode.name} build (--profile).',
       ),
       StaticWebMode() => (
-        reason: 'static_bundle',
+        reason: 'static_bundle_${plan.buildMode.name}',
         because:
-            'this run serves a built bundle (--profile or --no-hot), which '
-            'has no VM service.',
+            'the agent extensions are compiled into debug builds only, and '
+            'this run serves a ${plan.buildMode.name} bundle (--profile or '
+            '--no-hot without -c dbg).',
       ),
       DdcWebMode() || null => throw StateError(
         'A DDC or native run has the agent surface; nothing should be asking '

@@ -1,0 +1,15 @@
+name: greeting
+description: Greets, with an asset, a hosted package and a path package.
+version: 1.2.0
+publish_to: none
+environment:
+  sdk: ^3.13.0
+dependencies:
+  flutter:
+    sdk: flutter
+  intl: ^0.20.0
+  tagline:
+    path: ../tagline
+flutter:
+  assets:
+    - assets/greeting.txt

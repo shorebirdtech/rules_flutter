@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 /// `--web-viewport` against a real Chrome: the capture has the size asked for,
 /// keeps it across a hot restart, and `app.setViewport` changes it.
 ///
@@ -62,7 +62,7 @@ void main() {
         final restart = await dt.sendCommand(
           7,
           'app.restart',
-          params: {'appId': dt.appId},
+          params: {'appId': dt.appId, 'fullRestart': true},
         );
         expect(restart['error'], isNull, reason: 'app.restart: $restart');
         await dt.nativeScreenshotWhenOnScreen(dt.appId!);

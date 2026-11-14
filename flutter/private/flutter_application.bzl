@@ -15,28 +15,83 @@ This rule produces outputs that platform-specific wrappers consume:
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "dart_link_hook_actions", "link_hook_runner_attr")
-load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartPackageMetadataInfo")
+load("@rules_dart//dart:utils.bzl", "PROGRAM_ASSETS_TOOLCHAINS", "program_assets_action_args", "program_assets_attrs")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterApplicationInputsInfo", "FlutterInfo")
 load("//flutter/private:code_asset_libraries.bzl", "code_asset_libraries", "code_asset_libraries_aspect", "describe_code_asset_libraries")
-load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "host_target_arch", "launch_build_args", "shader_sources", "shakes_icons_from_recorded_uses")
+load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "PROGRAM_PACKAGE_DOC", "asset_roots", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "flutter_deps_attr", "flutter_program_inputs", "host_target_arch", "launch_build_args", "shader_sources", "shakes_icons_from_recorded_uses")
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action")
+load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action", "gen_snapshot_options")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "collect_bundled_code_asset_files", "resolve_native_assets", "write_native_assets_manifest")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_DOC", "CODE_ASSETS_TOOL_ATTRS", "candidate_code_asset_libraries", "check_bundled_library_names", "native_assets_target_string", "run_code_assets_tool")
+load("//flutter/private:link_hooks.bzl", "link_hooks_plan", "native_code_config", "program_assets")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
+load("//flutter/private:program_analysis.bzl", "program_analyzable_info")
 
-def _flutter_application_impl(ctx):
-    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
+_FLUTTER_TOOLCHAIN_TYPE = "@rules_flutter//flutter:toolchain_type"
+
+# What an application rule declares so it can be built for a web platform,
+# where it needs no Flutter toolchain of the target's (no toolchain targets
+# one: a web app compiles with its own host tools) and builds nothing.
+WEB_PLATFORM_CONSTRAINT_ATTRS = {
+    "_js_constraint": attr.label(default = "@rules_dart//dart/constraints:js"),
+    "_wasm_constraint": attr.label(default = "@rules_dart//dart/constraints:wasm"),
+}
+
+# The toolchains of an application rule. The Flutter one is optional for the
+# web platforms alone: `flutter_application_build` fails where it is missing
+# for any other.
+APPLICATION_TOOLCHAINS = [
+    config_common.toolchain_type(_FLUTTER_TOOLCHAIN_TYPE, mandatory = False),
+] + PROGRAM_ASSETS_TOOLCHAINS
+
+def is_web_platform(ctx):
+    """Whether `ctx`, carrying `WEB_PLATFORM_CONSTRAINT_ATTRS`, is built for a web platform.
+
+    Args:
+        ctx: Rule context.
+
+    Returns:
+        True for a platform with the `js` or `wasm` web compiler constraint.
+    """
+    return ctx.target_platform_has_constraint(ctx.attr._js_constraint[platform_common.ConstraintValueInfo]) or \
+           ctx.target_platform_has_constraint(ctx.attr._wasm_constraint[platform_common.ConstraintValueInfo])
+
+def flutter_application_build(ctx, inputs):
+    """Builds the program `inputs` describes as the application `ctx` declares.
+
+    The whole of `flutter_application`'s analysis, over a program passed in
+    rather than read off `ctx`'s attributes, so a rule that is the same
+    application with another `main` (`flutter_application_variant`) runs the
+    same pipeline over its own program. `ctx` supplies what is not the
+    program: the label that names the outputs, the toolchains and the tool
+    attributes, and the platform.
+
+    Args:
+        ctx: Rule context carrying `FLUTTER_APPLICATION_ATTRS`, the platform
+            constraint attributes and `program_assets_attrs()`.
+        inputs: The program, from `flutter_program_inputs`.
+
+    Returns:
+        The providers `flutter_application` returns, `FlutterApplicationInputsInfo`
+        included.
+    """
+
+    # Built for a web platform, under a web app's split, the application is
+    # its program and nothing else: the web app compiles that with its own
+    # compilers (see `flutter_web_bundle`). Nothing native is built there, as
+    # `flutter build web` builds none of a shared app's native code.
+    if is_web_platform(ctx):
+        return [FlutterApplicationInputsInfo(inputs = inputs), DefaultInfo(files = depset())]
+
+    flutter_toolchain = ctx.toolchains[_FLUTTER_TOOLCHAIN_TYPE]
+    if flutter_toolchain == None:
+        fail("%s: no Flutter toolchain targets the platform this is built for. Rerun with `--toolchain_resolution_debug='@@rules_flutter+//flutter:toolchain_type'` to see why each registered one was rejected." % ctx.label)
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info
 
     mode = flutter_build_mode(ctx)
     is_debug = mode == "debug"
-
-    # Profile strips like release, as `flutter build --profile` does: the
-    # profiler names Dart code from the snapshot, not from native symbols.
-    strip = ctx.var["COMPILATION_MODE"] == "opt"
 
     # Guard: AOT cross-compilation between desktop OSes is not supported.
     # gen_snapshot can only produce native code for the host OS.
@@ -73,47 +128,76 @@ def _flutter_application_impl(ctx):
     # otherwise be quietly short an entry and die at runtime on an unresolved
     # `@Native` symbol. Checked before any compilation so the build fails on
     # the cause rather than minutes later on a symptom.
-    hook_err = check_unreplaced_hooks(ctx.label, ctx.attr.deps)
+    hook_err = check_unreplaced_hooks(ctx.label, inputs.deps)
     if hook_err != None:
         fail(hook_err)
 
-    # Aggregate transitive Native Assets so the manifest exists before
-    # kernel compile (the frontend_server reads it via --native-assets).
-    transitive_native_asset_depsets = []
-    transitive_data_asset_depsets = []
-    for dep in ctx.attr.deps:
-        if FlutterInfo not in dep:
-            continue
-        info = dep[FlutterInfo]
-        transitive_native_asset_depsets.append(info.native_assets)
-        transitive_data_asset_depsets.append(info.data_assets)
-    transitive_native_assets = depset(transitive = transitive_native_asset_depsets)
-    transitive_data_assets = depset(transitive = transitive_data_asset_depsets)
+    # Link hooks run over the uses the AOT compile records, so only a
+    # release or profile build has any: a JIT compile tree-shakes nothing and
+    # records nothing, and a debug build runs no hook. As in `flutter build`,
+    # every package with a link hook has it run then, whether or not it emits
+    # anything: the hook decides which of its package's declared data assets
+    # ship.
+    link_hooks = link_hooks_plan(inputs, inputs.deps, links = not is_debug)
+    # Icon tree shaking reads the same file from Flutter 3.50 on.
+    shake_from_uses = shakes_icons_from_recorded_uses(portable_tools(ctx), inputs.tree_shake_icons, is_debug)
+    recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if link_hooks.runs or shake_from_uses else None
 
-    # Plus any code assets rules_dart propagated through the Dart package
-    # graph — a pub package that owns a native library contributes it just by
-    # being depended on — and those this target names in `code_assets`, which
-    # replace whatever arrives under their ids. See `resolve_native_assets`.
-    resolved_assets = resolve_native_assets(
-        ctx,
-        declared = transitive_native_assets.to_list(),
-        deps = ctx.attr.deps,
-        code_assets = [target[DartCodeAssetInfo] for target in ctx.attr.code_assets],
-    )
-    native_assets_list = resolved_assets.assets
-    lifted_code_assets = resolved_assets.lifted
-
+    # What the application ships: its data assets, bundled under
+    # `flutter_assets/packages/<pkg>/<name>`, and its code assets, the Dart
+    # package graph's (a package that owns a native library contributes it
+    # just by being depended on) and those this target names in
+    # `code_assets`, which replace whatever arrives under their ids. See
+    # `resolve_native_assets`.
     target_arch = host_target_arch(ctx, flutter_sdk_info)
-    native_assets_manifest_file = ctx.actions.declare_file(ctx.label.name + ".native_assets.json")
-    write_native_assets_manifest(
-        ctx = ctx,
-        output_file = native_assets_manifest_file,
-        native_assets = native_assets_list,
-        target_os = target_platform,
-        target_arch = target_arch,
+    shipped = program_assets(
+        ctx,
+        inputs,
+        inputs.deps,
+        link_hooks,
+        recorded_uses,
+        name = ctx.label.name + "_program_assets",
+        code_config = native_code_config(
+            target_platform,
+            target_arch,
+            is_simulator = is_ios and apple_support.target_environment_from_rule_ctx(ctx) == "simulator",
+            minimum_os_version = inputs.minimum_os_version,
+        ) if link_hooks.runs else None,
+        code_assets = [target[DartCodeAssetInfo] for target in inputs.code_assets],
     )
+    link_hook_validation = shipped.validation_outputs
 
-    bundled_code_assets = collect_bundled_code_asset_files(native_assets_list)
+    # The app's native-assets manifest, which it ships as
+    # `flutter_assets/NativeAssetsManifest.json`, as upstream's
+    # `InstallCodeAssets` ships it after the link hooks: the engine reads it at
+    # startup and resolves every `@Native(assetId:)` binding through it, a
+    # hot restart's included. Which code assets ship is known only when the
+    # hooks have run, so an action reading the program's code assets by name
+    # writes it, naming each where its platform's bundle places it.
+    native_assets_manifest_file = ctx.actions.declare_file(ctx.label.name + ".native_assets.json")
+    dart_target = native_assets_target_string(target_platform, target_arch)
+    if shipped.code_assets and not dart_target:
+        fail((
+            "%s: %d code asset(s) can reach this application on %r, but the " +
+            "target architecture could not be determined (got %r), so its " +
+            "native-assets manifest could name none of them. This is a " +
+            "rules_flutter bug in host_target_arch's cpu detection: please " +
+            "report the bazel-out cpu segment of this build."
+        ) % (ctx.label, len(shipped.code_assets), target_platform, target_arch))
+    manifest_code_assets = program_assets_action_args(ctx.actions, shipped.info, data = False, code = "names")
+    manifest_args = ctx.actions.args()
+    manifest_args.add("--os", target_platform)
+    manifest_args.add("--target", dart_target)
+    manifest_args.add("--output", native_assets_manifest_file)
+    run_code_assets_tool(
+        ctx,
+        "manifest",
+        [manifest_args, manifest_code_assets.args],
+        manifest_code_assets.inputs,
+        [native_assets_manifest_file],
+        mnemonic = "FlutterNativeAssetsManifest",
+        progress_message = "Writing the native-assets manifest of %{label}",
+    )
 
     # Declared before the kernel compile that will later feed it, because a
     # debug app carries this path inside itself: `flutter_compile_kernel`
@@ -123,23 +207,15 @@ def _flutter_application_impl(ctx):
     # action that fills it, so the ordering costs nothing.
     flutter_assets = declare_flutter_assets_dir(ctx)
 
-    # Link hooks run over the uses the AOT compile records, so only a
-    # release or profile build has any: a JIT compile tree-shakes nothing and
-    # records nothing, and a debug build runs no hook and bundles no asset.
-    # Icon tree shaking reads the same file from Flutter 3.50 on.
-    run_link_hooks = bool(ctx.attr.link_hook_assets) and not is_debug
-    shake_from_uses = shakes_icons_from_recorded_uses(ctx, portable_tools(ctx), is_debug)
-    recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if run_link_hooks or shake_from_uses else None
-
     # Step 1: Kernel compilation (mode-aware: debug uses debug dill, no AOT).
     compilation = flutter_compile_kernel(
         ctx,
         portable_tools(ctx),
         target_platform = target_platform,
-        native_assets_manifest = native_assets_manifest_file,
-        track_widget_creation = ctx.attr.track_widget_creation,
+        track_widget_creation = inputs.track_widget_creation and mode != "release",
         assets_dir = flutter_assets,
         recorded_uses = recorded_uses,
+        inputs = inputs,
         platform_build_args = launch_build_args(
             target_platform,
             is_simulator = is_ios and apple_support.target_environment_from_rule_ctx(ctx) == "simulator",
@@ -149,86 +225,83 @@ def _flutter_application_impl(ctx):
             is_x86_64 = ctx.target_platform_has_constraint(
                 ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo],
             ),
+            is_armv7 = ctx.target_platform_has_constraint(
+                ctx.attr._armv7_constraint[platform_common.ConstraintValueInfo],
+            ),
         ),
     )
     kernel_dill = compilation.kernel_dill
-    package_config = compilation.package_config
 
     aot_output = None
+    aot_object = None
+    strip_aot = True
     debug_info_output = None
+    gen_snapshot_files = []
     if not is_debug:
-        # Collect gen_snapshot extra flags from user attrs.
-        extra_flags = list(ctx.attr.extra_gen_snapshot_options)
-        if ctx.attr.obfuscate:
-            extra_flags.append("--obfuscate")
-        if ctx.attr.split_debug_info:
-            debug_info_output = ctx.actions.declare_file(ctx.label.name + ".symbols")
+        options = gen_snapshot_options(ctx, inputs)
+        strip_aot = options.strip
+        debug_info_output = options.debug_info
+        gen_snapshot_files = options.files
 
         # Step 2: AOT compile — choose format based on target platform.
         if is_ios or is_macos:
             aot_output = ctx.actions.declare_file(ctx.label.name + ".dylib")
+            aot_object = ctx.actions.declare_file(ctx.label.name + ".o")
             flutter_aot_macho_action(
                 ctx = ctx,
                 gen_snapshot = flutter_sdk_info.gen_snapshot,
-                flutter_sdk_files = flutter_sdk_info.tool_files,
                 kernel_dill = kernel_dill,
                 output = aot_output,
-                strip = strip,
-                extra_flags = extra_flags,
+                extra_flags = options.flags,
+                file_flags = options.file_flags,
                 debug_info = debug_info_output,
-                min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None,
+                object = aot_object,
+                minimum_os_version = inputs.minimum_os_version if inputs.minimum_os_version else None,
             )
         else:
             aot_output = ctx.actions.declare_file(ctx.label.name + ".so")
             flutter_aot_elf_action(
                 ctx = ctx,
                 gen_snapshot = flutter_sdk_info.gen_snapshot,
-                flutter_sdk_files = flutter_sdk_info.tool_files,
                 kernel_dill = kernel_dill,
                 output = aot_output,
-                strip = strip,
-                extra_flags = extra_flags,
+                # Every AOT build strips unless `--no-strip` asks otherwise,
+                # as `flutter build` does whatever the `-c`: release and profile
+                # alike, since the profiler names Dart code from the snapshot.
+                # Apple strips after making a dSYM instead (`apple_xcode.bzl`).
+                strip = options.strip,
+                extra_flags = options.flags,
+                file_flags = options.file_flags,
                 debug_info = debug_info_output,
+                target_arch = flutter_sdk_info.target_arch,
             )
 
     # Collect native shared libraries from native_deps + transitive plugin deps.
-    native_libs = collect_native_libs(ctx.attr.native_deps)
+    native_libs = collect_native_libs(inputs.native_deps)
     transitive_native_depsets = [
         dep[FlutterInfo].transitive_native_libs
-        for dep in ctx.attr.deps
+        for dep in inputs.deps
         if FlutterInfo in dep
     ]
     if transitive_native_depsets:
         native_libs.extend(depset(transitive = transitive_native_depsets).to_list())
 
-    # Step 2b: package link hooks over the recorded uses. Each emits the data
-    # assets declared in `link_hook_assets`, bundled below beside the native
-    # assets' data assets.
-    link_hook_validation = []
-    if run_link_hooks:
-        link = dart_link_hook_actions(
-            ctx,
-            runner = ctx.executable._link_hook_runner,
-            recorded_uses = recorded_uses,
-            deps = ctx.attr.deps,
-            data_asset_ids = ctx.attr.link_hook_assets,
-            name = ctx.label.name + "_link_hooks",
-        )
-        transitive_data_assets = depset(link.assets, transitive = [transitive_data_assets])
-        link_hook_validation = link.validation_outputs
-
-    # Step 3: Shader compilation + asset bundle. Pass data assets so the
-    # bundler places them under flutter_assets/packages/<pkg>/<name>.
-    compiled_shaders = flutter_compile_shaders(ctx, portable_tools(ctx), target_platform)
+    # Step 3: Shader compilation + asset bundle. Pass the program's assets so
+    # the bundler places its data assets under flutter_assets/packages/<pkg>/<name>.
+    compiled_shaders = flutter_compile_shaders(ctx, portable_tools(ctx), target_platform, inputs.deps, inputs)
     flutter_build_assets(
         ctx,
         portable_tools(ctx),
         flutter_assets,
+        inputs.deps,
+        target_platform,
         compiled_shaders,
         kernel_dill = kernel_dill,
         recorded_uses = recorded_uses,
         is_debug = is_debug,
-        data_assets = transitive_data_assets,
+        program_assets = shipped.info,
+        native_assets_manifest = native_assets_manifest_file,
+        inputs = inputs,
     )
 
     # Aggregate the plugin channels from deps. These are what the platform
@@ -240,25 +313,31 @@ def _flutter_application_impl(ctx):
     linux_plugin_lib_depsets = []
     windows_plugin_lib_depsets = []
     apple_privacy_manifest_depsets = []
-    for dep in ctx.attr.deps:
+    android_lib_depsets = []
+    for dep in inputs.deps:
         if FlutterInfo in dep:
             all_dep_plugins.extend(dep[FlutterInfo].plugins)
             apple_plugin_lib_depsets.append(dep[FlutterInfo].apple_plugin_libraries)
             linux_plugin_lib_depsets.append(dep[FlutterInfo].linux_plugin_libraries)
             windows_plugin_lib_depsets.append(dep[FlutterInfo].windows_plugin_libraries)
             apple_privacy_manifest_depsets.append(dep[FlutterInfo].apple_privacy_manifests)
+            android_lib_depsets.append(dep[FlutterInfo].android_libs)
     all_plugins = dedup_plugins(all_dep_plugins)
     apple_plugin_libraries = depset(transitive = apple_plugin_lib_depsets)
     linux_plugin_libraries = depset(transitive = linux_plugin_lib_depsets)
     windows_plugin_libraries = depset(transitive = windows_plugin_lib_depsets)
     apple_privacy_manifests = depset(transitive = apple_privacy_manifest_depsets)
+    android_libs = depset(transitive = android_lib_depsets)
 
-    # Every loose native library this app carries, by both routes in: the
-    # `native_deps` set above, and the Native Assets `CodeAsset` libraries
-    # `native_assets.json` already points at. Deduplicated by path because
-    # nothing stops one library arriving twice.
+    # Every loose native library this app can carry, by both routes in: the
+    # `native_deps` set above, and every code-asset candidate. No two may
+    # land on one path, whichever a link hook keeps. Deduplicated by path
+    # because nothing stops one library arriving twice. A debug build, the
+    # one the dev tool reads these of, runs no link hook and ships them all.
+    candidate_libraries = candidate_code_asset_libraries(shipped.info)
+    check_bundled_library_names(ctx.label, native_libs + candidate_libraries, target_platform)
     bundled_native_libs = {}
-    for lib in native_libs + bundled_code_assets.to_list():
+    for lib in native_libs + candidate_libraries:
         bundled_native_libs[lib.path] = lib
 
     # What each of those libraries' bindings were generated from, when its build
@@ -267,9 +346,9 @@ def _flutter_application_impl(ctx):
     # tool has to tell "nothing describes this one" from "this one is not
     # bundled", and they mean opposite things for a reload.
     binding_contracts = {path: [] for path in bundled_native_libs}
-    for pair in collect_binding_contracts(ctx.attr.native_deps) + [
+    for pair in collect_binding_contracts(inputs.native_deps) + [
         p
-        for dep in ctx.attr.deps
+        for dep in inputs.deps
         if FlutterInfo in dep
         for p in dep[FlutterInfo].binding_contracts.to_list()
     ]:
@@ -279,9 +358,9 @@ def _flutter_application_impl(ctx):
     # And what each is built from, on the same keys, so a reload can tell that a
     # library went stale in an app that runs no build of its own.
     native_lib_sources = {path: [] for path in bundled_native_libs}
-    for pair in collect_native_source_pairs(ctx.attr.native_deps) + [
+    for pair in collect_native_source_pairs(inputs.native_deps) + [
         p
-        for dep in ctx.attr.deps
+        for dep in inputs.deps
         if FlutterInfo in dep
         for p in dep[FlutterInfo].native_lib_sources.to_list()
     ]:
@@ -295,11 +374,11 @@ def _flutter_application_impl(ctx):
     # `code_asset_libraries.bzl`.
     describe_code_asset_libraries(
         ctx.label,
-        lifted_code_assets,
+        shipped.code_assets,
         code_asset_libraries(
-            ctx.attr.deps,
-            ctx.attr.code_assets,
-            resolved_assets.libraries,
+            inputs.deps + ([inputs.package_target] if inputs.package_target != None else []),
+            inputs.code_assets,
+            {asset.asset_id: asset.file for asset in shipped.code_assets},
         ),
         binding_contracts,
         native_lib_sources,
@@ -312,7 +391,6 @@ def _flutter_application_impl(ctx):
     # path named by a build that did not write it fails far from its cause.
     default_files = [
         flutter_assets,
-        package_config,
         native_assets_manifest_file,
     ] + bundled_native_libs.values()
     if aot_output:
@@ -346,9 +424,12 @@ def _flutter_application_impl(ctx):
                 "frontendServer": flutter_sdk_info.frontend_server,
                 "patchedSdkRoot": dev_source_dir(platform_dill, platform_dill.dirname),
                 "appEntrypoint": compilation.app_entrypoint_uri,
-                # Merged user defines (attr + extra_dart_defines flag). The
-                # dev tool replays these as -D on its resident frontend_server
-                # so hot reload/restart recompiles keep the same environment.
+                # Merged user defines (attr + extra_dart_defines flag), the
+                # flavor's `FLUTTER_APP_FLAVOR`, and the app's version and the
+                # SDK's (`FLUTTER_BUILD_NAME`, `FLUTTER_VERSION`, ...). The dev
+                # tool replays these as
+                # -D on its resident frontend_server so hot reload/restart
+                # recompiles keep the same environment.
                 "dartDefines": compilation.dart_defines,
                 # Generated plugin registrants, keyed by platform ("" when
                 # that platform has no Dart plugins and no agent). One per
@@ -374,7 +455,11 @@ def _flutter_application_impl(ctx):
                 # Every bundled shader, by bundle path, with the workspace
                 # files it is compiled from. The dev tool watches those and
                 # has the app reload a shader whose compiled bytes changed.
-                "shaders": shader_sources(ctx),
+                "shaders": shader_sources(ctx, inputs.deps, target_platform, inputs),
+                # Where each package's first-party assets are in the workspace,
+                # by bundle path prefix: an asset is bundled under its path in
+                # its package, not in the workspace.
+                "assetRoots": asset_roots(ctx, inputs.deps, inputs),
                 # The loose native libraries this build writes, from the
                 # same list `default_files` carries so the two cannot drift —
                 # `native_deps` and Native Assets code assets alike, because a
@@ -398,10 +483,10 @@ def _flutter_application_impl(ctx):
                 # reload; see `native_sources.bzl`.
                 "nativeLibSources": native_lib_sources,
                 # First-party source packages (app + local deps) the dev tool
-                # maps live edits back to via its SourceUriResolver. libRoot is
+                # maps live edits back to via its SourceUriResolver. packageRoot is
                 # workspace-relative.
                 "sourcePackages": [
-                    {"name": sp[0], "libRoot": sp[1]}
+                    {"name": sp[0], "packageRoot": sp[1]}
                     for sp in compilation.dev_source_packages
                 ],
                 # The sources outside every package the app compiles under the
@@ -414,37 +499,65 @@ def _flutter_application_impl(ctx):
 
     output_groups = {
         "native_assets_manifest": depset([native_assets_manifest_file]),
-        "bundled_code_assets": bundled_code_assets,
     }
     if debug_info_output:
         output_groups["debug_info"] = depset([debug_info_output])
+    if gen_snapshot_files:
+        output_groups["gen_snapshot_files"] = depset(gen_snapshot_files)
 
     # Every hook runs whenever the app builds, even one that emits no asset,
     # so its verdict on the program is never skipped.
-    output_groups["_validation"] = depset(link_hook_validation, transitive = [compilation.import_checks])
+    output_groups.update(compilation.import_checks)
+    output_groups["_validation"] = depset(link_hook_validation, transitive = [compilation.import_checks["_validation"]])
 
     providers = [
+        FlutterApplicationInputsInfo(inputs = inputs),
         DefaultInfo(files = depset(default_files)),
         FlutterApplicationInfo(
             aot_output = aot_output,
+            aot_object = aot_object,
+            strip_aot = strip_aot,
             kernel_dill = kernel_dill if is_debug else None,
             flutter_assets = flutter_assets,
             icu_data = flutter_sdk_info.icu_data,
             native_libs = native_libs,
             is_debug = is_debug,
-            package_config = package_config,
             native_assets_manifest = native_assets_manifest_file,
-            bundled_code_assets = bundled_code_assets,
-            bundled_data_assets = transitive_data_assets,
+            program_assets = shipped.info,
             apple_privacy_manifests = apple_privacy_manifests,
             plugins = all_plugins,
             apple_plugin_libraries = apple_plugin_libraries,
             linux_plugin_libraries = linux_plugin_libraries,
             windows_plugin_libraries = windows_plugin_libraries,
+            android_libs = android_libs,
+        ),
+        # What `bazel coverage` of a test compiled in this application
+        # reports of it: its sources and the libraries it reaches. A
+        # variant's `main` is what replaces the application's, an entry point
+        # of its own (an integration test's), so only its `srcs` are.
+        coverage_common.instrumented_files_info(
+            ctx,
+            source_attributes = ["srcs"] if hasattr(ctx.attr, "application") else ["srcs", "main"],
+            dependency_attributes = ["deps", "application"],
+            extensions = ["dart"],
+        ),
+        # What lets rules_dart's analysis check the program's own files: its
+        # `main`, which may be outside any `lib/`, its sources, and the sources
+        # of what it compiles staged copies of. Deliberately not a `DartInfo`:
+        # `deps` requires one, and an application is not a dependency.
+        program_analyzable_info(
+            ctx,
+            inputs.package,
+            inputs.package_root,
+            inputs.deps,
+            [inputs.main] + inputs.srcs + inputs.staged_sources,
         ),
     ]
     providers.append(OutputGroupInfo(**output_groups))
     return providers
+
+def _flutter_application_impl(ctx):
+    return flutter_application_build(ctx, flutter_program_inputs(ctx))
 
 flutter_application = rule(
     implementation = _flutter_application_impl,
@@ -455,6 +568,14 @@ flutter_application = rule(
         # asset's own build declared about it.
         {
             "deps": flutter_deps_attr(aspects = [code_asset_libraries_aspect]),
+            # Redeclared to reach the code assets the package itself declares,
+            # which no library in `deps` carries when none names it.
+            "package": attr.label(
+                providers = [DartPackageMetadataInfo],
+                mandatory = True,
+                doc = PROGRAM_PACKAGE_DOC,
+                aspects = [code_asset_libraries_aspect],
+            ),
             "code_assets": attr.label_list(
                 doc = CODE_ASSETS_DOC,
                 providers = [DartCodeAssetInfo],
@@ -462,7 +583,9 @@ flutter_application = rule(
             ),
         },
         PLATFORM_CONSTRAINT_ATTRS,
-        link_hook_runner_attr(),
+        WEB_PLATFORM_CONSTRAINT_ATTRS,
+        CODE_ASSETS_TOOL_ATTRS,
+        program_assets_attrs(),
         # Simulator-vs-device is an Apple *environment* constraint, not an OS
         # one, so it needs apple_support's own attrs on top of the OS set.
         # `launch_build_args` turns it into `--ios_multi_cpus=sim_arm64` or
@@ -472,9 +595,8 @@ flutter_application = rule(
     ),
     # The target's toolchain is for its AOT compile and engine files; every
     # compile whose output does not depend on the target is `portable`.
-    toolchains = [
-        "@rules_flutter//flutter:toolchain_type",
-    ] + COPY_TO_DIRECTORY_TOOLCHAINS,
+    toolchains = APPLICATION_TOOLCHAINS,
     exec_groups = PORTABLE_EXEC_GROUPS,
-    doc = "Compiles a Flutter application to AOT native code + asset bundle (release) or kernel .dill + assets (debug).",
+    fragments = ["cpp"],
+    doc = "Compiles a Flutter application to AOT native code + asset bundle (release) or kernel .dill + assets (debug). A web app (`flutter_web_app`) builds it for its compilers' web platforms, where it compiles nothing and gives the web app its program (`FlutterApplicationInputsInfo`).",
 )

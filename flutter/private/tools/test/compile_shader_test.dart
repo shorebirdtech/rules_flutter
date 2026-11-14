@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
 import '../compile_shader.dart';
@@ -23,27 +24,17 @@ void main() {
   });
 
   group('compileShader', () {
-    late Directory dir;
     late String impellerc;
 
     // A stand-in impellerc that, like the real one on an Impeller-only
-    // shader, fails whenever it is asked for SkSL.
+    // shader, fails whenever it is asked for SkSL: a compiled Dart program, as
+    // a script would not start on every OS.
     setUp(() {
-      dir = Directory.systemTemp.createTempSync('compile_shader_test_');
-      impellerc = '${dir.path}/impellerc';
-      File(impellerc).writeAsStringSync(
-        '#!/bin/sh\n'
-        'for a in "\$@"; do\n'
-        '  if [ "\$a" = "--sksl" ]; then\n'
-        '    echo "error: index expression must be constant" >&2\n'
-        '    exit 1\n'
-        '  fi\n'
-        'done\n'
-        'exit 0\n',
+      impellerc = Runfiles.create().rlocation(
+        '_main/flutter/private/tools/fake_impellerc'
+        '${Platform.isWindows ? '.exe' : ''}',
       );
-      Process.runSync('chmod', ['+x', impellerc]);
     });
-    tearDown(() => dir.deleteSync(recursive: true));
 
     Future<(int, String)> run(List<String> flags, {bool strict = false}) async {
       final err = StringBuffer();

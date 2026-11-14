@@ -1,0 +1,196 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_font", "flutter_font_family", "flutter_library")
+load("//flutter/tests:flutter_fonts_test.bzl", "analysis_fails_test", "assets_owner_test", "fonts_bundled_test")
+
+# The package the libraries below are targets of, each a separate subject of a
+# test, but `derived_name`, which names none. Named apart from the directory,
+# so a bundle under the declared name is told from one under the derived.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "font_package",
+)
+
+# A plain file is a font with no weight and no style.
+flutter_font(
+    name = "bold",
+    src = "fonts/Bold.ttf",
+    style = "italic",
+    weight = 700,
+)
+
+flutter_font_family(
+    name = "f",
+    family = "F",
+    fonts = [
+        "fonts/Regular.ttf",
+        ":bold",
+    ],
+)
+
+flutter_library(
+    name = "two_fonts",
+    srcs = ["lib/fixture.dart"],
+    fonts = [":f"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+)
+
+fonts_bundled_test(
+    name = "two_fonts_test",
+    size = "small",
+    files = {
+        "packages/font_package/fonts/Bold.ttf": "fonts/Bold.ttf",
+        "packages/font_package/fonts/Regular.ttf": "fonts/Regular.ttf",
+    },
+    manifest = '[{"family":"packages/font_package/F","fonts":[{"asset":"packages/font_package/fonts/Regular.ttf"},{"asset":"packages/font_package/fonts/Bold.ttf","style":"italic","weight":700}]}]',
+    target_under_test = ":two_fonts",
+)
+
+# In a program of the library's own package (its own `flutter_test`, say) the
+# fonts are the program's: the family and the files are bare, as the
+# package's pubspec declares them.
+fonts_bundled_test(
+    name = "two_fonts_own_package_test",
+    size = "small",
+    files = {
+        "fonts/Bold.ttf": "fonts/Bold.ttf",
+        "fonts/Regular.ttf": "fonts/Regular.ttf",
+    },
+    manifest = '[{"family":"F","fonts":[{"asset":"fonts/Regular.ttf"},{"asset":"fonts/Bold.ttf","style":"italic","weight":700}]}]',
+    own_package = True,
+    target_under_test = ":two_fonts",
+)
+
+# No `package_name`: the Dart package name derived from the BUILD file's path
+# is the one the fonts and `assets` are bundled under.
+flutter_font_family(
+    name = "regular",
+    family = "F",
+    fonts = ["fonts/Regular.ttf"],
+)
+
+flutter_library(
+    name = "derived_name",
+    srcs = ["lib/fixture.dart"],
+    assets = ["fonts/Bold.ttf"],
+    fonts = [":regular"],
+    tags = ["manual"],
+)
+
+fonts_bundled_test(
+    name = "derived_name_test",
+    size = "small",
+    files = {"packages/fonts_fixture/fonts/Regular.ttf": "fonts/Regular.ttf"},
+    manifest = '[{"family":"packages/fonts_fixture/F","fonts":[{"asset":"packages/fonts_fixture/fonts/Regular.ttf"}]}]',
+    target_under_test = ":derived_name",
+)
+
+assets_owner_test(
+    name = "derived_name_assets_test",
+    size = "small",
+    assets = ["fonts_fixture:fonts/Bold.ttf"],
+    target_under_test = ":derived_name",
+)
+
+# A font of another package keeps that package's path; only the family is this
+# package's, which is what flutter_tools writes to FontManifest.json.
+flutter_font(
+    name = "other",
+    src = "//flutter/tests/fonts_fixture/other:fonts/Other.ttf",
+    asset = "packages/other/fonts/Other.ttf",
+)
+
+flutter_font_family(
+    name = "other_family",
+    family = "F",
+    fonts = [":other"],
+)
+
+flutter_library(
+    name = "font_of_other_package",
+    srcs = ["lib/fixture.dart"],
+    fonts = [":other_family"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+)
+
+fonts_bundled_test(
+    name = "font_of_other_package_test",
+    size = "small",
+    files = {"packages/other/fonts/Other.ttf": "other/fonts/Other.ttf"},
+    manifest = '[{"family":"packages/font_package/F","fonts":[{"asset":"packages/other/fonts/Other.ttf"}]}]',
+    target_under_test = ":font_of_other_package",
+)
+
+# The other package's font keeps its path in the declaring package's own
+# program too; only the family is bare there.
+fonts_bundled_test(
+    name = "font_of_other_package_own_package_test",
+    size = "small",
+    files = {"packages/other/fonts/Other.ttf": "other/fonts/Other.ttf"},
+    manifest = '[{"family":"F","fonts":[{"asset":"packages/other/fonts/Other.ttf"}]}]',
+    own_package = True,
+    target_under_test = ":font_of_other_package",
+)
+
+# A file of this package under a `packages/` directory is this package's own
+# font: only `asset` makes a font another package's.
+flutter_font_family(
+    name = "own_family",
+    family = "F",
+    fonts = ["packages/other/fonts/Own.ttf"],
+)
+
+flutter_library(
+    name = "own_packages_directory",
+    srcs = ["lib/fixture.dart"],
+    fonts = [":own_family"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+)
+
+fonts_bundled_test(
+    name = "own_packages_directory_test",
+    size = "small",
+    files = {"packages/font_package/packages/other/fonts/Own.ttf": "packages/other/fonts/Own.ttf"},
+    manifest = '[{"family":"packages/font_package/F","fonts":[{"asset":"packages/font_package/packages/other/fonts/Own.ttf"}]}]',
+    target_under_test = ":own_packages_directory",
+)
+
+# Each font is a file of the package that lists its family, as an asset is,
+# unless `asset` names another package's.
+flutter_font_family(
+    name = "outside_family",
+    family = "F",
+    # Any file outside the package root will do.
+    fonts = ["//flutter:android_proguard_rules.pro"],
+    tags = ["manual"],
+)
+
+flutter_library(
+    name = "font_outside_package",
+    srcs = ["lib/fixture.dart"],
+    fonts = [":outside_family"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "font_outside_package_test",
+    size = "small",
+    message = "is not in the Dart package rooted at",
+    target_under_test = ":font_outside_package",
+)
+
+flutter_font(
+    name = "bad_asset",
+    src = "fonts/Regular.ttf",
+    asset = "fonts/Regular.ttf",
+    tags = ["manual"],
+)
+
+analysis_fails_test(
+    name = "bad_asset_test",
+    size = "small",
+    message = "it names a font of another package as `packages/<package>/<path>`",
+    target_under_test = ":bad_asset",
+)

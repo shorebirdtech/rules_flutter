@@ -113,6 +113,46 @@ const _diskCacheMaxSize = '50G';
 /// run cold.
 const _diskCacheMaxAge = '30d';
 
+/// Set to a rules_dart checkout to build generated workspaces against it
+/// instead of the module `.bazelrc.user` names (or the published pin), such as
+/// a snapshot of rules_dart's committed HEAD while its live tree is changing.
+/// See docs/TESTING.md, "Testing against another rules_dart".
+const rulesDartOverrideEnvVar = 'E2E_RULES_DART_OVERRIDE';
+
+/// The repository's `.bazelrc.user` as a generated workspace can use it, or
+/// null when the repository has none and [rulesDartOverrideEnvVar] is unset.
+///
+/// On a developer machine that file points modules at sibling checkouts
+/// (`--override_module`), among them ones only the repository's own
+/// development depends on. Bazel refuses an override of a module the root
+/// does not depend on ("the root module specifies overrides on nonexistent
+/// module(s)"), so a generated workspace takes the overrides of the modules
+/// its own `MODULE.bazel` ([moduleBazel]) names with `bazel_dep`, and nothing
+/// else of the file changes. [rulesDartOverrideEnvVar], when set, replaces the
+/// file's override of rules_dart, or adds one.
+String? repositoryUserConfigFor(String repository, String moduleBazel) {
+  final file = File(p.join(repository, '.bazelrc.user'));
+  final rulesDart = Platform.environment[rulesDartOverrideEnvVar] ?? '';
+  if (!file.existsSync() && rulesDart.isEmpty) return null;
+  final depends = {
+    for (final m in RegExp(
+      r'bazel_dep\(\s*name\s*=\s*"([^"]+)"',
+    ).allMatches(moduleBazel))
+      m.group(1)!,
+  };
+  final override = RegExp(r'^\s*\w+\s+--override_module=([^=\s]+)=');
+  final lines = file.existsSync() ? file.readAsLinesSync() : <String>[];
+  return [
+    ...lines.where((line) {
+      final module = override.firstMatch(line)?.group(1);
+      if (module == 'rules_dart' && rulesDart.isNotEmpty) return false;
+      return module == null || depends.contains(module);
+    }),
+    if (rulesDart.isNotEmpty && depends.contains('rules_dart'))
+      'common --override_module=rules_dart=${_rcPath(rulesDart)}',
+  ].join('\n');
+}
+
 /// A workspace copy that belongs to one test.
 class EditableWorkspace {
   /// The name it was copied from, for messages.
@@ -149,7 +189,38 @@ Future<EditableWorkspace> editableWorkspace(String name) async {
   _writeLocalConfig(source: source, root: root);
 
   printOnFailure('workspace copy for "$name": $root');
+  _disposeAtTeardown(parent: parent, root: root);
 
+  return EditableWorkspace._(name, root);
+}
+
+/// A workspace made from [files] (relative path to contents), for a test that
+/// needs a project of its own rather than a copy of one under `e2e/`.
+///
+/// Disposed like a copy: its Bazel server is shut down and its output base and
+/// tree removed when the test ends (when the scope is a `setUpAll`, after the
+/// group). Nothing is copied or rewritten, so [files] must be a complete
+/// workspace, `MODULE.bazel` included.
+Future<EditableWorkspace> generatedWorkspace(
+  String name,
+  Map<String, String> files,
+) async {
+  final parent = await Directory.systemTemp.createTemp('e2e_ws_');
+  final root = p.join(parent.path, name);
+  Directory(root).createSync(recursive: true);
+  for (final entry in files.entries) {
+    final file = File(p.join(root, entry.key));
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync(entry.value);
+  }
+  printOnFailure('generated workspace "$name": $root');
+  _disposeAtTeardown(parent: parent, root: root);
+  return EditableWorkspace._(name, root);
+}
+
+/// Shut down the Bazel server of the workspace at [root], remove its output
+/// base, and delete [parent], when the current test (or group) ends.
+void _disposeAtTeardown({required Directory parent, required String root}) {
   addTearDown(() async {
     // Asked BEFORE the shutdown, for two reasons. The server is still up from
     // the test's own builds, so answering is nearly free; and after a shutdown
@@ -181,8 +252,6 @@ Future<EditableWorkspace> editableWorkspace(String name) async {
     if (outputBase != null) await _removeOutputBase(outputBase);
     if (parent.existsSync()) parent.deleteSync(recursive: true);
   });
-
-  return EditableWorkspace._(name, root);
 }
 
 /// The output base Bazel uses for the workspace at [root], or null if it will
@@ -300,6 +369,11 @@ void _writeLocalConfig({required String source, required String root}) {
     // and costs only a cold rebuild.
     'common --experimental_disk_cache_gc_max_size=$_diskCacheMaxSize',
     'common --experimental_disk_cache_gc_max_age=$_diskCacheMaxAge',
+    '',
+    // The overrides below change what resolves, so the committed lock no
+    // longer describes it; under the workspaces' `--lockfile_mode=error` the
+    // build would refuse it.
+    'common --lockfile_mode=off',
     '',
     '# Invariant 2: the source resolves these by a path relative to itself.',
   ];

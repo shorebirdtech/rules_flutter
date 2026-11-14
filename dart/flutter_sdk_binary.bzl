@@ -17,14 +17,25 @@ source "${RUNFILES_DIR:-/dev/null}/$f" 2>/dev/null || \
   { echo>&2 "ERROR: cannot find $f"; exit 1; }; f=; set -e
 # --- end runfiles.bash initialization v3 ---"""
 
+# Where Bazel makes no runfiles tree (Windows' default) the script's
+# runfiles directory holds no SDK, so the VM is looked up in the runfiles
+# manifest, which Bazel writes either way. The script's own manifest is read
+# before an inherited `RUNFILES_MANIFEST_FILE`, which may name a caller's.
 _BAT_TEMPLATE = """\
 @echo off
 setlocal
-set RUNFILES_DIR=%~dp0%~n0.exe.runfiles
-if not exist "%RUNFILES_DIR%" set RUNFILES_DIR=%~dp0%~n0.runfiles
-set DART=%RUNFILES_DIR%\\{dart}
+set "MANIFEST=%~f0.runfiles_manifest"
+if not exist "%MANIFEST%" set "MANIFEST=%~f0.runfiles\\MANIFEST"
+if not exist "%MANIFEST%" set "MANIFEST=%RUNFILES_MANIFEST_FILE%"
+set "DART="
+for /f "usebackq tokens=1,* delims= " %%a in ("%MANIFEST%") do if "%%a"=="{dart}" set "DART=%%b"
+if not defined DART goto missing
 if defined BUILD_WORKING_DIRECTORY cd /d "%BUILD_WORKING_DIRECTORY%"
 "%DART%" %*
+exit /b %ERRORLEVEL%
+:missing
+echo ERROR: {dart} is not in the runfiles manifest "%MANIFEST%" 1>&2
+exit /b 1
 """
 
 def _runfiles_path(f, workspace_name):
@@ -46,7 +57,7 @@ def _flutter_sdk_binary_impl(ctx):
         script = ctx.actions.declare_file(ctx.label.name + ".bat")
         ctx.actions.write(
             output = script,
-            content = _BAT_TEMPLATE.format(dart = dart_path.replace("/", "\\")),
+            content = _BAT_TEMPLATE.format(dart = dart_path),
             is_executable = True,
         )
     else:

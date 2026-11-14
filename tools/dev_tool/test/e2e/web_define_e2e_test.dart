@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'web'])
 /// `--web-define` parity for the dev loop, asserted from the live page.
 ///
 /// A `web_defines` entry is a template substitution, so it reaches a running

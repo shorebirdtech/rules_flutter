@@ -1,0 +1,11 @@
+name: fx_flavors
+version: 1.0.0
+environment:
+  sdk: ^3.13.0
+flutter:
+  assets:
+    - assets/all.txt
+    - path: assets/free.txt
+      flavors: [free]
+    - path: assets/paid/
+      flavors: [paid, premium]

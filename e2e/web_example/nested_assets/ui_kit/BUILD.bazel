@@ -1,0 +1,16 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "ui_kit",
+)
+
+# A library below the workspace root with an asset of its own, bundled as
+# `packages/ui_kit/assets/greeting.txt`.
+flutter_library(
+    name = "ui_kit",
+    srcs = ["lib/ui_kit.dart"],
+    assets = glob(["assets/**"]),
+    package = ":pubspec-metadata",
+    visibility = ["//nested_assets:__pkg__"],
+)

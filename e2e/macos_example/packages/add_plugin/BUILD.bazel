@@ -4,6 +4,5 @@ flutter_plugin(
     name = "add_plugin",
     srcs = ["lib/add_plugin.dart"],
     native_deps = ["//:add"],
-    platforms = ["macos"],
     visibility = ["//:__pkg__"],
 )

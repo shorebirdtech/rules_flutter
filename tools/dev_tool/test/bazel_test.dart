@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/bazel.dart';
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/launch_bundle_parts.dart';
+import 'package:flutter_bazel_dev_tool/web_bundle_facts.dart';
 import 'package:logging/logging.dart';
 import 'package:test/test.dart';
 
@@ -31,6 +33,24 @@ const _remoteHotPatchBuildEvents = [
 ];
 
 void main() {
+  group('userBazelFlags', () {
+    test('passes each --config as --config=<name>, before the build args', () {
+      expect(userBazelFlags(configs: ['a', 'b'], buildArgs: ['--jobs=4']), [
+        '--config=a',
+        '--config=b',
+        '--jobs=4',
+      ]);
+    });
+
+    test('reaches the build argv, next to -c', () {
+      final flags = userBazelFlags(configs: ['a', 'b'], buildArgs: []);
+      expect(
+        bazelBuildArgs('//app', compilationMode: 'dbg', extraArgs: flags),
+        containsAllInOrder(['-c', 'dbg', '--config=a', '--config=b']),
+      );
+    });
+  });
+
   group('aspectOutputsFromBuildEvents', () {
     const aspect =
         '@rules_flutter//flutter:native_hot_patch.bzl%'
@@ -54,13 +74,33 @@ void main() {
       },
     );
 
+    test('reads each of several groups an aspect filled apart', () {
+      final events = [
+        '{"id":{"workspace":{}},"workspaceInfo":{"localExecRoot":"/x/root"}}',
+        '{"id":{"namedSet":{"id":"0"}},"namedSetOfFiles":{"files":[{"name":"assets/a.bin","uri":"file:///x/root/bazel-out/k/bin/assets/a.bin","pathPrefix":["bazel-out","k","bin"]}]}}',
+        '{"id":{"namedSet":{"id":"1"}},"namedSetOfFiles":{"files":[{"name":"libx.so","uri":"file:///x/root/bazel-out/k/bin/libx.so","pathPrefix":["bazel-out","k","bin"]}]}}',
+        '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:a.bzl%an_aspect"}},"completed":{"outputGroup":[{"name":"assets","fileSets":[{"id":"0"}]},{"name":"libs","fileSets":[{"id":"1"}]}]}}',
+      ];
+      final outputs = aspectOutputsFromBuildEvents(
+        events.join('\n'),
+        aspect: '@rules_flutter//flutter:a.bzl%an_aspect',
+        outputGroup: 'assets',
+        otherGroups: ['libs'],
+      );
+      expect(outputs.filesByGroup, {
+        'assets': ['/x/root/bazel-out/k/bin/assets/a.bin'],
+        'libs': ['/x/root/bazel-out/k/bin/libx.so'],
+      });
+      expect(outputs.files, outputs.filesByGroup['assets']);
+    });
+
     test('ignores another aspect\'s group and follows nested file sets', () {
       final events = [
         '{"id":{"workspace":{}},"workspaceInfo":{"localExecRoot":"/x/root"}}',
         '{"id":{"namedSet":{"id":"1"}},"namedSetOfFiles":{"files":[{"name":"b.json","uri":"file:///x/root/bazel-out/k/bin/b.json","pathPrefix":["bazel-out","k","bin"]}]}}',
         '{"id":{"namedSet":{"id":"0"}},"namedSetOfFiles":{"files":[{"name":"a.json","uri":"file:///x/root/bazel-out/k/bin/a.json","pathPrefix":["bazel-out","k","bin"]}],"fileSets":[{"id":"1"}]}}',
         '{"id":{"namedSet":{"id":"2"}},"namedSetOfFiles":{"files":[{"name":"other","uri":"file:///x/root/other"}]}}',
-        '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:dev_files.bzl%flutter_dev_files"}},"completed":{"outputGroup":[{"name":"flutter_native_hot_patch","fileSets":[{"id":"2"}]}]}}',
+        '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:dev_files.bzl%flutter_dev_files_aspect"}},"completed":{"outputGroup":[{"name":"flutter_native_hot_patch","fileSets":[{"id":"2"}]}]}}',
         '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:native_hot_patch.bzl%flutter_native_hot_patch_aspect"}},"completed":{"outputGroup":[{"name":"flutter_native_hot_patch","fileSets":[{"id":"0"}]}]}}',
       ];
       final outputs = aspectOutputsFromBuildEvents(
@@ -205,10 +245,34 @@ void main() {
       expect(
         args,
         contains(
-          '--aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files',
+          '--aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files_aspect',
         ),
       );
       expect(args, contains('--output_groups=+flutter_dev_files'));
+    });
+
+    // A restart compares the bundle's parts against the ones the launch built:
+    // a build of them made later can hold an edit the launched app does not.
+    test('adds the bundle parts a restart reads, for the launch build', () {
+      const parts = LaunchBundleParts(
+        aspect: '//:parts.bzl%parts',
+        assetsGroup: 'assets_group',
+        nativeLibsGroup: 'native_group',
+      );
+      final args = bazelBuildArgs(
+        '//:app',
+        compilationMode: 'dbg',
+        parts: parts,
+      );
+      expect(args, contains('--aspects=//:parts.bzl%parts'));
+      expect(args, contains('--output_groups=+assets_group,+native_group'));
+      // Added to the outputs, not in place of them: the launch artifact and
+      // the dev files are still built.
+      expect(args, contains('--output_groups=+flutter_dev_files'));
+      expect(
+        bazelBuildArgs('//:app').any((a) => a.contains('parts.bzl')),
+        isFalse,
+      );
     });
 
     test('does not touch the download policy', () {
@@ -257,13 +321,35 @@ void main() {
   group('dartDefineFlags', () {
     test('maps each define to one repeatable build-setting flag', () {
       expect(dartDefineFlags(['A=1', 'B=x,y']), [
-        '--@rules_flutter//flutter:extra_dart_defines=A=1',
-        '--@rules_flutter//flutter:extra_dart_defines=B=x,y',
+        '--@rules_dart//dart:extra_dart_defines=A=1',
+        '--@rules_dart//dart:extra_dart_defines=B=x,y',
       ]);
     });
 
     test('empty defines produce no flags', () {
       expect(dartDefineFlags([]), isEmpty);
+    });
+  });
+
+  group('extraDartDefinesFrom', () {
+    test('reads the one list the query prints', () {
+      expect(
+        extraDartDefinesFrom('["E2E_FLAG=from_flag","MSG=a,b"]\n'),
+        ['E2E_FLAG=from_flag', 'MSG=a,b'],
+      );
+      expect(extraDartDefinesFrom('[]\n'), isEmpty);
+    });
+
+    test('refuses anything but one list of strings', () {
+      // Two lines are two configurations, which `config(…, target)` exists to
+      // rule out: either could be the build's.
+      for (final stdout in ['', '[]\n[]\n', '{}\n', '[1]\n']) {
+        expect(
+          () => extraDartDefinesFrom(stdout),
+          throwsA(isA<DevToolException>()),
+          reason: stdout,
+        );
+      }
     });
   });
 
@@ -549,6 +635,95 @@ void main() {
       expect(fake.interrupted, isEmpty);
     });
 
+    test('cqueryExtraDartDefines asks in the build\'s own options', () async {
+      final fake = fakeBazel();
+      final defines = fake.bazel.cqueryExtraDartDefines(
+        workspace: '/ws',
+        compilationMode: 'dbg',
+        extraArgs: const ['--config=a'],
+      );
+      await pumpEventQueue();
+      final process = fake.processes.single;
+      await process.outputAttached;
+      process.emitStdout('["A=1"]\n');
+      process.complete(0);
+
+      expect(await defines, ['A=1']);
+      expect(fake.spawned.single.args, [
+        ...extraDartDefinesQuery,
+        '-c',
+        'dbg',
+        '--config=a',
+      ]);
+    });
+
+    group('cqueryWebBundleFacts', () {
+      Future<WebBundleFacts?> ask(
+        Bazel bazel,
+        List<FakeProcess> processes, {
+        required int exitCode,
+        String stdout = '',
+        String stderr = '',
+      }) async {
+        final facts = bazel.cqueryWebBundleFacts(
+          '//app:web',
+          workspace: '/ws',
+          compilationMode: 'dbg',
+          extraArgs: const ['--define=a=b'],
+        );
+        await pumpEventQueue();
+        final process = processes.single;
+        await process.outputAttached;
+        process.emitStdout(stdout);
+        process.emitStderr(stderr);
+        process.complete(exitCode);
+        return facts;
+      }
+
+      test('asks in the configuration the run builds in and reads the '
+          'answer', () async {
+        final fake = fakeBazel();
+        final facts = await ask(
+          fake.bazel,
+          fake.processes,
+          exitCode: 0,
+          stdout:
+              '{"target":[{"rule":{"name":"//app:web",'
+              '"ruleClass":"flutter_web_bundle","attribute":[{'
+              '"name":"js_fallback","booleanValue":false}]}}]}',
+        );
+
+        expect(facts!.wasmOnly, isTrue);
+        expect(fake.spawned.single.args, [
+          ...webBundleFactsQuery('//app:web'),
+          '-c',
+          'dbg',
+          '--define=a=b',
+        ]);
+        expect(fake.spawned.single.workingDirectory, '/ws');
+      });
+
+      test('a query bazel rejects is a failure that names the target and '
+          'what bazel said', () async {
+        final fake = fakeBazel();
+        await expectLater(
+          ask(
+            fake.bazel,
+            fake.processes,
+            exitCode: 1,
+            stderr: 'ERROR: no such package',
+          ),
+          throwsA(
+            isA<DevToolException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('//app:web'), contains('no such package')),
+            ),
+          ),
+        );
+      });
+    });
+
     group('build', () {
       test('lists the outputs of a build that succeeded', () async {
         final fake = fakeBazel();
@@ -579,6 +754,85 @@ void main() {
         ]);
         expect(result.success, isTrue);
         expect(result.outputFiles, ['/ws/bazel-out/darwin/bin/app.zip']);
+      });
+
+      test(
+        'a build the run stopped says it stopped, not that it failed',
+        () async {
+          final fake = fakeBazel();
+          final lines = <Map<String, dynamic>>[];
+          final sub = Logger.root.onRecord.listen((r) {
+            final o = r.object;
+            if (o is Map && o['message'] == 'bazel_phase') {
+              lines.add(Map<String, dynamic>.from(o));
+            }
+          });
+          addTearDown(sub.cancel);
+          final build = fake.bazel.build('//:app', workspace: '/ws');
+          final cancelled = expectLater(build, throwsA(isA<BazelCancelled>()));
+          await pumpEventQueue();
+          final process = fake.processes.single;
+          await process.outputAttached;
+
+          final closing = fake.bazel.close();
+          await pumpEventQueue();
+          process.complete(8);
+          await closing;
+          await cancelled;
+
+          expect(lines.single['event'], 'stopped');
+          expect(
+            lines.single['text'],
+            matches(
+              r'^bazel build //:app stopped after \d+ms: '
+              r'the run is shutting down$',
+            ),
+          );
+        },
+      );
+
+      // A reload that sits in bazel and one that sits in the query after it are
+      // different stalls; each ends with a line that says so, and the query
+      // announces itself because it is a second invocation.
+      test('says when the build ended and when the query after it ended, with '
+          'timings', () async {
+        final fake = fakeBazel();
+        final lines = <Map<String, dynamic>>[];
+        final sub = Logger.root.onRecord.listen((r) {
+          final o = r.object;
+          if (o is Map && o['message'] == 'bazel_phase') {
+            lines.add(Map<String, dynamic>.from(o));
+          }
+        });
+        addTearDown(sub.cancel);
+        final build = fake.bazel.build('//:app', workspace: '/ws');
+        await pumpEventQueue();
+        final buildProcess = fake.processes.single;
+        await buildProcess.outputAttached;
+        buildProcess.complete(0);
+        await pumpEventQueue();
+        final cquery = fake.processes.last;
+        await cquery.outputAttached;
+        cquery.emitStdout('bazel-out/darwin/bin/app.zip');
+        cquery.complete(0);
+        await build;
+
+        expect(
+          [for (final l in lines) '${l['phase']} ${l['event']}'],
+          [
+            'bazel build finished',
+            'bazel query started',
+            'bazel query finished',
+          ],
+        );
+        expect(
+          lines.first['text'],
+          matches(r'^bazel build //:app finished in \d+ms \(exit 0\)$'),
+        );
+        expect(
+          lines.last['text'],
+          matches(r'^bazel query of //:app outputs finished in \d+ms$'),
+        );
       });
 
       test('a build that failed carries the tail of what bazel said, and '
@@ -635,6 +889,58 @@ void main() {
           contains(
             '/output_base/execroot/_main/bazel-out/darwin_arm64-dbg-macos-arm64-min12.0-ST-fea79f7fcfbc/bin/mul_hot_patch.hot_patch.json',
           ),
+        );
+      });
+
+      // What a restart compares against is what the launch built, so the
+      // launch build itself reports the parts, from its own event stream: an
+      // aspect's outputs are in no cquery.
+      test('a launch build with bundle parts reads them from its event '
+          'stream', () async {
+        final fake = fakeBazel();
+        final build = fake.bazel.build(
+          '//:app',
+          workspace: '/ws',
+          parts: const LaunchBundleParts(
+            aspect: '@rules_flutter//flutter:a.bzl%an_aspect',
+            assetsGroup: 'assets',
+            nativeLibsGroup: 'libs',
+          ),
+        );
+        while (fake.processes.isEmpty) {
+          await pumpEventQueue();
+        }
+        final process = fake.processes.single;
+        await process.outputAttached;
+        final args = fake.spawned.single.args;
+        expect(args, contains('--output_groups=+assets,+libs'));
+        final eventFile = args
+            .singleWhere((a) => a.startsWith('--build_event_json_file='))
+            .split('=')
+            .last;
+        File(eventFile).writeAsStringSync(
+          [
+            '{"id":{"workspace":{}},"workspaceInfo":{"localExecRoot":"/x/root"}}',
+            '{"id":{"namedSet":{"id":"0"}},"namedSetOfFiles":{"files":[{"name":"libx.dylib","pathPrefix":["bazel-out","k","bin"]}]}}',
+            '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@rules_flutter+//flutter:a.bzl%an_aspect"}},"completed":{"outputGroup":[{"name":"libs","fileSets":[{"id":"0"}]}]}}',
+          ].join('\n'),
+        );
+        process.complete(0);
+        await pumpEventQueue();
+        final cquery = fake.processes.last;
+        await cquery.outputAttached;
+        cquery.emitStdout('bazel-out/darwin/bin/app.zip');
+        cquery.complete(0);
+
+        final result = await build;
+        expect(result.partsFiles, {
+          'assets': <String>[],
+          'libs': ['/x/root/bazel-out/k/bin/libx.dylib'],
+        });
+        expect(
+          fake.spawned.last.args,
+          isNot(contains(startsWith('--build_event_json_file'))),
+          reason: 'the cquery lists outputs; it writes no event stream',
         );
       });
 

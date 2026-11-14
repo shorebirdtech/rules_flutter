@@ -5,5 +5,25 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  firebase_core: 5.1.0
+  flutter_qjs_next: 1.5.2
+  libremidi_flutter: 0.9.0
+  # An iOS plugin with a Package.swift and a podspec script phase.
+  script_phase_plugin:
+    path: path_packages/script_phase_plugin
+  # An iOS plugin whose Swift package has a resource, one of them read from
+  # Objective-C.
+  resource_plugin:
+    path: path_packages/resource_plugin
+  # An iOS plugin whose Swift package is in the Swift 6 language mode.
+  swift6_plugin:
+    path: path_packages/swift6_plugin
+  # An FFI plugin whose Swift package product is dynamic.
+  ffi_dynamic_plugin:
+    path: path_packages/ffi_dynamic_plugin
+  video_player_avfoundation: 2.12.3
+  permission_handler: 13.0.2
+  audio_session: 0.2.4
+  geolocator_apple: 2.4.3
 dev_dependencies:
   very_good_analysis: ^10.3.0

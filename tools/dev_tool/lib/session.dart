@@ -10,6 +10,7 @@ import 'dart:io';
 
 import 'package:dds/dds.dart';
 
+import 'app_extension_channel.dart';
 import 'command_report.dart';
 import 'command_runner.dart';
 import 'device.dart';
@@ -38,9 +39,32 @@ class DeviceSession {
   AppInstance _appInstance;
 
   VmServiceClient? vmClient;
+
+  /// How the `app.*` agent commands reach this app's service extensions: its
+  /// VM service where there is one, otherwise — a bundled debug web build —
+  /// the browser's bridge over the DevTools protocol. Null where neither
+  /// exists yet (the DDC dev loop before DWDS hands its connection over) or at
+  /// all (`--allow-no-vm-service`).
+  AppExtensionChannel? get extensionChannel {
+    final client = vmClient;
+    if (client != null) {
+      if (_vmChannel?.client != client) _vmChannel = VmExtensionChannel(client);
+      return _vmChannel;
+    }
+    final d = device;
+    return d is WebDevice ? d.browserChannel : null;
+  }
+
+  VmExtensionChannel? _vmChannel;
+
   final String appId;
   String? devToolsUrl;
   Process? devToolsProcess;
+
+  /// The Dart Tooling Daemon this app is registered with, or null when it is
+  /// registered with none. The DevTools this tool launches joins it, as
+  /// `flutter run`'s does, rather than starting one of its own.
+  Uri? dtdUri;
 
   /// The Dart Development Service **we** started on the app's raw VM service.
   /// Our [vmClient] and DevTools both connect through it (DDS multiplexes), so
@@ -114,22 +138,13 @@ class DeviceSession {
 
   /// Settle [drivable], reporting the wait as `app.progress` while it lasts.
   ///
-  /// Always settles: ready when the app paints, unavailable with a reason when
-  /// it does not, so a command waiting on the gate is never left holding a
-  /// signal that is not coming.
-  ///
-  /// A settlement is for the run. An app that misses this budget has not been
-  /// slow, it has failed to start — the budget is minutes, and a healthy start
-  /// on the slowest platform here is one — so the answer does not get better
-  /// by being asked again, and every command says the same thing rather than
-  /// each one spending the budget over.
-  ///
-  /// Bounded by [Device.applyTimeout] — the same budget that governs a hot
-  /// restart there, for the same reason. A restart re-runs `main()`, which is
-  /// the work being waited on here, and the platform note on the iOS override
-  /// is what both are sized against.
+  /// Settles when the app paints (ready), or when the app exits or the run
+  /// ends (unavailable, with a reason), so a command waiting on the gate is
+  /// never left holding a signal that is not coming. There is no time limit:
+  /// a late first frame makes the app drivable whenever it arrives. After each
+  /// [Device.applyTimeout] without one, the wait says it is still going.
   Future<void> waitUntilDrivable(MachineProtocol protocol) async {
-    final client = vmClient;
+    final client = extensionChannel;
     if (client == null) {
       // Left unsettled rather than refused, because "no client yet" is the
       // normal web case, not a failure: a browser's VM service is handed over
@@ -151,77 +166,85 @@ class DeviceSession {
 
     // Nothing here may throw: callers start this and walk away, so a throw
     // would leave the gate unsettled and every command waiting on it hanging
-    // for good. A failure becomes the gate's reason instead, which is where a
-    // refused command reads it from.
+    // for good.
+    //
+    // There is no deadline. A first frame that lands late is exactly as good as
+    // one that lands early: the app is drivable from that moment, and a verdict
+    // that the app "failed to start" would be about the clock, not the app. The
+    // wait ends on the frame, on the app exiting, or on the run ending, and
+    // [Device.applyTimeout] only paces the warnings that tell the person it is
+    // taking long.
     var rendered = false;
-    String? failure;
-    // Measured, because the wait does not always reach its bound: `until`
-    // abandons it when the run ends, and a failed query returns early.
-    // Reporting the full `applyTimeout` for either would send a reader looking
-    // for a thirty-second hang that had not happened.
+    Object? failure;
     final waited = Stopwatch()..start();
     try {
       rendered = await client.waitForFirstFrame(
-        timeout: device.applyTimeout,
+        timeout: null,
+        slowEvery: device.applyTimeout,
         until: _stopDrivableWait.future,
+        onSlow: (cause) {
+          final seconds = waited.elapsed.inSeconds;
+          final why = cause != null
+              ? ' The last attempt to find out failed: $cause'
+              : '';
+          // Logged as well as reported. The progress event reaches a machine
+          // protocol client, but a terminal run has no one reading it and would
+          // otherwise show nothing for an app that is slow to come up.
+          _logger.warning({
+            'message': 'first_frame_slow',
+            'text':
+                'The app on ${device.name} has not rendered a frame after '
+                '${seconds}s; still waiting. Commands that drive it wait for '
+                'it.$why',
+            'device': device.name,
+            'appId': appId,
+          });
+          protocol.appProgress(
+            appId,
+            'Still waiting for $appId to render its first frame (${seconds}s)',
+            progressId: progressId,
+          );
+        },
       );
     } catch (e) {
-      failure = '$e';
+      // A throw must not leave the gate unsettled. It is the wait reporting
+      // what the app could not be asked, as it ends with the run.
+      failure = e;
+      _logger.warning({
+        'message': 'first_frame_wait_failed',
+        'text': 'Waiting for $appId to render its first frame failed: $e',
+        'appId': appId,
+      });
     }
     waited.stop();
 
     // What the wait found, not what it was for. The closing event repeated the
     // opening one's "Waiting for the app to render its first frame", so a
     // progress item named `first_frame_*` finishing read as the frame having
-    // arrived — while this method was about to refuse every drivable command
-    // for the rest of the run. A client watching the stream had no way to tell
-    // the two endings apart, and the one that costs time is the one that looks
-    // like success.
+    // arrived while it had not. A client watching the stream must be able to
+    // tell the two endings apart.
+    final exited = _terminated.isCompleted;
     protocol.appProgress(
       appId,
       rendered
           ? '$appId rendered its first frame'
-          : _stopDrivableWait.isCompleted
-          ? 'the run ended before $appId rendered its first frame'
-          : '$appId did not render a frame within '
-                '${waited.elapsed.inSeconds}s',
+          : exited
+          ? '$appId exited before it rendered its first frame'
+          : 'the run ended before $appId rendered its first frame',
       progressId: progressId,
       finished: true,
     );
 
     if (rendered) {
       drivable.signalReady();
-      return;
+    } else {
+      drivable.signalUnavailable(
+        exited
+            ? '$appId exited before it rendered${_death != null ? ': $_death' : ''}'
+            : 'the run ended before $appId rendered'
+                  '${failure != null ? ' (and could not tell whether it had: $failure)' : ''}',
+      );
     }
-
-    if (_stopDrivableWait.isCompleted) {
-      drivable.signalUnavailable('the run ended before $appId rendered');
-      return;
-    }
-
-    // Logged as well as gated. The gate's reason reaches a machine-protocol
-    // client through the command it refuses, but a terminal run issues no
-    // commands and would otherwise show nothing at all for an app that never
-    // came up.
-    _logger.warning({
-      'message': 'first_frame_not_rendered',
-      'text':
-          'The app on ${device.name} did not render a frame within '
-          '${waited.elapsed.inSeconds}s. Commands that drive it are '
-          'refused for the rest of this run; start it again once the app '
-          'comes up.',
-      'device': device.name,
-      'appId': appId,
-    });
-    drivable.signalUnavailable(
-      failure != null
-          ? 'could not tell whether $appId on ${device.name} has rendered: '
-                '$failure'
-          : '$appId on ${device.name} had not rendered a frame after '
-                '${waited.elapsed.inSeconds}s, so the Flutter framework '
-                'is not up and its service extensions are not registered. The '
-                'app is either still starting or stuck before its first build.',
-    );
   }
 
   /// How many times this session's app has been launched: 1 for the original
@@ -258,9 +281,12 @@ class DeviceSession {
     required this.vmClient,
     required this.appId,
     this.dds,
+    this.dtdUri,
+    this.onDied,
   }) : _appInstance = appInstance {
     if (vmClient != null && dds != null) markDebugReady();
     _watchForExit(appInstance);
+    _watchConnection();
   }
 
   /// Tear this session down: end DevTools, tell the client the app is going,
@@ -278,38 +304,159 @@ class DeviceSession {
   Future<void> shutdown(MachineProtocol protocol) async {
     if (_shutDown) return;
     _shutDown = true;
-    stopWaitingForFirstFrame();
-    devToolsProcess?.kill();
-    protocol.appStop(appId);
-    // Retired, not merely disconnected: this session is over, and a client
-    // that could still be dialled would be — an RPC in flight when this lands
-    // re-dials on its way back and publishes a socket nothing owns. See
-    // [VmServiceClient.retire].
-    await vmClient?.retire();
-    await boundedTeardownStep(
-      'the DDS to shut down',
-      dds?.shutdown() ?? Future.value(),
-      device.teardownBound,
-    );
-    // Read through the session, not a local: a restart that relaunches the app
-    // replaces the instance, and stopping the one a caller saw earlier would
-    // leave the live one running.
-    await device.stop(appInstance);
+    try {
+      stopWaitingForFirstFrame();
+      devToolsProcess?.kill();
+      protocol.appStop(appId, error: _death);
+      // Retired, not merely disconnected: this session is over, and a client
+      // that could still be dialled would be — an RPC in flight when this lands
+      // re-dials on its way back and publishes a socket nothing owns. See
+      // [VmServiceClient.retire].
+      await vmClient?.retire(leaveDevFS: device.sharesHostFilesystem);
+      await boundedTeardownStep(
+        'the DDS to shut down',
+        dds?.shutdown() ?? Future.value(),
+        device.teardownBound,
+      );
+    } finally {
+      // Whatever the steps above did, the app itself is stopped: it is what
+      // outlives the tool if this is skipped — a browser and its profile
+      // directory, an app on a device. And once only: the session is marked
+      // shut down above, so a second caller returns without it.
+      //
+      // Read through the session, not a local: a restart that relaunches the
+      // app replaces the instance, and stopping the one a caller saw earlier
+      // would leave the live one running.
+      await device.stop(appInstance);
+      if (device.sharesHostFilesystem) await vmClient?.removeAbandonedDevFS();
+    }
   }
 
   void _watchForExit(AppInstance instance) {
     unawaited(
-      instance.process.exitCode.then((_) {
-        // Ignore the exit of a process this session no longer owns, and the
-        // exit of the one currently being replaced.
-        if (_relaunching || !identical(instance, _appInstance)) return;
-        _markTerminated();
+      instance.process.exitCode.then((code) {
+        _exitCodes[instance] = code;
+        return _appStopped(instance);
       }),
     );
   }
 
+  /// The exit status of each process this session has watched end.
+  ///
+  /// Kept per instance so that a connection that closes first can still be
+  /// told, once the platform has been asked, that the process it belonged to
+  /// exited cleanly.
+  final Expando<int> _exitCodes = Expando<int>('exit code');
+
+  /// Watch the VM service connection for the app going away with it.
+  ///
+  /// The connection closing and not coming back is the signal that does not
+  /// depend on how the app is held: a process this tool started, an app on a
+  /// simulator or a phone whose process it only follows through a log.
+  void _watchConnection() {
+    final client = vmClient;
+    if (client == null) return;
+    unawaited(client.gone.then((_) => _appStopped(_appInstance)));
+  }
+
+  /// The app's death, once it is established: set before [onDied] is told.
+  String? _death;
+
+  /// Why the app ended without being asked to: the platform's account of it
+  /// (with the app's last output), or null while the app is running, was
+  /// stopped by this tool, or finished cleanly.
+  String? get death => _death;
+
+  /// Called once, with [death], when the app ends without being asked to.
+  final void Function(String reason)? onDied;
+
+  /// The app behind [instance] has stopped answering: the process exited, or
+  /// the connection to it closed and did not come back.
+  ///
+  /// Both signals arrive for one death, in either order, and the first to be
+  /// handled settles it. Four things are not deaths: the tool's own shutdown,
+  /// the replacement of the app by a relaunch, an exit with code 0, which is
+  /// the app finishing (upstream's "Application finished.") and not a crash,
+  /// and a close the platform says was asked for (the user closing the app).
+  /// The shutdown flag is checked again once the platform has answered,
+  /// because the platform's check takes real time and a quit can land in it.
+  Future<void> _appStopped(AppInstance instance) async {
+    // A replaced app's exit is not the session's.
+    if (_relaunching || !identical(instance, _appInstance)) return;
+    // A stop this tool asked for is the end of the session and not a death:
+    // the app going is exactly what was wanted, and the run is waiting on it.
+    if (_shutDown) {
+      _markTerminated();
+      return;
+    }
+    if (_stopped) return;
+    _stopped = true;
+
+    // Asked before anything is stopped: a process this run killed is not one
+    // that died.
+    AppExit? ending;
+    try {
+      ending = await device.howAppExited(instance);
+    } catch (e) {
+      _logger.warning({
+        'message': 'app_exit_check_failed',
+        'text':
+            'Could not ask ${device.name} whether the app is still running: '
+            '$e.',
+        'device': device.name,
+        'error': '$e',
+      });
+    }
+    if (_relaunching || !identical(instance, _appInstance)) {
+      _stopped = false;
+      return;
+    }
+    if (_shutDown) {
+      _markTerminated();
+      return;
+    }
+
+    final code = _exitCodes[instance];
+    if (code == 0) {
+      _logger.info({
+        'message': 'app_finished',
+        'text': 'Application finished.',
+        'device': device.name,
+      });
+      _markTerminated();
+      return;
+    }
+    // A device that does not hold the app's exit status (a simulator, whose
+    // app launchd starts) says itself when the app was closed.
+    if (ending != null && ending.closed) {
+      _logger.info({
+        'message': 'app_closed',
+        'text': '${ending.account} Application finished.',
+        'device': device.name,
+      });
+      _markTerminated();
+      return;
+    }
+
+    final reason =
+        ending?.account ??
+        (code != null
+            ? 'The app on ${device.name} stopped: the process the tool '
+                  'follows for it exited with code $code.'
+            : 'Lost the connection to the app on ${device.name}: '
+                  '${vmClient?.goneReason ?? 'its process ended'}.');
+    _death = reason;
+    _markTerminated();
+    onDied?.call(reason);
+  }
+
+  bool _stopped = false;
+
   void _markTerminated() {
     if (!_terminated.isCompleted) _terminated.complete();
+    // A command waiting for a frame that a dead app will never paint would
+    // wait for good; the wait has no deadline of its own.
+    stopWaitingForFirstFrame();
   }
 
   /// Replace the running app process with a freshly launched one.
@@ -388,7 +535,7 @@ Future<ReloadResult> recompileAndReload({
   apply: (result) => reloadStrategy.applyReload(result, sessions),
 );
 
-/// Full recompile and hot restart all devices.
+/// Compile the whole program and hot restart all devices.
 ///
 /// `reset` + `recompile`, never a second `compile` — the same pairing
 /// `FrontendServerCompiler.compileFull` uses for a native restart, and the one
@@ -483,8 +630,33 @@ Future<ReloadResult> _compileAndApply({
   );
 }
 
-/// Report the result of a reload **nobody requested** — a keypress, or an edit
-/// the watcher picked up.
+/// Where a session's human-facing reports go.
+///
+/// In `--machine` mode stdout IS the JSON-RPC stream, so a line written there
+/// lands in the middle of what an editor is parsing; the report goes to the
+/// log instead. `report` as well as `text`: the JSON log format strips `text`
+/// as human-only, which would otherwise leave every one of these records in
+/// machine mode with no payload at all.
+void Function(String message) sessionReportLog(MachineProtocol protocol) =>
+    protocol.enabled
+    ? (msg) => _logger.info({
+        'message': 'session_report',
+        'text': msg,
+        'report': msg,
+      })
+    : (msg) => stdout.writeln(msg);
+
+/// The machine-readable half of [reportReloadCommand]'s report. A no-op
+/// outside `--machine` mode, like every other event.
+void announceReloadResult(
+  MachineProtocol protocol,
+  Map<String, dynamic> params,
+) => protocol.sendEvent('app.reloadResult', params);
+
+/// Report the result of a reload **nobody requested** — a keypress, an edit
+/// the watcher picked up, or a VM service client such as DevTools calling the
+/// `reloadSources` this tool registers (that client has its answer, but the
+/// terminal and a `--machine` client do not).
 ///
 /// The HTTP control channel hands this map back to its caller; the interactive
 /// session has no caller to hand it to, so it reports here instead. Pressing
@@ -656,24 +828,12 @@ Future<void> runInteractiveSession({
   void Function(bool lineMode)? setLineMode,
   Future<void>? shutdownSignal,
 }) async {
-  // In `--machine` mode stdout IS the JSON-RPC stream, so a human-facing line
-  // written there lands in the middle of what an editor is parsing. The
-  log ??= protocol.enabled
-      // `report` as well as `text`: the JSON log format strips `text` as
-      // human-only, which would otherwise leave every one of these records in
-      // machine mode with no payload at all — a line that says only that
-      // something was reported.
-      ? (msg) => _logger.info({
-          'message': 'session_report',
-          'text': msg,
-          'report': msg,
-        })
-      : (msg) => stdout.writeln(msg);
+  log ??= sessionReportLog(protocol);
 
   // The machine-readable half of the same report. A no-op outside `--machine`
   // mode, like every other event — the terminal reader has [log].
   void announce(Map<String, dynamic> params) =>
-      protocol.sendEvent('app.reloadResult', params);
+      announceReloadResult(protocol, params);
 
   // Launch DevTools once each session can serve it. Native is ready
   // immediately; web resolves when the browser connects, so this is wired as a
@@ -706,7 +866,11 @@ Future<void> runInteractiveSession({
                   'URL; this one did not.',
                 );
               }
-              final devtools = await _launchDevTools(dartExecutable, dds.uri!);
+              final devtools = await _launchDevTools(
+                dartExecutable,
+                dds.uri!,
+                dtdUri: session.dtdUri,
+              );
               session.devToolsProcess = devtools.process;
               if (devtools.serverUrl == null) return;
               url = devToolsConnectUri(
@@ -921,7 +1085,7 @@ Future<void> runInteractiveSession({
         if (hotReloadUnavailable == null) log('Performing hot restart...');
         reportReloadCommand(
           'Hot restart',
-          await commandRunner.run('app.restart', {}),
+          await commandRunner.run('app.restart', {'fullRestart': true}),
           log,
           method: 'app.restart',
           announce: announce,
@@ -1101,14 +1265,20 @@ Uri devToolsConnectUri(String serverUrl, Uri vmServiceWsUri) =>
 /// rather than spawning a bare `dart` keeps the DevTools we launch tied to the
 /// SDK the app was built with, and fails loudly when the toolchain is missing
 /// instead of picking up whatever happens to be on `PATH`.
+///
+/// [dtdUri] is the Dart Tooling Daemon the app is registered with. Without it
+/// the DevTools server starts a DTD of its own, which knows nothing of the app.
 Future<({Process process, String? serverUrl})> _launchDevTools(
   String dartExecutable,
-  Uri vmServiceUri,
-) async {
-  final process = await Process.start(
-    dartExecutable,
-    ['devtools', '--no-launch-browser', '--vm-uri=$vmServiceUri'],
-  );
+  Uri vmServiceUri, {
+  Uri? dtdUri,
+}) async {
+  final process = await Process.start(dartExecutable, [
+    'devtools',
+    '--no-launch-browser',
+    '--vm-uri=$vmServiceUri',
+    if (dtdUri != null) '--dtd-uri=$dtdUri',
+  ]);
 
   final completer = Completer<String?>();
   Timer? timeout;

@@ -1,0 +1,4 @@
+name: fx_licence_dart
+version: 1.0.0
+environment:
+  sdk: ^3.13.0

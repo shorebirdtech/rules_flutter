@@ -1,0 +1,21 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin", "flutter_plugin_platform")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "unused_deps_plugin",
+)
+
+flutter_plugin_platform(
+    name = "web",
+    platform = "web",
+    plugin_class = "UnusedDepsPlugin",
+)
+
+# Registered by the app, never imported by the library that brings it in.
+flutter_plugin(
+    name = "plugin",
+    srcs = ["lib/plugin.dart"],
+    package = ":pubspec-metadata",
+    platforms = [":web"],
+    visibility = ["//flutter/tests/unused_deps_fixture:__pkg__"],
+)

@@ -17,7 +17,8 @@ def compile_and_link_runner(
         extra_defines = [],
         additional_srcs = [],
         system_include_dirs = [],
-        additional_inputs = []):
+        additional_inputs = [],
+        linking_contexts = []):
     """Compile C++ sources and link into an executable using cc_common.
 
     Uses Bazel's hermetic CC toolchain for both compilation and linking.
@@ -36,10 +37,12 @@ def compile_and_link_runner(
         engine_include_dir: Directory string for engine headers (-I path).
         extra_compile_flags: Additional compiler flags.
         extra_link_flags: Additional linker flags (e.g., -Wl,-rpath).
-        extra_defines: Local defines (e.g., GTK_APP_ID, NDEBUG).
+        extra_defines: Local defines (e.g., APPLICATION_ID, NDEBUG).
         additional_srcs: Additional source files to compile (e.g., native registrant).
         system_include_dirs: System include directories passed to cc_common.compile(system_includes=...).
         additional_inputs: Additional input files (e.g., sysroot files).
+        linking_contexts: Further `CcInfo` linking contexts to link with (e.g.,
+            compiled Windows resources).
 
     Returns:
         The executable File produced by cc_common.link().
@@ -115,7 +118,7 @@ def compile_and_link_runner(
         cc_toolchain = cc_toolchain,
         name = name,
         compilation_outputs = compilation_outputs,
-        linking_contexts = [engine_linking_context],
+        linking_contexts = [engine_linking_context] + linking_contexts,
         user_link_flags = extra_link_flags,
         output_type = "executable",
         additional_inputs = depset(additional_inputs),

@@ -69,4 +69,37 @@ void main() {
       expect(native, contains('-DA=1'));
     });
   });
+
+  group('trackWidgetCreation', () {
+    // The build's kernel records where each widget was created only if every
+    // library in it was compiled with the transform; the resident compiler
+    // recompiles the changed ones on each reload and restart, so it has to
+    // apply the same one.
+
+    test('is passed when the app was built with it', () {
+      expect(
+        NativeCompilerConfig(
+          patchedSdkRoot: '/patched',
+          trackWidgetCreation: true,
+        ).extraFlags,
+        contains('--track-widget-creation'),
+      );
+    });
+
+    test('is not passed otherwise', () {
+      expect(
+        NativeCompilerConfig(patchedSdkRoot: '/patched').extraFlags,
+        isNot(contains('--track-widget-creation')),
+      );
+    });
+  });
+
+  test('passes no --native-assets: the app ships its manifest', () {
+    // The engine reads `flutter_assets/NativeAssetsManifest.json` at startup
+    // and keeps it across a hot restart, as `flutter run` relies on.
+    expect(
+      NativeCompilerConfig(patchedSdkRoot: '/patched').extraFlags,
+      isNot(contains('--native-assets')),
+    );
+  });
 }

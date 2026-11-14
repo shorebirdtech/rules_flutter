@@ -1,0 +1,139 @@
+load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_test")
+load("@rules_flutter//flutter:integration_test.bzl", "flutter_web_integration_test")
+load("@rules_flutter//flutter:ios.bzl", "IOS_MINIMUM_OS_VERSION", "flutter_ios_app", "flutter_ios_app_framework_gen", "flutter_ios_simulator_build")
+load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
+load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
+
+exports_files(["pubspec.lock"])
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "custom_engine",
+)
+
+flutter_application(
+    name = "app_flutter",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+# Built with the release by default; with a stand-in checkout's engine and
+# framework under --@rules_flutter//flutter:sdk=local (see MODULE.bazel).
+flutter_macos_app(
+    name = "app",
+    app_name = "Custom Engine",
+    application = ":app_flutter",
+    bundle_id = "com.example.customengine",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# The same program for iOS and Android. A simulator app is a debug build; the
+# device framework is the AOT release one, built without the provisioning an
+# installable device app needs.
+flutter_application(
+    name = "ios_flutter",
+    main = "lib/main.dart",
+    minimum_os_version = IOS_MINIMUM_OS_VERSION,
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_ios_app(
+    name = "ios_app",
+    application = ":ios_flutter",
+    bundle_id = "com.example.customengine",
+    tags = ["manual"],
+)
+
+flutter_ios_simulator_build(
+    name = "ios_simulator",
+    testonly = True,
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":ios_app"],
+)
+
+flutter_ios_app_framework_gen(
+    name = "ios_framework",
+    application = ":ios_flutter",
+    tags = ["manual"],
+)
+
+apple_release_build(
+    name = "ios_device_framework",
+    compilation_mode = "opt",
+    ios_device = True,
+    tags = ["manual"],
+    targets = [":ios_framework"],
+)
+
+flutter_application(
+    name = "android_flutter",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_android_app(
+    name = "android_app",
+    application = ":android_flutter",
+    application_id = "com.example.customengine",
+)
+
+# A Linux bundle, cross-compiled from the Mac: build it with
+# `--platforms=@rules_flutter//flutter/platforms:linux_x64 -c dbg` (no AOT
+# compiler cross-compiles between desktop OSes).
+flutter_linux_app(
+    name = "linux_app",
+    application = ":app_flutter",
+    application_id = "com.example.custom_engine.linux_app",
+    tags = ["manual"],
+)
+
+# A Windows bundle, built on a Windows machine whose checkout's `host_<mode>` out
+# dirs hold the embedder and the gen_snapshot. The scan for the snapshot hash
+# reads `flutter_windows.dll` in the AOT modes.
+flutter_windows_app(
+    name = "windows_app",
+    application = ":app_flutter",
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
+# The web bundle, and the render check that runs it in the pinned headless
+# Chrome. Built with the release by default, with the stand-in checkout's web
+# SDK under --@rules_flutter//flutter:sdk=local.
+flutter_web_app(
+    name = "web_app",
+    app_name = "Custom Engine",
+    application = ":app_flutter",
+    tags = ["manual"],
+)
+
+flutter_web_integration_test(
+    name = "web_render_test",
+    src = "integration_test/render_test.dart",
+    application = ":app_flutter",
+    tags = ["manual"],
+    deps = [
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+    ],
+)
+
+# A widget test, run by the flutter_tester of the selected SDK, with its modules
+# compiled against that SDK's platform kernel.
+flutter_test(
+    name = "widget_test",
+    srcs = ["lib/main.dart"],
+    main = "test/widget_test.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)

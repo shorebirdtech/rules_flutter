@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dds/dds.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/command_runner.dart';
 import 'package:flutter_bazel_dev_tool/compiler_config.dart';
@@ -386,6 +387,7 @@ void main() {
       timeout: Timeout(Duration(seconds: 10)),
       () async {
         final dispatched = <String>[];
+        Map<String, dynamic>? restartParams;
         final commandRunner = CommandRunner()
           ..register('app.hotReload', (params) async {
             dispatched.add('app.hotReload');
@@ -393,6 +395,7 @@ void main() {
           })
           ..register('app.restart', (params) async {
             dispatched.add('app.restart');
+            restartParams = params;
             return {'error': '`--no-hot` was passed'};
           });
 
@@ -429,6 +432,11 @@ void main() {
           reason:
               'swallowing the key leaves the user with no answer at all; '
               'the handler is where the reason lives',
+        );
+        expect(
+          restartParams,
+          {'fullRestart': true},
+          reason: 'R is a restart, which app.restart only is when asked',
         );
         expect(
           logs,
@@ -1044,6 +1052,27 @@ void main() {
         reason: 'the app must be stopped even when the DDS will not go',
       );
     });
+
+    test('a step that fails still lets the app be stopped, and the failure '
+        'is still reported', () async {
+      // What outlives the tool when the app is skipped is a browser and its
+      // profile directory, or an app on a device.
+      final process = FakeProcess();
+      final session = DeviceSession(
+        device: MacOSDevice(),
+        appInstance: AppInstance(process: process),
+        vmClient: null,
+        appId: 'app-1',
+        dds: _FailingDds(),
+      );
+
+      await expectLater(
+        session.shutdown(MachineProtocol(enabled: false, output: BufferSink())),
+        throwsStateError,
+      );
+
+      expect(process.signals, contains(ProcessSignal.sigterm));
+    });
   });
 
   /// What the watcher does with an edit it cannot map.
@@ -1064,7 +1093,7 @@ void main() {
           return {'message': 'Hot reload successful'};
         });
 
-      final fake = _FakeDirectoryWatcher('/root');
+      final fake = FakeDirectoryWatcher('/root');
       final watcher = SourceWatcher(
         root: '/root',
         debounce: const Duration(milliseconds: 5),
@@ -1242,17 +1271,41 @@ void main() {
       fake.callServiceExtensionGate!.complete();
     });
 
+    // A first frame that never lands is not a verdict the tool reaches: the app
+    // may be on a loaded host, minutes from painting. The wait goes on, says so
+    // as it goes, and ends with the run, with a reason.
     test(
-      'an app that never paints settles with a reason, not silence',
+      'an app that never paints is waited for, with a warning as it waits, '
+      'until the run ends',
       () async {
         final sink = BufferSink();
         final protocol = MachineProtocol(enabled: true, output: sink);
-        final session = sessionOn(
-          _ImpatientDevice(),
-          await connected(newFake()),
+        final fake = newFake()..callServiceExtensionGate = Completer<void>();
+        final session = sessionOn(MacOSDevice(), await connected(fake));
+
+        final async = FakeAsync();
+        final waiting = async.run(
+          (_) => track(session.waitUntilDrivable(protocol)),
+        );
+        async.elapse(const Duration(minutes: 3));
+        async.flushMicrotasks();
+
+        expect(session.drivable.isSettled, isFalse);
+        expect(waiting.done, isFalse);
+        expect(
+          [
+            for (final p in progressFrom(sink))
+              if ('${p['message']}'.startsWith('Still waiting')) p,
+          ],
+          hasLength(greaterThanOrEqualTo(2)),
+          reason: 'the wait has to say it is still going',
         );
 
-        await session.waitUntilDrivable(protocol);
+        session.stopWaitingForFirstFrame();
+        for (var i = 0; i < 5; i++) {
+          await pumpEventQueue();
+          async.flushMicrotasks();
+        }
 
         expect(session.drivable.isSettled, isTrue);
         expect(session.drivable.isReady, isFalse);
@@ -1267,6 +1320,7 @@ void main() {
           reason:
               'a progress that starts and never finishes is a stuck spinner',
         );
+        fake.callServiceExtensionGate!.complete();
       },
     );
 
@@ -1293,35 +1347,18 @@ void main() {
   });
 }
 
-/// A [DirectoryWatcher] whose events a test decides.
-class _FakeDirectoryWatcher implements DirectoryWatcher {
-  @override
-  final String path;
-
-  final StreamController<WatchEvent> _events =
-      StreamController<WatchEvent>.broadcast();
-
-  _FakeDirectoryWatcher(this.path);
-
-  void emit(WatchEvent event) => _events.add(event);
-
-  @override
-  Stream<WatchEvent> get events => _events.stream;
-
-  @override
-  Future<void> get ready async {}
-
-  @override
-  bool get isReady => true;
-
-  @override
-  String get directory => path;
-}
-
 /// A DDS whose `shutdown()` never completes.
 ///
 /// It closes its socket to the app's VM service on the way out
 /// (`dds_impl.dart:311`), and that peer is not ours to trust.
+class _FailingDds implements DartDevelopmentService {
+  @override
+  Future<void> shutdown() => throw StateError('the DDS would not shut down');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _HangingDds implements DartDevelopmentService {
   @override
   Future<void> shutdown() => Completer<void>().future;
@@ -1409,10 +1446,4 @@ class _TrackingDevice extends Device {
   Future<void> stop(AppInstance instance) async {
     onStop();
   }
-}
-
-/// A device whose budget for the app's first frame is short enough to test.
-class _ImpatientDevice extends MacOSDevice {
-  @override
-  Duration get applyTimeout => const Duration(milliseconds: 100);
 }

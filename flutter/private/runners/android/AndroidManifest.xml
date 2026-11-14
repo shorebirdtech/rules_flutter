@@ -7,6 +7,7 @@
     <application
         android:label="APP_NAME"
         android:name="android.app.Application"
+        android:extractNativeLibs="false"
         android:hardwareAccelerated="true">
         <activity
             android:name="io.flutter.embedding.android.FlutterActivity"

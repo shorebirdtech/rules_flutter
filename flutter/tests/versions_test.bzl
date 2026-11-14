@@ -11,11 +11,11 @@ load(
     "ios_engine_artifact_path",
 )
 load("//flutter/private:engine_helpers.bzl", "const_finder_attr")
-load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "flutter_has_const_finder", "flutter_version_at_least")
+load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_SDK_EXACT_PINS", "FLUTTER_SDK_PACKAGES", "FLUTTER_VERSIONS", "flutter_has_const_finder", "flutter_version_at_least")
 
 def _latest_version_first_test_impl(ctx):
     env = unittest.begin(ctx)
-    asserts.equals(env, "3.41.2", FLUTTER_VERSIONS.keys()[0])
+    asserts.equals(env, "3.47.2", FLUTTER_VERSIONS.keys()[0])
     return unittest.end(env)
 
 def _engine_revision_format_test_impl(ctx):
@@ -108,7 +108,7 @@ def _downloaded_artifact_paths():
             paths.append(desktop_engine_artifact_path(os, arch, mode))
     for mode in modes:
         paths.append(ios_engine_artifact_path(mode))
-    for android_arch in ["arm64", "x64"]:
+    for android_arch in ["arm", "arm64", "x64"]:
         for mode in modes:
             paths.append(android_engine_artifact_path(android_arch, mode))
         for mode in ["profile", "release"]:
@@ -155,6 +155,29 @@ def _checksums_are_sha256_test_impl(ctx):
             )
     return unittest.end(env)
 
+def _sdk_pins_recorded_for_all_versions_test_impl(ctx):
+    # The guard that keeps a lock from moving a package past an SDK package's
+    # exact pin reads the pins of the default toolchain's version; one without
+    # an entry fails the extension.
+    env = unittest.begin(ctx)
+    asserts.equals(env, sorted(FLUTTER_VERSIONS.keys()), sorted(FLUTTER_SDK_EXACT_PINS.keys()), "FLUTTER_SDK_EXACT_PINS has an entry for every Flutter version")
+    for version, pins in FLUTTER_SDK_EXACT_PINS.items():
+        for package, pinned in pins.items():
+            asserts.true(env, len(pinned) > 0, "{} pins nothing in {}".format(package, version))
+            asserts.false(env, "flutter_tools" == package, "flutter_tools is the tool, not an SDK package a lock lists")
+    return unittest.end(env)
+
+def _sdk_packages_recorded_for_all_versions_test_impl(ctx):
+    # A Flutter SDK package of a lock is fetched only if the release's entry
+    # lists it, so a version without one could fetch none of them.
+    env = unittest.begin(ctx)
+    asserts.equals(env, sorted(FLUTTER_VERSIONS.keys()), sorted(FLUTTER_SDK_PACKAGES.keys()), "FLUTTER_SDK_PACKAGES has an entry for every Flutter version")
+    for version, packages in FLUTTER_SDK_PACKAGES.items():
+        asserts.equals(env, sorted(packages), packages, "FLUTTER_SDK_PACKAGES[{}] is sorted".format(version))
+        for package in ["flutter_test", "integration_test"]:
+            asserts.true(env, package in packages, "FLUTTER_SDK_PACKAGES[{}] lacks {}".format(version, package))
+    return unittest.end(env)
+
 def _version_at_least_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.true(env, flutter_version_at_least("3.50.0", 3, 50))
@@ -175,14 +198,16 @@ def _const_finder_gate_test_impl(ctx):
     return unittest.end(env)
 
 _t0_test = unittest.make(_latest_version_first_test_impl)
-_t7_test = unittest.make(_version_at_least_test_impl)
-_t8_test = unittest.make(_const_finder_gate_test_impl)
 _t1_test = unittest.make(_engine_revision_format_test_impl)
 _t2_test = unittest.make(_checksums_exist_for_all_versions_test_impl)
 _t3_test = unittest.make(_checksums_have_key_artifacts_test_impl)
 _t4_test = unittest.make(_checksums_are_sha256_test_impl)
 _t5_test = unittest.make(_source_sha256_recorded_for_all_versions_test_impl)
 _t6_test = unittest.make(_every_download_is_checksummed_test_impl)
+_t7_test = unittest.make(_sdk_pins_recorded_for_all_versions_test_impl)
+_t8_test = unittest.make(_sdk_packages_recorded_for_all_versions_test_impl)
+_t9_test = unittest.make(_version_at_least_test_impl)
+_t10_test = unittest.make(_const_finder_gate_test_impl)
 
 def versions_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test, _t9_test, _t10_test)

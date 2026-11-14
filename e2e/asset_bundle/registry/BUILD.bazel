@@ -1,0 +1,6 @@
+# The source of the packages `pub_registry` serves. Each `<name>/<version>/`
+# directory below is one package as pub.dev would ship it.
+exports_files([
+    "MARKER",
+    "fx_extra/1.0.0/THIRD_PARTY.txt",
+])

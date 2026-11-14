@@ -1,31 +1,43 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("//flutter:defs.bzl", "flutter_library", "flutter_plugin")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_library", "flutter_plugin", "flutter_plugin_platform")
 load("//flutter/tests:dart_resources_test.bzl", "dart_in_resources_fails_test", "resources_probe")
+
+# One package; each target below is a separate subject of a test.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "resources_fixture",
+)
 
 # A library whose lib/ holds a Dart source, a YAML file, and a shader. The
 # shader is deliberately listed on BOTH channels: `resources` says it is part
 # of the package's lib/ tree (package:-URI addressable, staged wherever the
-# whole package is), `pkg_shaders` says it is compiled and bundled into
+# whole package is), `shaders` says it is compiled and bundled into
 # flutter_assets. The two have different destinations, so a lib/ shader is
 # legitimately both — this fixture pins that coexistence.
 flutter_library(
     name = "resources_library",
-    package_name = "resources_fixture",
     srcs = ["lib/fixture.dart"],
-    pkg_shaders = {"lib/glow.frag": "lib/glow.frag"},
+    package = ":pubspec-metadata",
     resources = [
         "lib/data.yaml",
         "lib/glow.frag",
     ],
+    shaders = ["lib/glow.frag"],
     # The path-mapping test compiles this library's shader.
     visibility = ["//flutter/tests:__pkg__"],
 )
 
+flutter_plugin_platform(
+    name = "web",
+    platform = "web",
+    plugin_class = "FixturePlugin",
+)
+
 flutter_plugin(
     name = "resources_plugin",
-    package_name = "resources_plugin",
     srcs = ["lib/fixture.dart"],
-    plugin_platforms_json = '{"web":{"pluginClass":"FixturePlugin"}}',
+    package = ":pubspec-metadata",
+    platforms = [":web"],
     resources = ["lib/data.yaml"],
 )
 
@@ -56,17 +68,17 @@ build_test(
 # Mis-filed Dart source: refused, mirroring dart_library.
 flutter_library(
     name = "dart_in_resources_library",
-    package_name = "dart_in_resources",
     srcs = ["lib/fixture.dart"],
+    package = ":pubspec-metadata",
     resources = ["lib/fixture.dart"],
     tags = ["manual"],
 )
 
 flutter_plugin(
     name = "dart_in_resources_plugin",
-    package_name = "dart_in_resources_plugin",
     srcs = ["lib/fixture.dart"],
-    plugin_platforms_json = '{"web":{"pluginClass":"FixturePlugin"}}',
+    package = ":pubspec-metadata",
+    platforms = [":web"],
     resources = ["lib/fixture.dart"],
     tags = ["manual"],
 )

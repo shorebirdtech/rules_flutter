@@ -168,7 +168,7 @@ void main() {
     return lines;
   }
 
-  /// An edit a stat can see: a different size.
+  /// An edit of a different size.
   void editSource() => File(
     '$workspace/native/mul.c',
   ).writeAsStringSync('int mul() { return ${DateTime.now().microsecond}2; }');
@@ -299,6 +299,53 @@ void main() {
       expect(await patcher.patchIfMoved(), isA<NativePatchNotNeeded>());
       expect(builds, 0);
     });
+
+    // A native source that changed is patched, whatever its size and mtime say.
+    // A source can be rewritten to the same size in the same mtime tick (a
+    // coarse-timestamp filesystem, or a tool that keeps the old mtime: `cp -p`,
+    // `rsync -t`), which leaves size and mtime exactly as they were; the
+    // patcher compares content, so the edit is delivered either way.
+    final stampedAtSnapshot = <String, Future<void> Function()>{
+      'written just before the snapshot': () async {},
+      'stamped in the future': () async {
+        File('$workspace/native/mul.c').setLastModifiedSync(
+          DateTime.now().add(const Duration(minutes: 5)),
+        );
+        await patcher.rebaseline();
+      },
+    };
+
+    for (final MapEntry(key: stamping, value: stampIt)
+        in stampedAtSnapshot.entries) {
+      test('an edit that leaves size and mtime as they were is still patched '
+          '($stamping)', () async {
+        await stampIt();
+        builds = 0;
+        final source = File('$workspace/native/mul.c');
+        final stamp = source.statSync().modified;
+        final before = source.readAsStringSync();
+        // The same length, a different program.
+        source.writeAsStringSync(before.replaceFirst('return 1;', 'return 2;'));
+        expect(source.readAsStringSync(), isNot(before));
+        source.setLastModifiedSync(stamp);
+
+        expect(await patcher.patchIfMoved(), isA<NativePatched>());
+        expect(builds, 1);
+      });
+
+      test('an edit that leaves size and mtime as they were is seen by the '
+          'restart check too ($stamping)', () async {
+        await stampIt();
+        final source = File('$workspace/native/mul.c');
+        final stamp = source.statSync().modified;
+        source.writeAsStringSync(
+          source.readAsStringSync().replaceFirst('return 1;', 'return 2;'),
+        );
+        source.setLastModifiedSync(stamp);
+
+        expect(await patcher.sourcesMoved(), isTrue);
+      });
+    }
 
     test('with a source moved builds, patches and loads it', () async {
       editSource();

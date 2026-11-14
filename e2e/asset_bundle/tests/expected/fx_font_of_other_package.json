@@ -1,0 +1,11 @@
+{
+  "assets": {
+    "packages/fx_font_owner/fonts/Owner.ttf": {
+      "variants": [
+        {
+          "asset": "packages/fx_font_owner/fonts/Owner.ttf"
+        }
+      ]
+    }
+  }
+}

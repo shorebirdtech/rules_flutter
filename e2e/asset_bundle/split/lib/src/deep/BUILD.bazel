@@ -1,0 +1,14 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+
+# Part of the package rooted at `split/`, named `split` after that directory.
+# Its assets are keyed by their path from the package root, as the package's
+# pubspec would list them: a file beside this BUILD file and one outside it.
+flutter_library(
+    name = "deep",
+    srcs = ["deep.dart"],
+    assets = [
+        "d.txt",
+        "//split:assets/s.txt",
+    ],
+    visibility = ["//visibility:public"],
+)

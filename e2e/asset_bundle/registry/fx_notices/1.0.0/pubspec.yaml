@@ -1,0 +1,7 @@
+name: fx_notices
+version: 1.0.0
+environment:
+  sdk: ^3.13.0
+flutter:
+  assets:
+    - assets/a.txt

@@ -1,0 +1,34 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "int64_wasm_only",
+)
+
+# An app holding 64-bit integers in an `Int64List`, which only WebAssembly
+# supports: dart2js refuses the largest 64-bit literal at compile time and
+# throws on `Int64List` at runtime. It stands for any code that only works under
+# WebAssembly and has no JavaScript variant, and `js_fallback = False` makes
+# `compiler = "dart2wasm"` build it, because then nothing else compiles it.
+# (`//int64:int64_app` is the same program with a variant for each compiler,
+# which keeps the fallback.)
+flutter_application(
+    name = "app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_web_app(
+    name = "wasm_only_app",
+    app_name = "Int64List",
+    application = ":app",
+    js_fallback = False,
+)
+
+build_test(
+    name = "wasm_only_build_test",
+    targets = [":wasm_only_app"],
+)

@@ -1,0 +1,53 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("//flutter:windows.bzl", "flutter_windows_app")
+load("//flutter/tests:windows_resources_test.bzl", "windows_resources_test_suite", "windows_runner_title_test")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "windows_resources_fixture",
+)
+
+# The application's build number is the app's.
+flutter_application(
+    name = "app",
+    build_number = "9",
+    main = "//flutter/tests/windows_resources_fixture:main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+)
+
+# An app with no `windows/runner/`: the built-in runner's resource script,
+# naming the app. The build name is a `select()` whose `None` keeps the default;
+# the build number is set.
+flutter_windows_app(
+    name = "builtin",
+    app_name = "Built In",
+    application = ":app",
+    build_name = select({"//conditions:default": None}),
+    build_number = select({"//conditions:default": "9"}),
+    tags = ["manual"],
+)
+
+windows_resources_test_suite(
+    name = "builtin_resources_test",
+    defines = [
+        "FLUTTER_VERSION=\"1.0.0+9\"",
+        "FLUTTER_VERSION_MAJOR=1",
+        "FLUTTER_VERSION_MINOR=0",
+        "FLUTTER_VERSION_PATCH=0",
+        "FLUTTER_VERSION_BUILD=9",
+        "RUNNER_APP_NAME=\"Built In\"",
+    ],
+    inputs = [
+        "flutter/private/runners/windows/resource.h",
+        "flutter/private/runners/windows/resources/app_icon.ico",
+    ],
+    rc = "flutter/private/runners/windows/Runner.rc",
+    target = ":__builtin_resources",
+)
+
+windows_runner_title_test(
+    name = "builtin_title_test",
+    target = ":__builtin_runner",
+    title = "Built In",
+)

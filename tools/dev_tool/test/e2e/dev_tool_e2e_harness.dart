@@ -240,11 +240,45 @@ class DevToolProcess {
       timeout,
       onTimeout: () => throw StateError(
         'Timed out after ${timeout.inSeconds}s waiting for $what.\n'
+        '${_hostLoad()}\n'
         '${seen == null ? '' : '${seen()}\n'}'
         '${_lastLines('stderr', stderrLines)}'
         '${_lastLines('stdout (non-protocol)', nonProtocolStdoutLines)}',
       ),
     );
+  }
+
+  /// The host's load average against its core count, for a timeout message.
+  ///
+  /// A deadline in this suite is sized for a machine that can give the run's
+  /// processes CPU. On one that cannot, a compiler that is working reads like
+  /// one that is stuck: still runnable, a few seconds of CPU a minute, and its
+  /// answer minutes late. The dev tool's `frontend_server_still_working` lines
+  /// say it was working; this says why it was slow, so a timeout on a
+  /// saturated host is not taken for a hang in the change under test.
+  static String _hostLoad() {
+    final cores = Platform.numberOfProcessors;
+    String? averages;
+    try {
+      if (Platform.isMacOS) {
+        // `{ 3.12 2.95 2.80 }`
+        final out = Process.runSync('sysctl', ['-n', 'vm.loadavg']);
+        if (out.exitCode == 0) {
+          averages = (out.stdout as String)
+              .replaceAll(RegExp(r'[{}]'), '')
+              .trim();
+        }
+      } else if (Platform.isLinux) {
+        averages = File(
+          '/proc/loadavg',
+        ).readAsStringSync().split(' ').take(3).join(' ');
+      }
+    } on Object catch (e) {
+      return '  host load: could not be read ($e); $cores cores.';
+    }
+    if (averages == null)
+      return '  host load: not read on this OS; $cores cores.';
+    return '  host load averages (1/5/15 min): $averages, on $cores cores.';
   }
 
   static String _lastLines(String label, List<String> lines) => lines.isEmpty
@@ -632,6 +666,24 @@ class DevToolProcess {
     return json.decode(reply.body) as Map<String, dynamic>;
   }
 
+  /// The device's screens from the control channel's `/screens` endpoint:
+  /// `{id, name, type, width, height, active, primary}` each.
+  Future<List<Map<String, dynamic>>> httpScreens(
+    String appId, {
+    Duration timeout = _controlChannelTimeout,
+  }) async {
+    final reply = await _controlRequest(
+      _controlUrl('/sessions/$appId/screens'),
+      what: 'the screens of $appId',
+      timeout: timeout,
+    );
+    if (reply.statusCode != HttpStatus.ok) {
+      throw StateError('screens failed (${reply.statusCode}): ${reply.body}');
+    }
+    final body = json.decode(reply.body) as Map<String, dynamic>;
+    return [for (final s in body['screens'] as List) s as Map<String, dynamic>];
+  }
+
   /// Extract the HTTP control channel info from structured JSON stderr lines.
   ///
   /// Parses the `http_control_channel` structured log entry emitted by the
@@ -980,7 +1032,7 @@ class DevToolProcess {
   /// Asks for `daemon.shutdown` first and waits for the run to end on its own,
   /// because
   /// the tool's own teardown is the only thing that stops what it launched: a
-  /// SIGTERM'd dev tool leaves its Chrome (and the `flutter_chrome_*` profile
+  /// SIGKILL'd dev tool leaves its Chrome (and the `flutter_chrome_*` profile
   /// behind it) running. That matters beyond tidiness — an orphaned browser
   /// from a test that failed mid-run is a live window a *later* run can be
   /// screenshotted against, which is how a stale app produces a false pass.
@@ -1383,36 +1435,16 @@ Future<BoundedRun> runBounded(
   );
 }
 
-/// Resolve `adb` the same way the dev tool itself does: $ANDROID_HOME
-/// → macOS default → PATH. Inlined to keep the harness independent of
-/// the dev tool's internal device library.
+/// The `adb` the Android cases ask which device to run on: the Android SDK's
+/// for this host, which `bazel run //tools/dev_tool:e2e` names in
+/// `FLUTTER_BAZEL_E2E_ADB`. The dev tool drives the device with its workspace's
+/// own; either reaches the one adb server, so what this one lists is what the
+/// tool sees.
 ///
-/// Note the fallthrough: an `$ANDROID_HOME` that holds no `platform-tools/adb`
-/// does not mean "no adb", it means "keep looking", and on a machine with an
-/// SDK in the default location the search then finds a perfectly working one.
-/// That is why every message built from a probe names the path that actually
-/// answered rather than the variable that was set.
-String resolveAdb(Map<String, String> environment) {
-  final androidHome = environment['ANDROID_HOME'];
-  if (androidHome != null) {
-    final adb = p.join(androidHome, 'platform-tools', 'adb');
-    if (File(adb).existsSync()) return adb;
-  }
-  if (Platform.isMacOS) {
-    final home = environment['HOME'];
-    if (home != null) {
-      final adb = p.join(
-        home,
-        'Library',
-        'Android',
-        'sdk',
-        'platform-tools',
-        'adb',
-      );
-      if (File(adb).existsSync()) return adb;
-    }
-  }
-  return 'adb';
+/// Null when the variable is unset: the suite was not started by its target.
+String? resolveAdb(Map<String, String> environment) {
+  final adb = environment['FLUTTER_BAZEL_E2E_ADB'];
+  return adb == null || adb.isEmpty ? null : adb;
 }
 
 /// One line of `adb devices` output: a serial and the state adb reports it in.
@@ -1439,47 +1471,49 @@ class AdbEntry {
 
 /// What asking the host which Android device to run against actually found.
 ///
-/// Three outcomes, because there are three, and collapsing them is the defect
-/// this type exists to prevent. `adb devices` returning an empty list is an
-/// environmental fact about a machine with nothing plugged in, and skipping is
-/// the right answer. `adb` failing to run, exiting non-zero, printing
-/// something unrecognisable, or listing only devices in a state nothing can be
-/// run against are all *tooling* failures — the detector is broken, or the
-/// device needs attention — and reporting those as "no device attached" hides
-/// a fixable problem behind an unfixable-looking one.
+/// Three outcomes, because there are three, and collapsing them hides which
+/// fix is needed. `adb devices` returning an empty list means a machine with
+/// nothing plugged in: boot an emulator. `adb` failing to run, exiting
+/// non-zero, printing something unrecognisable, or listing only devices in a
+/// state nothing can be run against are *tooling* failures — the detector is
+/// broken, or the device needs attention — and reporting those as "no device
+/// attached" hides a fixable problem behind an unfixable-looking one.
 ///
-/// Collapsed into a nullable string, a missing `adb`, a broken `adb`, an
-/// unauthorized phone and an empty bench all produce the same skip and the same
-/// green run: a whole platform's worth of e2e coverage can stop running and
-/// nothing says so.
+/// None of them skips: [require] fails the test for every outcome but a found
+/// device, so a platform's coverage cannot stop running unnoticed. A bench
+/// without Android deselects it with `--exclude-tags android`.
 sealed class AndroidDeviceProbe {
   const AndroidDeviceProbe();
 
   /// Ask [environment]'s host which device an Android e2e run should use.
   ///
-  /// [adbPath] overrides the [resolveAdb] search; tests inject a stub through
-  /// it, since `Platform.environment` cannot be mutated in-process and a
-  /// developer's shell profile must not be able to change a unit test's
-  /// verdict.
+  /// [adbPath] overrides [resolveAdb]; tests inject a stub through it, since
+  /// `Platform.environment` cannot be mutated in-process and a developer's
+  /// shell must not be able to change a unit test's verdict.
   static AndroidDeviceProbe detect({
     Map<String, String>? environment,
     String? adbPath,
   }) {
     final env = environment ?? Platform.environment;
     final adb = adbPath ?? resolveAdb(env);
+    if (adb == null) {
+      return const AndroidProbeFailed(
+        'FLUTTER_BAZEL_E2E_ADB is unset, so there is no adb to ask: run the '
+        'suite with `bazel run //tools/dev_tool:e2e`, which sets it to the '
+        "Android SDK's.",
+      );
+    }
 
     final ProcessResult result;
     try {
       result = Process.runSync(adb, ['devices']);
     } on Object catch (error) {
       // Deliberately caught rather than propagated: `main()` evaluates this at
-      // load time to build a group's `skip:`, and a throw there takes down the
+      // load time, and a throw there takes down the
       // macOS, iOS and web groups declared in the same file. The error is
       // carried as data instead of discarded.
       return AndroidProbeFailed(
-        'could not run `$adb devices`: $error\n'
-        'Set \$ANDROID_HOME to an SDK whose platform-tools/adb runs, or put '
-        'adb on PATH.',
+        'could not run `$adb devices`: $error',
       );
     }
 
@@ -1530,7 +1564,7 @@ sealed class AndroidDeviceProbe {
 
     // An explicit $ANDROID_SERIAL is the user naming a device, which makes
     // every other attached device irrelevant and its own absence an error.
-    // Silently running something else — or silently skipping — would be
+    // Silently running something else would be
     // ignoring an instruction that was given.
     final requested = env['ANDROID_SERIAL'];
     if (requested != null && requested.isNotEmpty) {
@@ -1578,15 +1612,21 @@ sealed class AndroidDeviceProbe {
     );
   }
 
-  /// Why the `Android e2e` group should be skipped, or null when it must run.
+  /// The device a test runs against, or a failure saying what to do.
   ///
-  /// Only [NoAndroidDevice] answers this. A failed probe deliberately does not
-  /// skip: the group runs, and the test fails carrying [AndroidProbeFailed]'s
-  /// explanation, because a broken detector reporting itself as an absent
-  /// device is exactly what must not happen quietly.
-  String? get skipReason => switch (this) {
-    NoAndroidDevice(:final reason) => reason,
-    _ => null,
+  /// Every outcome but [AndroidDeviceFound] fails the test: a run that was
+  /// asked for Android and had no device must not report green. A bench that
+  /// has no Android setup opts out with `--exclude-tags android`, which drops
+  /// the Android cases before they run, so this is never reached for them.
+  AndroidDeviceFound require() => switch (this) {
+    final AndroidDeviceFound found => found,
+    NoAndroidDevice(:final reason) => throw TestFailure(
+      '$reason\nOr exclude the Android cases: --exclude-tags android.',
+    ),
+    AndroidProbeFailed(:final reason) => throw TestFailure(
+      'Android device detection failed: $reason\n'
+      'Or exclude the Android cases: --exclude-tags android.',
+    ),
   };
 }
 
@@ -1594,22 +1634,21 @@ sealed class AndroidDeviceProbe {
 final class AndroidDeviceFound extends AndroidDeviceProbe {
   final String serial;
 
-  /// The `adb` that answered — not the one `$ANDROID_HOME` pointed at, which
-  /// [resolveAdb] may have fallen through. Reported so a run says which SDK it
-  /// actually used.
+  /// The `adb` that answered. Reported so a run says which SDK it used.
   final String adb;
 
   const AndroidDeviceFound(this.serial, this.adb);
 }
 
-/// `adb` ran, was understood, and listed nothing. The legitimate skip.
+/// `adb` ran, was understood, and listed nothing. An empty bench: the run
+/// fails, naming how to provide a device or how to exclude Android.
 final class NoAndroidDevice extends AndroidDeviceProbe {
   final String reason;
   const NoAndroidDevice(this.reason);
 }
 
 /// `adb` could not be run, failed, could not be understood, or listed only
-/// devices nothing can run on. A tooling failure, never a skip.
+/// devices nothing can run on. A tooling failure.
 final class AndroidProbeFailed extends AndroidDeviceProbe {
   final String reason;
   const AndroidProbeFailed(this.reason);
@@ -1626,7 +1665,7 @@ final class AndroidProbeFailed extends AndroidDeviceProbe {
 ///
 /// Only the envelope every capture path here emits is supported — 8-bit,
 /// non-interlaced, colour type 2 (RGB) or 6 (RGBA), which covers `adb
-/// screencap`, the emulator console, `simctl io screenshot`, CDP and the
+/// screencap`, the emulator console, `devicectl device capture screenshot`, CDP and the
 /// desktop helpers. Anything else throws naming what it found rather than being
 /// waved through: a decoder that quietly handles half of what it is given is
 /// the byte threshold again in a new costume.

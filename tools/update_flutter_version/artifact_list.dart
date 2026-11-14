@@ -86,6 +86,14 @@ const artifactSections = [
     ],
   ),
   ArtifactSection(
+    "macOS add-to-app (Flutter's signed FlutterMacOS.xcframework per mode)",
+    [
+      'darwin-x64/framework.zip',
+      'darwin-x64-profile/framework.zip',
+      'darwin-x64-release/framework.zip',
+    ],
+  ),
+  ArtifactSection(
     'iOS engine (Flutter.xcframework — release and profile for device, debug for simulator)',
     [
       'ios-release/artifacts.zip',
@@ -96,10 +104,13 @@ const artifactSections = [
   ArtifactSection(
     'Android engine (flutter.jar — release and profile for AOT, debug for JIT)',
     [
+      'android-arm-release/artifacts.zip',
       'android-arm64-release/artifacts.zip',
       'android-x64-release/artifacts.zip',
+      'android-arm-profile/artifacts.zip',
       'android-arm64-profile/artifacts.zip',
       'android-x64-profile/artifacts.zip',
+      'android-arm/artifacts.zip',
       'android-arm64/artifacts.zip',
       'android-x64/artifacts.zip',
     ],
@@ -107,6 +118,9 @@ const artifactSections = [
   // The gen_snapshot that runs on the build host and targets Android. Flutter
   // publishes x64 hosts only; arm64 hosts run the x64 binary.
   ArtifactSection('Android cross-compile gen_snapshot (release)', [
+    'android-arm-release/darwin-x64.zip',
+    'android-arm-release/linux-x64.zip',
+    'android-arm-release/windows-x64.zip',
     'android-arm64-release/darwin-x64.zip',
     'android-arm64-release/linux-x64.zip',
     'android-arm64-release/windows-x64.zip',
@@ -115,6 +129,9 @@ const artifactSections = [
     'android-x64-release/windows-x64.zip',
   ]),
   ArtifactSection('Android cross-compile gen_snapshot (profile)', [
+    'android-arm-profile/darwin-x64.zip',
+    'android-arm-profile/linux-x64.zip',
+    'android-arm-profile/windows-x64.zip',
     'android-arm64-profile/darwin-x64.zip',
     'android-arm64-profile/linux-x64.zip',
     'android-arm64-profile/windows-x64.zip',

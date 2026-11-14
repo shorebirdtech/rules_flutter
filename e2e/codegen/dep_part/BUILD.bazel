@@ -1,33 +1,42 @@
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_codegen")
-load("@rules_flutter//flutter:defs.bzl", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
 
 # Dependency package mixing a hand-written source with a generated `part`.
 # Consumed by //:app — exercises per-dependency source assembly and the dev
 # tool resolving a generated part in a NON-app package.
 
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "dep_part",
+)
+
 dart_codegen(
     name = "settings_gen",
-    package_name = "dep_part",
     src = "lib/settings.dart",
-    generator = "tools/settings_generator.dart",
+    generator = ":settings_generator",
     output_suffixes = [".g.dart"],
+    package = ":pubspec-metadata",
 )
 
 flutter_library(
     name = "dep_part",
-    package_name = "dep_part",
     srcs = [
         "lib/settings.dart",
         ":settings_gen",
     ],
+    package = ":pubspec-metadata",
     visibility = ["//visibility:public"],
 )
 
-# Analysis handle for the generator script — see the comment on the same
-# pattern in //:BUILD.bazel. `generator` takes a bare `.dart` file label, so
-# no target owns the script until a `dart_binary` over the same source does,
-# and the analysis aspect checks only files a target owns. Not wired into `:settings_gen`.
+# The generator: a Builder behind rules_dart's shim runner, over the shim and
+# pub packages the workspace's `//tools` package resolves.
 dart_binary(
     name = "settings_generator",
+    srcs = ["tools/settings_generator.dart"],
+    code_assets_from_packages = False,
     main = "tools/settings_generator.dart",
+    deps = [
+        "//tools:builder_shim",
+        "@generator_pub_deps//:build",
+    ],
 )

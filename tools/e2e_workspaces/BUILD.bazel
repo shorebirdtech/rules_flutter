@@ -1,0 +1,17 @@
+load("@rules_dart//dart:defs.bzl", "dart_test")
+
+# Finds the Bazel workspaces under e2e/. Shared by //tools/maven_locks and
+# //tools/ci_matrix, which import the file by relative path so that
+# `dart run` works on it without Bazel too.
+exports_files(
+    ["e2e_workspaces.dart"],
+    visibility = ["//tools:__subpackages__"],
+)
+
+dart_test(
+    name = "e2e_workspaces_test",
+    size = "small",
+    srcs = ["e2e_workspaces.dart"],
+    main = "test/e2e_workspaces_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)

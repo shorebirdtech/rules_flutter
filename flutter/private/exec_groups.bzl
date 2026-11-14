@@ -10,6 +10,12 @@ local machine otherwise. The group also resolves rules_dart's exec-tools
 toolchain, so it lands only on a host that has both SDKs, and rules_dart's
 helpers can read their SDK from the same group.
 
+So an action in `PORTABLE` needs no host tool but the Flutter and Dart ones:
+no `run_shell` (`cp`, `od`, `cat`) and no genrule, which a Windows worker
+lacks. It copies and checks files with a Dart
+script (`assemble_directory.dart`, `validate_android_elf.dart`) run by the
+toolchain's `dart`, or with a Starlark action.
+
 Actions that need the target's `gen_snapshot` (AOT) or engine stay in the
 rule's default group, whose `//flutter:toolchain_type` matches the target.
 Actions that run Xcode's tools name no group of ours: they run through

@@ -1,0 +1,21 @@
+# A `path` package with no Bazel build: an FFI plugin (no plugin class) whose
+# Swift package product is `.dynamic` and whose C function carries no
+# `used` attribute, so only the product's linking keeps it in a release app.
+name: ffi_dynamic_plugin
+description: An FFI plugin with a dynamic Swift package product.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        ffiPlugin: true

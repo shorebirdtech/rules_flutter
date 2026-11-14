@@ -260,6 +260,20 @@ void main() {
       );
     });
 
+    // Upstream's event: how a `--machine` client learns where the Dart
+    // Tooling Daemon is, which a DTD client such as the Dart MCP server needs.
+    test('appDtd carries the uri', () {
+      final protocol = MachineProtocol(enabled: true, output: sink);
+      protocol.appDtd('myapp', Uri.parse('ws://127.0.0.1:4242/t0k3n='));
+      final decoded =
+          (json.decode(sink.lines.first) as List).first as Map<String, dynamic>;
+      expect(decoded['event'], 'app.dtd');
+      expect(decoded['params'], {
+        'appId': 'myapp',
+        'uri': 'ws://127.0.0.1:4242/t0k3n=',
+      });
+    });
+
     // The address a web run serves at reaches a client only here. The browser
     // this tool launches carries its own scratch profile and may be headless,
     // so someone wanting to open the page themselves has nowhere else to read

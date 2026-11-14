@@ -1,0 +1,3 @@
+# The release archive //tools/consumer_archive extracts is a module, not a
+# package of this workspace.
+ignore_directories(["rules_flutter"])

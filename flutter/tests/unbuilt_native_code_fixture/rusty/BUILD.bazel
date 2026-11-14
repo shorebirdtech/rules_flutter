@@ -1,0 +1,50 @@
+"""Plugin `rusty`, whose macOS and Linux libraries its own build makes, as `flutter_pub_package` writes one."""
+
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_plugin", "flutter_plugin_platform")
+load("//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+flutter_unbuilt_plugin_library(
+    name = "rusty_apple_macos",
+    message = "package:rusty 1.0 builds native code for macOS with cargokit",
+    tags = ["manual"],
+)
+
+flutter_unbuilt_plugin_library(
+    name = "rusty_linux",
+    message = "package:rusty 1.0 builds native code for Linux with cargokit",
+    tags = ["manual"],
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "rusty",
+)
+
+flutter_plugin(
+    name = "rusty",
+    srcs = ["lib/rusty.dart"],
+    package = ":pubspec-metadata",
+    platforms = [
+        ":plugin_linux",
+        ":plugin_macos",
+    ],
+    tags = ["manual"],
+)
+
+flutter_plugin_platform(
+    name = "plugin_linux",
+    ffi_plugin = True,
+    lib = ":rusty_linux",
+    platform = "linux",
+    tags = ["manual"],
+)
+
+flutter_plugin_platform(
+    name = "plugin_macos",
+    ffi_plugin = True,
+    lib = ":rusty_apple_macos",
+    platform = "macos",
+    tags = ["manual"],
+)

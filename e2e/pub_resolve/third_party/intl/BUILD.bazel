@@ -1,0 +1,18 @@
+load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "intl",
+)
+
+# Replaces the lock's hosted `intl` for the whole graph:
+# `flutter_pub.from_lock(resolve = ...)` in MODULE.bazel maps it here, so
+# `@deps//:intl` is this library, the hosted archive is never fetched, and the
+# greeting is built with this one.
+dart_library(
+    name = "intl",
+    srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
+    visibility = ["//visibility:public"],
+)

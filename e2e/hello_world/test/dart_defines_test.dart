@@ -1,6 +1,6 @@
 /// Verifies Dart environment defines reach the compiled test:
 /// - the target's `defines` attr,
-/// - the `--@rules_flutter//flutter:extra_dart_defines` flag (set in this
+/// - the `--@rules_dart//dart:extra_dart_defines` flag (set in this
 ///   workspace's .bazelrc),
 /// - flag-beats-attr precedence on a key collision.
 library;

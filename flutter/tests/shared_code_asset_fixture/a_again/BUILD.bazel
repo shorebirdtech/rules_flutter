@@ -1,11 +1,17 @@
 load("@rules_dart//dart:defs.bzl", "dart_library")
+load("//flutter:defs.bzl", "dart_package_metadata")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "shared_a",
+    code_assets = ["//flutter/tests/shared_code_asset_fixture:a_combined_asset"],
+)
 
 # Package `shared_a` again, as a second pub hub supplies it, claiming the same id
 # with a different library.
 dart_library(
     name = "a_again",
-    package_name = "shared_a",
     srcs = ["lib/a_again.dart"],
-    code_assets = ["//flutter/tests/shared_code_asset_fixture:a_combined_asset"],
+    package = ":pubspec-metadata",
     visibility = ["//flutter/tests:__subpackages__"],
 )

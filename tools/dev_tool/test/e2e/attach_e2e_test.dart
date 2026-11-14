@@ -1,4 +1,4 @@
-@Tags(['e2e'])
+@Tags(['e2e', 'macos'])
 library;
 
 import 'dart:async';
@@ -143,7 +143,7 @@ void main() {
         final app = await launchAppDirectly(
           ws,
           buildArgs: const [
-            '--@rules_flutter//flutter:extra_dart_defines=E2E_MESSAGE=defines,live',
+            '--@rules_dart//dart:extra_dart_defines=E2E_MESSAGE=defines,live',
           ],
         );
         final dt = await attachDevTool(
@@ -250,7 +250,7 @@ void main() {
         final restart = await dt.sendCommand(
           1,
           'app.restart',
-          params: {'appId': appId},
+          params: {'appId': appId, 'fullRestart': true},
         );
         expect(
           restart['error'],

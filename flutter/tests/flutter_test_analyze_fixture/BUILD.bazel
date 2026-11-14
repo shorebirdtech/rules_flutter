@@ -1,5 +1,10 @@
 load("@rules_dart//dart:defs.bzl", "dart_analysis_test")
-load("//flutter:defs.bzl", "flutter_test")
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_test")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "flutter_test_analyze_fixture",
+)
 
 # The guard on `flutter_test`'s `DartAnalyzableInfo`, in the root workspace so
 # `bazel test //...` covers it. Test sources are the files this whole provider
@@ -23,10 +28,10 @@ load("//flutter:defs.bzl", "flutter_test")
 # not `package:test_api`, so the generated bootstrap would not compile. And a
 # `flutter_test` cannot build in a non-root Bazel package at all: `package_for`
 # (rules_dart `dart/private/source_set.bzl`) claims every path under a
-# non-empty `lib_root`, so the generated bootstrap joins this package's group,
+# non-empty `package_root`, so the generated bootstrap joins this package's group,
 # triggers source assembly into a `.pkgsrcs` directory, and its relative import
 # of `main` stops resolving. Every `flutter_test` that runs today sits at a
-# workspace root, where `lib_root` is `""` and only `lib/…` is claimed.
+# workspace root, where `package_root` is `""` and only `lib/…` is claimed.
 #
 # Only the analysis closure is exercised: `:analysis_test` reaches this target
 # through the analysis aspect, which reads the provider, so nothing is built
@@ -36,9 +41,9 @@ load("//flutter:defs.bzl", "flutter_test")
 # instead; see `//:test_api_only_test` there.
 flutter_test(
     name = "fixture_test",
-    package_name = "flutter_test_analyze_fixture",
     srcs = ["lib/counter.dart"],
     main = "test/counter_test.dart",
+    package = ":pubspec-metadata",
     tags = ["manual"],
     deps = ["//flutter/tests/flutter_test_analyze_fixture/fake_test_api"],
 )

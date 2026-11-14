@@ -1,0 +1,92 @@
+diff --git a/src/tools/java/com/google/devtools/build/android/AaptCommandBuilder.java b/src/tools/java/com/google/devtools/build/android/AaptCommandBuilder.java
+index 4565ebc..62a80f7 100644
+--- a/src/tools/java/com/google/devtools/build/android/AaptCommandBuilder.java
++++ b/src/tools/java/com/google/devtools/build/android/AaptCommandBuilder.java
+@@ -34,6 +34,14 @@ import javax.annotation.Nullable;
+  */
+ public class AaptCommandBuilder {
+ 
++  /**
++   * The most characters of values {@link #addParameterableRepeated} puts on the command line
++   * before it writes them to a file instead. Windows limits a whole command line to 32,767
++   * characters, and a flag repeated for each of a hundred libraries' paths reaches that well
++   * before 200 values.
++   */
++  private static final int MAX_INLINE_PARAMETER_CHARS = 8192;
++
+   private final ImmutableList.Builder<String> flags = new ImmutableList.Builder<>();
+   private Revision buildToolsVersion;
+   private VariantTypeImpl variantType;
+@@ -129,20 +137,22 @@ public class AaptCommandBuilder {
+    * null} values will be skipped. If the collection is empty, nothing will be added. The values
+    * will be added in the source collection's iteration order. See {@link
+    * AaptCommandBuilder#addRepeated(String, Collection)} for more information. If the collection
+-   * exceed 200 items, the values will be written to a file and passed as &lt;flag&gt @&lt;file&gt;.
++   * exceed 200 items or {@link #MAX_INLINE_PARAMETER_CHARS} characters, the values will be written
++   * to a file and passed as &lt;flag&gt @&lt;file&gt;.
+    */
+   @CanIgnoreReturnValue
+   public AaptCommandBuilder addParameterableRepeated(
+       final String flag, Collection<String> values, Path workingDirectory) throws IOException {
+     Preconditions.checkNotNull(flag);
+     Preconditions.checkNotNull(workingDirectory);
+-    if (values.size() > 200) {
++    String joined = values.stream().collect(Collectors.joining(" "));
++    if (values.size() > 200 || joined.length() > MAX_INLINE_PARAMETER_CHARS) {
+       add(
+           flag,
+           "@"
+               + Files.write(
+                   Files.createDirectories(workingDirectory).resolve("params" + flag),
+-                  ImmutableList.of(values.stream().collect(Collectors.joining(" ")))));
++                  ImmutableList.of(joined)));
+     } else {
+       addRepeated(flag, values);
+     }
+diff --git a/src/tools/java/com/google/devtools/build/android/aapt2/ResourceLinker.java b/src/tools/java/com/google/devtools/build/android/aapt2/ResourceLinker.java
+index dd300e3..812a5ae 100644
+--- a/src/tools/java/com/google/devtools/build/android/aapt2/ResourceLinker.java
++++ b/src/tools/java/com/google/devtools/build/android/aapt2/ResourceLinker.java
+@@ -66,6 +66,7 @@ import java.io.BufferedWriter;
+ import java.io.ByteArrayOutputStream;
+ import java.io.IOException;
+ import java.io.InputStream;
++import java.io.UncheckedIOException;
+ import java.nio.ByteBuffer;
+ import java.nio.channels.Channels;
+ import java.nio.channels.FileChannel;
+@@ -449,6 +450,26 @@ public class ResourceLinker {
+     return fileName.substring(0, lastIndex).concat(".").concat(newExtension);
+   }
+ 
++  /**
++   * Whether aapt2 would package a file from the assets directory {@code dir}. A library without
++   * assets gets a directory holding only a placeholder whose name ends in '~' (Bazel cannot declare
++   * an empty directory as an output), and aapt2 ignores such names. Leaving those directories out
++   * keeps the aapt2 command line short: it is limited to 32,767 characters on Windows, and cannot
++   * take -A from a file.
++   */
++  private static boolean hasAssetsToPackage(String dir) {
++    Path path = Path.of(dir);
++    if (!Files.isDirectory(path)) {
++      return true; // aapt2 reports it.
++    }
++    try (Stream<Path> files = Files.walk(path)) {
++      return files.anyMatch(
++          file -> Files.isRegularFile(file) && !file.getFileName().toString().endsWith("~"));
++    } catch (IOException e) {
++      throw new UncheckedIOException(e);
++    }
++  }
++
+   private Path linkApk(
+       CompiledResources compiled,
+       Path rTxt,
+@@ -500,6 +521,7 @@ public class ResourceLinker {
+                         assetDirs.stream().map(Path::toString),
+                         compiled.getAssetsStrings().stream())
+                     .distinct() // Deduplicate assets dirs, there are often duplicates.
++                    .filter(ResourceLinker::hasAssetsToPackage)
+                     .collect(toList()))
+             .addRepeated("-I", StaticLibrary.toPathStrings(linkAgainst))
+             .addRepeated("-I", StaticLibrary.toPathStrings(resourceApks))

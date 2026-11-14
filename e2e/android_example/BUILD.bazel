@@ -1,5 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_android//android:rules.bzl", "android_binary")
+load("@rules_android//android:rules.bzl", "aar_import", "android_binary")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_code_asset", "dart_test")
@@ -9,12 +11,15 @@ load(
     "flutter_android_bundle",
     "flutter_android_engine",
     "flutter_android_manifest_gen",
+    "flutter_android_release",
     "flutter_android_runner_lib_gen",
 )
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_library")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
-load("@rules_java//java:java_import.bzl", "java_import")
+load("@rules_flutter//tools/e2e_testing:version_build.bzl", "version_build")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+load(":aar.bzl", "android_archive")
+load(":version_test.bzl", "manifest_values_version_refused_test")
 
 exports_files(["pubspec.lock"])
 
@@ -22,8 +27,8 @@ exports_files(["pubspec.lock"])
 # Shared: Flutter application (Dart compilation)
 # =============================================================================
 
-# Native FFI library. flutter_android_bundle's platform transition compiles
-# it with the Android NDK toolchain for the bundle's ABI.
+# Native FFI library. It is built with the Android NDK toolchain for the
+# platform the APK is built for, once for each of --@rules_android//flags:android_platforms.
 cc_library(
     name = "add_cc",
     srcs = ["native/add.c"],
@@ -62,7 +67,7 @@ cc_library(
     dart_code_asset(
         name = "count_%s_%s" % (package, which),
         asset_id = "package:count_%s/count_%s" % (package, package),
-        shared_library = library,
+        file = library,
         visibility = ["//count_%s:__pkg__" % package],
     )
     for package in [
@@ -78,22 +83,71 @@ cc_library(
     ]
 ]
 
+# A prebuilt library: a plain file with no `CcSharedLibraryInfo`, as a vendored
+# `.so` or an `http_file` is. Taken from a `cc_shared_library` so it is built
+# for each ABI the APK carries, with no checked-in binary per ABI. It reaches
+# the app as the code asset of `//prebuilt_asset`; see `lib/negate_ffi.dart`.
+cc_library(
+    name = "negate_cc",
+    srcs = ["native/negate.c"],
+)
+
+cc_shared_library(
+    name = "negate",
+    deps = [":negate_cc"],
+)
+
+filegroup(
+    name = "negate_prebuilt",
+    srcs = [":negate"],
+    output_group = "main_shared_library_output",
+)
+
+dart_code_asset(
+    name = "negate_asset",
+    asset_id = "package:prebuilt_asset/negate",
+    file = ":negate_prebuilt",
+    visibility = ["//prebuilt_asset:__pkg__"],
+)
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "android_example",
+)
+
 flutter_application(
     name = "app_flutter",
-    package_name = "android_example",
     srcs = glob(["lib/**/*.dart"]),
+    # Not the default: every app built over this has it as its version, and
+    # `:second_app` states it too, which has to agree.
+    build_name = "2.3.4",
+    build_number = "42",
     code_assets = [
         ":count_a_combined",
         ":count_b_combined",
     ],
     main = "lib/main.dart",
     native_deps = [":add"],
+    package = ":pubspec-metadata",
     deps = [
         "//count_a",
         "//count_b",
+        "//prebuilt_asset",
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
     ],
+)
+
+# An application only a test may depend on, as one an integration test builds for
+# itself is. Everything `flutter_android_app` declares around it has to be
+# `testonly` too: `:testonly_app_build_test`.
+flutter_application(
+    name = "testonly_flutter",
+    testonly = True,
+    srcs = glob(["lib/**/*.dart"]),
+    main = "lib/testonly_main.dart",
+    package = ":pubspec-metadata",
+    deps = ["@deps//:flutter"],
 )
 
 # =============================================================================
@@ -107,8 +161,9 @@ flutter_application(
 
 flutter_android_app(
     name = "app",
-    package_name = "com.example.flutterapp",
+    app_bundle = "app_bundle",
     application = ":app_flutter",
+    application_id = "com.example.flutterapp",
     # `flutter create` grants INTERNET in the debug variant manifest only —
     # a *debugging* requirement for the Dart VM service, not the app's
     # network grant. A release APK built from the untouched scaffold cannot
@@ -120,19 +175,145 @@ flutter_android_app(
     permissions = ["android.permission.INTERNET"],
 )
 
+# `bazel run :app_release` signs `:app_bundle` and the APK of the same build
+# with the upload key android/key.properties names: release mode, every
+# default ABI (armeabi-v7a, arm64-v8a and x86_64). `:verify_android_release_test` signs with a key it makes itself.
+flutter_android_release(
+    name = "app_release",
+    app_bundle = ":app_bundle",
+)
+
 # The same flutter create runner shipped under a second application id. Its
 # MainActivity.kt declares `package com.example.flutterapp`, and the manifest
 # names `.MainActivity`, which Android resolves against the code's package
-# (Gradle's `namespace`), not the application id. Checked by
+# (Gradle's `namespace`), not the application id. Its version, from
+# `build_name` and `build_number`, is not the default. Both checked by
 # :verify_android_second_app_test.
 flutter_android_app(
     name = "second_app",
-    package_name = "com.example.flutterapp.second",
     application = ":app_flutter",
+    application_id = "com.example.flutterapp.second",
+    build_name = "2.3.4",
+    build_number = 42,
+    # A placeholder of the app's own passes through to `android_binary`
+    # beside the ones the macro sets.
+    manifest_values = {"appLabelSuffix": " (second)"},
     namespace = "com.example.flutterapp",
     # The VM service's grant, which this workspace has no debug variant
     # manifest to give, so `flutter_bazel run` can debug it.
     permissions = ["android.permission.INTERNET"],
+)
+
+# A `versionCode` in `manifest_values` that is not the application's 42: the
+# APK and `appBuildNumber` would disagree, so analysis fails.
+flutter_android_app(
+    name = "manifest_values_version_app",
+    application = ":app_flutter",
+    application_id = "com.example.flutterapp.version",
+    manifest_values = {"versionCode": "7"},
+    namespace = "com.example.flutterapp",
+)
+
+manifest_values_version_refused_test(
+    name = "manifest_values_version_refused_test",
+    target_under_test = ":manifest_values_version_app",
+)
+
+flutter_android_app(
+    name = "testonly_app",
+    testonly = True,
+    application = ":testonly_flutter",
+    application_id = "com.example.flutterapp.testonly",
+    namespace = "com.example.flutterapp",
+)
+
+# A native library the APK packages that is not the Flutter application's: a
+# `cc_library` listed directly on the `android_binary`, which links it into a
+# `lib<name>.so` of its own. `flutter_bazel run`'s restart has to notice an edit
+# to it and relaunch, as it does for the application's `native_deps`
+# (`android_restart_e2e_test`).
+cc_library(
+    name = "extra_native",
+    srcs = ["native/extra.c"],
+    hdrs = ["native/extra.h"],
+    alwayslink = True,
+)
+
+# A prebuilt shared library checked into the workspace (built from
+# native/prebuilt/prebuilt.c with the NDK's
+# `aarch64-linux-android30-clang -shared -fPIC -Wl,-soname,libprebuilt.so`), so
+# a source file, not a build output, is what the APK packages.
+cc_import(
+    name = "prebuilt_native",
+    shared_library = "native/prebuilt/libprebuilt.so",
+)
+
+# A prebuilt static archive (native/prebuilt/prebuilt_static.c, compiled with
+# the same compiler and archived with `llvm-ar rcsD`), which the APK links into
+# the binary's own library. `alwayslink` keeps it there though nothing calls it.
+# libprebuilt_static_next.a is the same source built with
+# -DPREBUILT_STATIC_VALUE=2, which no target uses: the e2e swaps it in.
+cc_import(
+    name = "prebuilt_static",
+    static_library = "native/prebuilt/libprebuilt_static.a",
+    alwayslink = True,
+)
+
+# A library an AAR carries, which the APK packages under `lib/<abi>/`. The AAR
+# is built here so that a test can edit the library's source.
+cc_binary(
+    name = "libaar_native.so",
+    srcs = ["native/aar_native.c"],
+    linkshared = True,
+)
+
+android_archive(
+    name = "aar_native_archive",
+    library = ":libaar_native.so",
+    package = "com.example.flutterapp.aarnative",
+)
+
+aar_import(
+    name = "aar_native",
+    aar = ":aar_native_archive",
+)
+
+flutter_android_manifest_gen(
+    name = "native_dep_manifest",
+    application_id = "com.example.flutterapp.nativedep",
+)
+
+flutter_android_runner_lib_gen(
+    name = "native_dep_runner_lib",
+    engine = ":app_engine",
+    namespace = "com.example.flutterapp.nativedep",
+)
+
+# The Tier 2 runner with `extra_native` listed on the `android_binary` itself,
+# which the Tier 1 macro cannot take (its `deps` also feed the plugin
+# registrant, which needs Java). Launchable under `-c dbg`: the generated
+# manifest grants the VM service its INTERNET.
+android_binary(
+    name = "native_dep_app",
+    assets = [":app_flutter_assets"],
+    assets_dir = "assets",
+    custom_package = "com.example.flutterapp.nativedep",
+    manifest = ":native_dep_manifest",
+    # Stored uncompressed, as the manifest's android:extractNativeLibs="false"
+    # requires: Android refuses to install the APK otherwise.
+    nocompress_extensions = [".so"],
+    tags = ["manual"],
+    deps = [
+        ":aar_native",
+        ":app_engine",
+        # libapp.so and the FFI library, for each ABI android_binary builds
+        # the bundle for.
+        ":app_android",
+        ":extra_native",
+        ":native_dep_runner_lib",
+        ":prebuilt_native",
+        ":prebuilt_static",
+    ],
 )
 
 # =============================================================================
@@ -144,20 +325,6 @@ flutter_android_bundle(
     application = ":app_flutter",
 )
 
-# Extract native_libs.jar for composable wiring.
-filegroup(
-    name = "app_native_libs_jar",
-    srcs = [":app_android"],
-    output_group = "native_libs_jar",
-    tags = ["manual"],
-)
-
-java_import(
-    name = "app_native_libs",
-    jars = [":app_native_libs_jar"],
-    tags = ["manual"],
-)
-
 flutter_android_engine(
     name = "app_engine",
 )
@@ -166,7 +333,7 @@ flutter_android_engine(
 filegroup(
     name = "app_flutter_assets",
     srcs = [":app_android"],
-    output_group = "mobile_install",
+    output_group = "flutter_assets",
     tags = ["manual"],
 )
 
@@ -174,19 +341,19 @@ filegroup(
 # Approach 2: Bazel-generated runner (flutter_android_runner_lib_gen)
 #
 # For users without `flutter create` output. Uses template manifest and
-# Kotlin MainActivity from rules_flutter. Only needs package_name.
+# Kotlin MainActivity from rules_flutter. Only needs a namespace.
 # =============================================================================
 
 flutter_android_manifest_gen(
     name = "bazel_runner_manifest",
-    package_name = "com.example.flutterapp.bazelrunner",
     app_name = "Flutter App (Bazel Runner)",
+    application_id = "com.example.flutterapp.bazelrunner",
 )
 
 flutter_android_runner_lib_gen(
     name = "bazel_runner_lib",
-    package_name = "com.example.flutterapp.bazelrunner",
     engine = ":app_engine",
+    namespace = "com.example.flutterapp.bazelrunner",
 )
 
 android_binary(
@@ -195,10 +362,15 @@ android_binary(
     assets_dir = "assets",
     custom_package = "com.example.flutterapp.bazelrunner",
     manifest = ":bazel_runner_manifest",
+    # Stored uncompressed, as the manifest's android:extractNativeLibs="false"
+    # requires: Android refuses to install the APK otherwise.
+    nocompress_extensions = [".so"],
     tags = ["manual"],
     deps = [
         ":app_engine",
-        ":app_native_libs",
+        # libapp.so and the FFI library, for each ABI android_binary builds
+        # the bundle for.
+        ":app_android",
         ":bazel_runner_lib",
     ],
 )
@@ -219,8 +391,8 @@ kt_android_library(
     tags = ["manual"],
     deps = [
         ":app_engine",
-        "@rules_android_maven//:androidx_annotation_annotation",
-        "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
+        "@rules_flutter_maven//:androidx_annotation_annotation",
+        "@rules_flutter_maven//:androidx_lifecycle_lifecycle_common",
     ],
 )
 
@@ -233,21 +405,21 @@ android_binary(
     tags = ["manual"],
     deps = [
         ":app_engine",
-        ":app_native_libs",
+        # libapp.so and the FFI library, for each ABI android_binary builds
+        # the bundle for.
+        ":app_android",
         ":custom_runner_lib",
     ],
 )
 
 # =============================================================================
-# Web build — same Dart code, no native deps.
+# Web build — the same application. Its native libraries are not built for
+# the web, and its Dart reaches them behind conditional imports.
 # =============================================================================
 
 flutter_web_bundle(
     name = "app_web",
-    package_name = "android_example",
-    srcs = glob(["lib/**/*.dart"]),
-    main = "lib/main.dart",
-    deps = ["@deps//:flutter"],
+    application = ":app_flutter",
 )
 
 # =============================================================================
@@ -257,6 +429,14 @@ flutter_web_bundle(
 build_test(
     name = "android_app_build_test",
     targets = [":app"],
+)
+
+# `flutter_android_app` takes `testonly = True`: every target it declares is
+# `testonly` too, so none is a non-test target depending on a `testonly`
+# application.
+build_test(
+    name = "testonly_app_build_test",
+    targets = [":testonly_app"],
 )
 
 build_test(
@@ -276,16 +456,43 @@ build_test(
 
 dart_test(
     name = "verify_android_apk_test",
-    srcs = ["test/apk_contents.dart"],
-    data = [":app"],
+    data = [
+        ":app",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_apk_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 dart_test(
     name = "verify_android_second_app_test",
-    srcs = ["test/apk_contents.dart"],
-    data = [":second_app"],
+    data = [
+        ":second_app",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_second_app_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# `:second_app` built with `--@rules_flutter//flutter:build_number=123`, which
+# replaces the build number its application states and it repeats.
+version_build(
+    name = "second_app_build_number_123",
+    build_number = "123",
+    targets = [":second_app"],
+)
+
+dart_test(
+    name = "verify_android_build_number_test",
+    data = [
+        ":second_app_build_number_123",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/verify_android_build_number_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # Reads the permissions out of the compiled binary AndroidManifest.xml inside
@@ -295,19 +502,63 @@ dart_test(
 # debug variant overlay.
 dart_test(
     name = "verify_android_permissions_test",
-    srcs = ["test/apk_contents.dart"],
-    data = [":app"],
+    data = [
+        ":app",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
     main = "test/verify_android_permissions_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# Runs `:app_release` as `bazel run` would, with a keystore of its own, and
+# checks what it signs with the SDK's own tools. The bundle is built through
+# the rule's release transition, so this is a release build for both ABIs in a
+# plain `bazel test`.
+filegroup(
+    name = "app_release_config",
+    srcs = [":app_release"],
+    output_group = "android_release_config",
+)
+
+dart_test(
+    name = "verify_android_release_test",
+    data = [
+        ":app_release",
+        ":app_release_config",
+        "@androidsdk//:apksigner",
+        "@androidsdk//:zipalign",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {
+        "APKSIGNER_RUNFILE": "$(rlocationpath @androidsdk//:apksigner)",
+        "RELEASE_CONFIG_RUNFILE": "$(rlocationpath :app_release_config)",
+        "RELEASE_RUNFILE": "$(rlocationpath :app_release)",
+        "ZIPALIGN_RUNFILE": "$(rlocationpath @androidsdk//:zipalign)",
+        "ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)",
+    },
+    main = "test/verify_android_release_test.dart",
+    deps = [
+        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
+    ],
 )
 
 dart_test(
     name = "verify_android_app_test",
-    data = [":app"],
+    data = [
+        ":app",
+        "@androidsdk//:adb",
+    ],
+    # The `adb` of the Android SDK Bazel resolved, so the test needs nothing
+    # on `PATH`.
+    env = {"ADB_RUNFILE": "$(rlocationpath @androidsdk//:adb)"},
     main = "test/verify_android_app_test.dart",
     tags = [
         "exclusive",
         "manual",
     ],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # `manual`, so `bazel test //...` never gives it to the analysis aspect; this
@@ -340,8 +591,8 @@ dart_analysis_config(
 # the analyzer to stage.
 flutter_library(
     name = "app_lib",
-    package_name = "android_example",
     srcs = glob(["lib/**/*.dart"]),
+    package = ":pubspec-metadata",
     deps = [
         "@deps//:flutter",
     ],

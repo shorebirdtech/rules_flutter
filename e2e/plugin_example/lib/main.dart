@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show MethodChannel;
 import 'package:greeting_plugin/greeting_plugin.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 void main() {
@@ -70,6 +71,21 @@ class _HomeState extends State<_Home> {
       return canLaunch ? 'launch ok' : 'launch denied';
     });
 
+    // shared_preferences is federated and, on Android, declares Maven
+    // dependencies (androidx.datastore, androidx.preference) in its Gradle
+    // build: the case where those must reach the plugin's compile classpath
+    // from @rules_flutter_maven. A value unique to this run proves the read
+    // comes from this write, not from state an earlier run left behind.
+    final prefs = await _safe(() async {
+      final stored = DateTime.now().millisecondsSinceEpoch.toString();
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString('e2e_key', stored);
+      final read = preferences.getString('e2e_key');
+      return read == stored
+          ? 'roundtrip ok'
+          : 'mismatch wrote=$stored read=$read';
+    });
+
     // audio_session uses the SwiftPM-canonical Sources/<pkg>/include/<pkg>/
     // public-header layout with bare-basename `#import "AudioSessionPlugin.h"`,
     // exercising the include-path wiring in flutter_apple_plugin_library.
@@ -104,17 +120,19 @@ class _HomeState extends State<_Home> {
       documentsPath: documentsPath,
       tempPath: tempPath,
       launchOk: launchOk,
+      prefs: prefs,
       audioSession: audioSession,
       recordHasPermission: recordHasPermission,
     );
 
-    // Emit a single line so e2e tests (Playwright + the macOS verifier) can
+    // Emit a single line so e2e tests (the macOS verifier) can
     // assert on the resolved plugin outputs without needing semantics-tree
     // access.
     final summary =
         'plugin_example_results greeting=${GreetingPlugin.greeting} | '
         'appName=$appName | documentsPath=$documentsPath | '
         'tempPath=$tempPath | launchOk=$launchOk | '
+        'prefs=$prefs | '
         'audioSession=$audioSession | '
         'recordHasPermission=$recordHasPermission';
     developer.log(summary, name: 'plugin_example');
@@ -165,6 +183,7 @@ class _HomeState extends State<_Home> {
                 _Row(label: 'documentsPath', value: r.documentsPath),
                 _Row(label: 'tempPath', value: r.tempPath),
                 _Row(label: 'launchOk', value: r.launchOk),
+                _Row(label: 'prefs', value: r.prefs),
                 _Row(label: 'audioSession', value: r.audioSession),
                 _Row(
                   label: 'recordHasPermission',
@@ -207,6 +226,7 @@ class _PluginResults {
     required this.documentsPath,
     required this.tempPath,
     required this.launchOk,
+    required this.prefs,
     required this.audioSession,
     required this.recordHasPermission,
   });
@@ -215,6 +235,7 @@ class _PluginResults {
   final String documentsPath;
   final String tempPath;
   final String launchOk;
+  final String prefs;
   final String audioSession;
   final String recordHasPermission;
 }
@@ -238,8 +259,8 @@ class _Row extends StatelessWidget {
             ),
             TextSpan(
               text: value,
-              // data-testid-style attribute via semantics so playwright/web
-              // tests can locate this row by its label.
+              // `semanticsLabel` below lets a test locate this row by its
+              // label.
             ),
           ],
         ),

@@ -1,0 +1,23 @@
+load("//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+
+package(default_visibility = ["//flutter/tests:__pkg__"])
+
+# An app naming its licence, over a pure-Dart package and a Flutter one that
+# each name theirs (the Flutter one depends on the Dart one), and a third that
+# names none. Each package is a directory of its own.
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "notices_app",
+    license_file = "APP_LICENSE",
+)
+
+flutter_application(
+    name = "notices_app",
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    deps = [
+        "//flutter/tests/notices_fixture/bare:notices_bare",
+        "//flutter/tests/notices_fixture/flutter:notices_flutter",
+    ],
+)

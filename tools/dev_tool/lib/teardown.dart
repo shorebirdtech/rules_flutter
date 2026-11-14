@@ -60,10 +60,12 @@ Future<void> boundedTeardownStep(
 
 class Teardown {
   final List<Future<void> Function()> _disposers = [];
-  bool _hasRun = false;
+
+  /// The one teardown, once [run] has started it.
+  Future<void>? _run;
 
   /// Whether [run] has already happened.
-  bool get hasRun => _hasRun;
+  bool get hasRun => _run != null;
 
   /// Take ownership of [dispose], or run it now if teardown is already past.
   ///
@@ -71,11 +73,16 @@ class Teardown {
   /// gap between creating something and registering it is exactly the window
   /// this exists to close.
   Future<void> add(Future<void> Function() dispose) async {
-    if (_hasRun) return dispose();
+    if (hasRun) return dispose();
     _disposers.add(dispose);
   }
 
   /// Dispose everything registered, most recent first. Idempotent.
+  ///
+  /// A run is started from more than one place (a failure, the apps ending,
+  /// the command's own way out), so every call after the first waits for the
+  /// first to finish and shares its outcome: returning at once would let the
+  /// process exit with an app or a bazel command still being stopped.
   ///
   /// Every disposer runs, even after one throws. The list is cleared before
   /// the loop — a disposer registered during the teardown has to be disposed
@@ -89,8 +96,18 @@ class Teardown {
   /// caller that gets no exception is entitled to read that as "everything was
   /// released". The ones after it are reported here, because that is the only
   /// place they can be.
-  Future<void> run() async {
-    _hasRun = true;
+  Future<void> run() {
+    if (_run case final running?) return running;
+    // Marked as run before the first disposer is called: one that registers
+    // something synchronously must find it disposed at once, not appended to
+    // a list that has already been read.
+    final done = Completer<void>();
+    _run = done.future;
+    done.complete(_dispose());
+    return done.future;
+  }
+
+  Future<void> _dispose() async {
     final pending = _disposers.reversed.toList();
     _disposers.clear();
     Object? firstError;

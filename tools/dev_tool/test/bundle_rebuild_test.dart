@@ -42,4 +42,20 @@ void main() {
           'caller that asked first has already reported it',
     );
   });
+
+  // The asset refresh needs only to know the build succeeded; the native-libs
+  // check needs the files it listed. They are one build, and the second caller
+  // reads what the first one's build produced.
+  test('callers inside one command share what the build produced', () async {
+    var builds = 0;
+    final rebuild = BundleRebuild<List<String>>(() async {
+      builds++;
+      return ['libfoo.so'];
+    }, () => 3);
+
+    final first = await rebuild.run();
+    final second = await rebuild.run();
+    expect(second, same(first));
+    expect(builds, 1);
+  });
 }

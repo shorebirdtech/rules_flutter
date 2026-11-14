@@ -1,0 +1,14 @@
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_library")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "ext_assets",
+)
+
+flutter_library(
+    name = "ext_assets",
+    srcs = ["lib/ext_assets.dart"],
+    assets = glob(["assets/**"]),
+    package = ":pubspec-metadata",
+    visibility = ["//visibility:public"],
+)

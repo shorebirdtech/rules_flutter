@@ -6,6 +6,7 @@ import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'loopbacks.dart';
@@ -522,7 +523,7 @@ void main() {
 
     test('names the module whose metadata is not JSON', () {
       // Swallowed, this costs that module its library list and
-      // `$dartReloadModifiedModules` skips it — the edit reloads, the screen
+      // the DWDS client skips it — the edit reloads, the screen
       // does not change. DWDS then chokes on the same bytes with no module
       // named.
       final dir = tempDir();
@@ -705,7 +706,7 @@ void main() {
     // the same emptiness is quieter and no less wrong: a recompile only happens
     // once something is known to have changed, so nothing coming back means
     // the invalidated libraries never reached the compiler —
-    // `reloaded_sources.json` lists nothing, `$dartReloadModifiedModules`
+    // `reloaded_sources.json` lists nothing, the DWDS client
     // reloads nothing, and the reload reports success over an unchanged page.
     test('ends a reload whose recompile produced no modules', () {
       final dir = tempDir();
@@ -771,7 +772,6 @@ void main() {
           'main_module.bootstrap.js',
           'ddc_module_loader.js',
           'stack_trace_mapper.js',
-          'reloaded_sources.json',
         ]),
       );
 
@@ -985,7 +985,7 @@ void main() {
         () => serverWith(buildOutputDir: dir.path).start(),
         throwsDevToolException(
           allOf(
-            contains('${dir.path}/flutter.js'),
+            contains(p.join(dir.path, 'flutter.js')),
             contains('blank'),
           ),
         ),
@@ -2293,7 +2293,7 @@ void main() {
       final server = serverWith(
         workspaceRoot: dir.path,
         // `generate_dev_package_config` writes exactly this for a
-        // source-assembled package: `<filesystemScheme>:///<lib_root>`. The
+        // source-assembled package: `<filesystemScheme>:///<package_root>`. The
         // frontend_server resolves it via `--filesystem-root`; nothing that
         // wants a file path can.
         packageConfigPath: writeConfig(dir, 'org-dartlang-app:///').path,

@@ -1,0 +1,106 @@
+diff --git a/proto/compiler.bzl b/proto/compiler.bzl
+index 597e404c..3197b309 100644
+--- a/proto/compiler.bzl
++++ b/proto/compiler.bzl
+@@ -50,7 +50,7 @@ def _incompatible_toolchains_enabled():
+ 
+ def _find_toolchain(ctx, legacy_attr, toolchain_type):
+     if _incompatible_toolchains_enabled():
+-        toolchain = ctx.toolchains[toolchain_type]
++        toolchain = ctx.exec_groups[GO_PROTO_GEN_EXEC_GROUP].toolchains[toolchain_type]
+         if not toolchain:
+             fail("No toolchains registered for '%s'." % toolchain_type)
+         return toolchain.proto
+@@ -63,6 +63,17 @@ def _use_toolchain(toolchain_type):
+     else:
+         return []
+ 
++# The exec group that runs protoc for a go_proto_library. The compiler builds
++# protoc, the plugin and go-protoc for this group, and go_proto_library runs
++# the action in an identical one, so the action lands on the platform its
++# tools were built for. With the tools built for the compiler's default exec
++# group instead, its Go and C++ toolchains could pick a different platform
++# than the action's.
++GO_PROTO_GEN_EXEC_GROUP = "internal_use_only_go_proto_gen"
++
++def go_proto_gen_exec_group():
++    return exec_group(toolchains = _use_toolchain(_PROTO_TOOLCHAIN_TYPE))
++
+ def _if_legacy_toolchain(legacy_attr_dict):
+     if _incompatible_toolchains_enabled():
+         return {}
+@@ -173,7 +184,7 @@ def go_proto_compile(go, compiler, protos, imports, importpath):
+         progress_message = "Generating into %s" % go_srcs[0].dirname,
+         mnemonic = "GoProtocGen",
+         executable = compiler.internal.go_protoc,
+-        exec_group = "internal_use_only_go_proto_gen",
++        exec_group = GO_PROTO_GEN_EXEC_GROUP,
+         tools = [compiler.internal.protoc, compiler.internal.plugin],
+         arguments = [args],
+         env = go.env,
+@@ -256,12 +267,12 @@ _go_proto_compiler = go_rule(
+         "import_path_option": attr.bool(default = False),
+         "plugin": attr.label(
+             executable = True,
+-            cfg = "exec",
++            cfg = config.exec(GO_PROTO_GEN_EXEC_GROUP),
+             mandatory = True,
+         ),
+         "_go_protoc": attr.label(
+             executable = True,
+-            cfg = "exec",
++            cfg = config.exec(GO_PROTO_GEN_EXEC_GROUP),
+             default = "//go/tools/builders:go-protoc",
+         ),
+         "_go_context_data": attr.label(
+@@ -273,11 +284,13 @@ _go_proto_compiler = go_rule(
+             # already needs to apply the non_go_tool_transition. Flipping the
+             # two would be more idiomatic, but proto_toolchains.find_toolchain
+             # doesn't support split transitions.
+-            cfg = "exec",
++            cfg = config.exec(GO_PROTO_GEN_EXEC_GROUP),
+             default = "//proto/private:legacy_proto_toolchain",
+         ),
+     }),
+-    toolchains = _use_toolchain(_PROTO_TOOLCHAIN_TYPE),
++    exec_groups = {
++        GO_PROTO_GEN_EXEC_GROUP: go_proto_gen_exec_group(),
++    },
+ )
+ 
+ def go_proto_compiler(name, **kwargs):
+diff --git a/proto/def.bzl b/proto/def.bzl
+index b2ec01e1..bf9c79fe 100644
+--- a/proto/def.bzl
++++ b/proto/def.bzl
+@@ -44,7 +44,9 @@ load(
+ )
+ load(
+     "//proto:compiler.bzl",
++    "GO_PROTO_GEN_EXEC_GROUP",
+     "GoProtoCompiler",
++    "go_proto_gen_exec_group",
+     "proto_path",
+ )
+ 
+@@ -222,17 +224,10 @@ go_proto_library = go_rule(
+             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+         ),
+     },
+-    # go-protoc-bin is built via cfg = "exec" and lands on the first registered
+-    # exec platform, while the Go toolchain may have constraints on the exec
+-    # platform. Because of the possible differences in platform resolution,
+-    # this may end up with a go-protoc-bin that is incompatible with the
+-    # selected exec platform (when --incompatible_auto_exec_groups is unset).
+-    # Assign it an explicit exec group with no toolchain constraints so it
+-    # resolves to the same platform as the one resolved for the binary.
+-    # Note that this exec platform matching is still fragile; the proper fix
+-    # is to create proper toolchains for the protoc compiler.
++    # Runs protoc in the exec group the compilers build their tools for: see
++    # GO_PROTO_GEN_EXEC_GROUP.
+     exec_groups = {
+-        "internal_use_only_go_proto_gen": exec_group(),
++        GO_PROTO_GEN_EXEC_GROUP: go_proto_gen_exec_group(),
+     },
+ )
+ # go_proto_library is a rule that takes a proto_library (in the proto

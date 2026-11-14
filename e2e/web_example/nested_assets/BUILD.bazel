@@ -1,0 +1,38 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application")
+load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
+
+dart_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "nested_assets",
+    visibility = ["//visibility:public"],
+)
+
+# An app below the workspace root with an asset of its own, a library of its own
+# package with another, and a library, below the root too, with one of its own.
+# Their keys (`assets/message.txt`, `lib/widgets/banner.txt`,
+# `packages/ui_kit/assets/greeting.txt`) are paths in their packages, so the dev
+# loop has to be told where in the workspace the files are to notice an edit:
+# `asset_reload_e2e_test` edits each and expects the running page to show it.
+flutter_application(
+    name = "app",
+    assets = glob(["assets/**"]),
+    main = "lib/main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//nested_assets/lib/widgets",
+        "//nested_assets/ui_kit",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_web_app(
+    name = "nested_app",
+    app_name = "Nested assets",
+    application = ":app",
+)
+
+build_test(
+    name = "nested_assets_build_test",
+    targets = [":nested_app"],
+)
