@@ -165,6 +165,10 @@ jobs:
           - codegen
         os:
           - macos-latest
+        # Empty: the workspace's own pin. An axis, so that an `include` entry
+        # that sets it adds a job rather than merging into the matching one.
+        flutter:
+          - ""
         include:
           # Run hello_world on Linux for native Linux bundle testing.
           - workspace: hello_world
@@ -182,7 +186,7 @@ jobs:
           # l10n and goldens in one workspace.
           - workspace: codegen
             os: macos-latest
-            flutter: 3.50.0
+            flutter: "3.50.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # See the note above `env` for why only hello_world saves. The output base
@@ -215,6 +219,9 @@ jobs:
         working-directory: e2e/${{ matrix.workspace }}
         run: |
           perl -pi -e 's/flutter_version = "[^"]*"/flutter_version = "${{ matrix.flutter }}"/' MODULE.bazel
+          # perl exits 0 on no match: fail here rather than run the pin under
+          # a job named for another release.
+          grep -q 'flutter_version = "${{ matrix.flutter }}"' MODULE.bazel
           cp pubspec.flutter-${{ matrix.flutter }}.lock pubspec.lock
           git diff --stat
       # --test_output=errors so a failure's assertion reaches this log. Without
