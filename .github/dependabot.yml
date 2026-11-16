@@ -10,6 +10,9 @@ updates:
     # Wait for a release to age before we ever see the PR, so the ecosystem has
     # time to flag a broken or compromised version first. Security updates
     # bypass the cooldown automatically.
+    # The Commit messages check wants a conventional-commit subject.
+    commit-message:
+      prefix: "ci"
     cooldown:
       default-days: 5
     groups:
