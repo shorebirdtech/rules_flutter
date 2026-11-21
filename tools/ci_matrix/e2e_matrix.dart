@@ -107,18 +107,16 @@ const _customEngineJob =
     'with the stand-in checkout through the dev tool e2e test, on macOS';
 
 const e2eWorkspaces = <E2eWorkspace>[
-  // The BCR presubmit module (.bcr/presubmit.yml), which BCR runs on Debian,
-  // Ubuntu, macOS and Windows before it accepts a release. Each job is the
-  // minimal consumer's toolchain resolving on that host, with none of the
-  // modules a fuller workspace declares to hide a gap. About a minute each.
+  // The minimal consumer module (upstream's BCR presubmit module). Each job is
+  // its toolchain resolving on that host, with none of the modules a fuller
+  // workspace declares to hide a gap. About a minute each.
   E2eWorkspace(
     'smoke',
     runs: {
-      Os.macos: 'the BCR presubmit module resolving its toolchain on a Mac',
-      Os.linux:
-          'the BCR presubmit module resolving its toolchain on Linux (BCR '
-          'runs Debian and Ubuntu)',
-      Os.windows: 'the BCR presubmit module resolving its toolchain on Windows',
+      Os.macos: 'the minimal consumer module resolving its toolchain on a Mac',
+      Os.linux: 'the minimal consumer module resolving its toolchain on Linux',
+      Os.windows:
+          'the minimal consumer module resolving its toolchain on Windows',
     },
   ),
   // Not an E2E job: the `consumer-query` job in ci.yaml queries
@@ -583,8 +581,8 @@ List<String> targetProblems(
   return problems..sort();
 }
 
-/// The entries of `e2e/` the release archive keeps: `smoke`, which
-/// `.bcr/presubmit.yml` names as its `module_path`.
+/// The entries of `e2e/` the release archive keeps: `smoke`, as upstream's
+/// archive does for its BCR presubmit.
 const archivedE2eEntries = {'smoke'};
 
 /// What is wrong with [gitattributes] as the release archive's filter of

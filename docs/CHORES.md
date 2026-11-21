@@ -80,17 +80,14 @@ Dart versions those need. Then `bazel test //...` in `e2e/smoke`.
   otherwise fetches the newest release, so a missing file silently runs a
   different Bazel than the rest of the sweep. `git ls-files '*.bazelversion'`
   is the list.
-- `.bcr/presubmit.yml` — the `bazel:` matrix value (if the major version
-  changes)
 - `tools/preset.bazelrc` — generated for the Bazel version in use
   (§ "Bazelrc Preset")
 
 **Procedure**:
 
 1. Update all `.bazelversion` files to the new version.
-2. If the major version changed, update the `.bcr/presubmit.yml` matrix.
-3. Regenerate `tools/preset.bazelrc` (§ "Bazelrc Preset").
-4. Refresh the lock files (§ "Lock File Refresh"): the lock records a format
+2. Regenerate `tools/preset.bazelrc` (§ "Bazelrc Preset").
+3. Refresh the lock files (§ "Lock File Refresh"): the lock records a format
    version that changes with Bazel's.
 
 **Verification**: `bazel build //...` passes.

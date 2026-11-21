@@ -1088,7 +1088,7 @@ finds a gap before a push.
 
 | Workspace | Runs on | What each run adds | Not on |
 |---|---|---|---|
-| `smoke` | macOS, Linux, Windows | the BCR presubmit module, which BCR runs on each | |
+| `smoke` | macOS, Linux, Windows | the minimal consumer module resolving its toolchain on each | |
 | `hello_world` | macOS, Linux, Windows | the Tier-1 app over each `flutter create` runner; profile bundles on Linux and Windows; Android and web from each host | |
 | `codegen` | macOS, Linux, Windows | Native Assets loaded by each host's `flutter_tester` | |
 | `plugin_example` | macOS, Linux, Windows (the `:windows_*` tests and `:android_bundle_build_test`) | each platform's implementations of real pub plugins; on Windows also one arm64 APK, whose AAR resources are the longest paths aapt2 opens ("Windows and MAX_PATH") | |
