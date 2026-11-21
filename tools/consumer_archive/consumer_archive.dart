@@ -2,9 +2,9 @@
 //
 //   bazel run //tools/consumer_archive [-- <revision>]
 //
-// What a consumer of the published module gets is `git archive` output, which
-// `.gitattributes` trims (as GitHub's archive of a commit does): files the
-// archive omits are files the module must not need. The revision is HEAD by
+// What a consumer that takes a commit's archive (`archive_override`) gets is
+// `git archive` output, which `.gitattributes` trims, as GitHub's does: files
+// the archive omits are files the module must not need. The revision is HEAD by
 // default; changes not committed are not in it.
 import 'dart:io';
 

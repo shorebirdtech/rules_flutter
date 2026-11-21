@@ -581,8 +581,8 @@ List<String> targetProblems(
   return problems..sort();
 }
 
-/// The entries of `e2e/` the release archive keeps: `smoke`, the minimal
-/// consumer module.
+/// The entries of `e2e/` the release archive keeps: `smoke`, as upstream's
+/// archive does for its BCR presubmit.
 const archivedE2eEntries = {'smoke'};
 
 /// What is wrong with [gitattributes] as the release archive's filter of
