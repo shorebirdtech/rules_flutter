@@ -2,10 +2,12 @@
 #
 # This runs on pull requests rather than on pushes to main (as upstream's
 # reusable overhead-commit-messages workflow does) because this fork lands
-# PRs by squash: GitHub writes the squash commit's message by joining the
-# PR's commit messages and appending a Co-authored-by paragraph, which buries
-# each `Changelog:` trailer. The commits the hook checked are the PR's own.
-# Every pull request is checked, stacked ones into other branches too.
+# its own PRs by squash (a sync from upstream lands as a merge commit, which
+# the check skips as `--no-merges`): GitHub writes the squash commit's
+# message by joining the PR's commit messages and appending a
+# Co-authored-by paragraph, which buries each `Changelog:` trailer. The
+# commits the hook checked are the PR's own. Every pull request is checked,
+# stacked ones into other branches too.
 name: Commit messages
 on:
   pull_request:

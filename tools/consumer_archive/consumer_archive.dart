@@ -24,6 +24,7 @@ Future<void> main(List<String> args) async {
   // written the zero padding of its last record, and a write into the closed
   // pipe then fails the run (SocketException: Broken pipe), now and then.
   final temp = Directory.systemTemp.createTempSync('consumer_archive');
+  final bool extracted;
   try {
     final tarball = '${temp.path}/archive.tar';
     final archive = await Process.run('git', [
@@ -43,12 +44,14 @@ Future<void> main(List<String> args) async {
             destination.path,
           ]);
     if (extract != null) stderr.write(extract.stderr);
-    if (extract == null || extract.exitCode != 0) {
-      stderr.writeln('consumer_archive: could not extract $revision');
-      exit(1);
-    }
+    extracted = extract != null && extract.exitCode == 0;
   } finally {
     temp.deleteSync(recursive: true);
+  }
+  // After the `finally`: `exit` ends the process without running it.
+  if (!extracted) {
+    stderr.writeln('consumer_archive: could not extract $revision');
+    exit(1);
   }
   stdout.writeln('extracted $revision to ${destination.path}');
 }
