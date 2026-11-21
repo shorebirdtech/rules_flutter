@@ -17,6 +17,8 @@ every other asset of the package is.
 
 load("//flutter:providers.bzl", "FlutterFontFamilyInfo", "FlutterFontInfo")
 
+visibility("//flutter/...")
+
 # What flutter_tools accepts for `weight:` and `style:` (flutter_manifest.dart).
 _WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900]
 _STYLES = ["normal", "italic"]
@@ -58,7 +60,7 @@ flutter_font = rule(
             values = [""] + _STYLES,
         ),
         "asset": attr.string(
-            doc = "For a font of another Dart package, the `packages/<package>/<path>` a pubspec's `asset:` names it by: `src` is that package's file `<path>`, and every program bundles it at this path, the family's own package included. Unset, `src` is a file of the package that lists the family, keyed by its path from that package's root.",
+            doc = "For a font of another Dart package, the `packages/<package>/<path>` a pubspec's `asset:` names it by: `src` is the file `<path>` of that package's `lib/`, as flutter_tools reads it, and every program bundles it at this path, the family's own package included. Unset, `src` is a file of the package that lists the family, keyed by its path from that package's root.",
         ),
     },
     doc = "A font file of a `flutter_font_family`, with its weight and style.",

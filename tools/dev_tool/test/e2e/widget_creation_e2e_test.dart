@@ -2,6 +2,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart' as vm;
@@ -9,6 +10,9 @@ import 'package:vm_service/vm_service_io.dart' as vm_io;
 
 import 'dev_tool_e2e_harness.dart';
 import 'editable_workspace.dart';
+
+/// The app under test.
+const _app = E2eApp('macos_example');
 
 /// A debug app tells the widget inspector where each widget was created, and
 /// still does after the libraries it edits are recompiled by the dev tool.
@@ -24,7 +28,7 @@ void main() {
     test(
       'survives a hot reload and a hot restart',
       () async {
-        final ws = await editableWorkspace('macos_example');
+        final ws = await editableWorkspace(_app);
         final appMain = ws.file('lib/main.dart');
         final original = appMain.readAsStringSync();
         expect(
@@ -92,6 +96,7 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 8)),
+      skip: !Platform.isMacOS ? 'macOS only' : null,
     );
   });
 }

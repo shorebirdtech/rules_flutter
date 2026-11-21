@@ -7,6 +7,8 @@ the repository of the SDK's own source. A name the flag does not declare
 fails at the first `select()`, listing the declared names.
 """
 
+visibility("//flutter/...")
+
 def face_build_content(sdks, targets, extra = ""):
     """The BUILD file of a face.
 
@@ -106,9 +108,17 @@ WEB_SDK_TARGETS = {
     "web-sdk/kernel/dart2js_platform.dill": "{prefix}//web:dart2js_platform.dill",
     "web-sdk/kernel/ddc_outline.dill": "{prefix}//web:ddc_outline.dill",
     "web-sdk/libraries.json": "{prefix}//web:libraries.json",
-    "web-sdk/kernel/ddcLibraryBundle-canvaskit/dart_sdk.js": "{prefix}//web:ddc_dart_sdk.js",
+    "web-sdk/kernel/ddc/canary/dart_sdk.js": "{prefix}//web:ddc_dart_sdk.js",
     "dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js": "{prefix}//web:ddc_module_loader.js",
     "dart-sdk/lib/dev_compiler/web/dart_stack_trace_mapper.js": "{prefix}//web:dart_stack_trace_mapper.js",
+}
+
+# The `sky_engine` package of the selected SDK's engine: the package the
+# analyzer reads `dart:ui` from, and the `LICENSE` `NOTICES` lists the
+# engine's licences from.
+SKY_ENGINE_TARGETS = {
+    "sky_engine": "{prefix}//sky_engine:sky_engine",
+    "LICENSE": "{prefix}//sky_engine:LICENSE",
 }
 
 # The iOS engine of each build mode. `Flutter_xcframework` is what rules_apple
@@ -133,7 +143,7 @@ alias(
 )
 """
 
-def android_engine_face_extra(sdks, arch, abi):
+def android_engine_face_extra(sdks, arch, abi, custom):
     """The BUILD text of the Android engine face of one CPU.
 
     `stripped` is the engine jar of the selected SDK and the build mode with
@@ -141,16 +151,23 @@ def android_engine_face_extra(sdks, arch, abi):
     them. The stripping is made once per SDK and mode, not in each
     `flutter_android_engine` target, which every pub plugin has one of.
 
+    `aar_engine` is the engine a module's Maven repository carries: `stripped`
+    for an SDK whose engine is not the release's, and nothing for one whose
+    engine is, whose artifacts the host takes from Google's Maven repository.
+    It names the release's jars in no branch, so a module's build under the
+    release fetches no engine it does not otherwise use.
+
     Args:
         sdks: A dict from each declared SDK to the label prefix of its engine
             source (`@repo`).
         arch: The CPU part of the target (`arm64`, `x64`).
         abi: The Android ABI of that CPU (`arm64-v8a`).
+        custom: The SDKs of `sdks` whose engine is not the release's.
 
     Returns:
         BUILD text, for `flutter_face_repo(extra = ...)`.
     """
-    content = 'load("@rules_flutter//flutter/private:flutter_android_engine_jar.bzl", "flutter_android_engine_jar")\n'
+    content = 'load("@rules_flutter//flutter/private:generated_repos.bzl", "flutter_android_engine_jar")\n'
     declared = ", ".join(sorted(sdks.keys()))
     for sdk, prefix in sorted(sdks.items()):
         for mode in ["debug", "profile", "release"]:
@@ -176,6 +193,13 @@ alias(
         '            "@flutter_toolchains//:sdk_{sdk}": ":{sdk}_stripped",\n'.format(sdk = sdk)
         for sdk in sorted(sdks.keys())
     ])
+    aar_branches = "".join([
+        '            "@flutter_toolchains//:sdk_{sdk}": ":{target}",\n'.format(
+            sdk = sdk,
+            target = sdk + "_stripped" if sdk in custom else "no_aar_engine",
+        )
+        for sdk in sorted(sdks.keys())
+    ])
     return content + """
 # The engine of the selected SDK and the build mode, stripped: debug under
 # `-c dbg`, profile under `-c opt` with `//flutter:profile`, release otherwise.
@@ -188,4 +212,20 @@ alias(
     ),
     visibility = ["//visibility:public"],
 )
-""".format(branches = branches, declared = declared)
+
+# What the selected SDK's module AAR carries of the engine: the stripped jar
+# when the engine is not the release's, otherwise nothing.
+filegroup(
+    name = "no_aar_engine",
+)
+
+alias(
+    name = "aar_engine",
+    actual = select(
+        {{
+{aar_branches}        }},
+        no_match_error = "No Flutter SDK is declared for --@rules_flutter//flutter:sdk. Declared: {declared}.",
+    ),
+    visibility = ["//visibility:public"],
+)
+""".format(branches = branches, aar_branches = aar_branches, declared = declared)

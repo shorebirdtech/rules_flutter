@@ -1,13 +1,14 @@
 # CI workflow for rules_flutter
 #
-# Runs repo-root tests (Starlark unit tests, the pre-commit hooks) and the e2e tests
-# on every push/PR, and weekly. Each e2e workspace runs on the operating systems where it
-# exercises something no other job does; the `plan` job reads which, and why,
-# from tools/ci_matrix/e2e_matrix.dart.
+# Runs repo-root tests (Starlark unit tests, the pre-commit hooks) and the e2e
+# tests on every push/PR, and weekly, when it also runs the `deep` tier of the
+# root and of the e2e workspaces that have one. Each e2e workspace runs on the
+# operating systems where it exercises something no other job does; the `plan`
+# job reads which, and why, from tools/ci_matrix/e2e_matrix.dart.
 #
-# No job checks out rules_dart: every workspace takes it as a registry
-# `bazel_dep`. Local sibling overrides live in gitignored `.bazelrc.user` files,
-# which never exist on a runner.
+# No job checks out rules_dart: every workspace fetches it as its MODULE.bazel
+# says, from the registry. Local sibling overrides live in gitignored `.bazelrc.user` files, which never
+# exist on a runner.
 name: CI
 on:
   push:
@@ -44,14 +45,15 @@ concurrency:
 # used beyond that. Each OS's cache was 5.2-5.7 GB, so the three evicted one
 # another; about 2 GB of each was Bazel's unpacked repositories (the repo
 # contents cache), which CI_BAZELRC now keeps outside the saved directory.
-# That leaves about 3.7 GB on macOS and 3.2 GB on Linux, 7 GB in all. A key
-# change saves a second copy for its OS, up to 10.7 GB, and GitHub then evicts
-# the least recently used entry, the superseded one unless the other OS's has
-# gone longer unused. Windows keeps none: it restored its 5.2 GB at about 64 MB/s and
+# That leaves 3.1 GB on macOS and 2.8 GB on Linux, 5.9 GB in all, beside
+# about 0.8 GB the shared overhead workflows keep (Commit messages) and 1.4 GB
+# a release saves under its tag. A key change saves a second copy for its OS,
+# and GitHub then evicts the least recently used entry, the superseded one
+# unless another has gone longer unused. Windows keeps none: it restored its 5.2 GB at about 64 MB/s and
 # took as long again to unpack it, no faster than downloading, and a third
 # cache would not fit beside the other two.
 #
-# No job keeps setup-bazel's disk cache of action outputs. The 3 GB left would
+# No job keeps setup-bazel's disk cache of action outputs. The 2 GB left would
 # not hold one for a job slow enough to gain from it (one e2e workspace's
 # outputs are several GB), and setup-bazel keys it by every BUILD file in the
 # repository, so each edit of one would save another copy and evict the
@@ -92,7 +94,8 @@ env:
 # smoke test (4-8), 60 and 90 for the Linux and macOS lock checks (about 20 and
 # 35), 150 for the custom engine (60), and for an e2e workspace 90 on Linux and
 # Windows (45 at most, plugin_example on Linux) and 180 on macOS (95 for
-# plugin_example).
+# plugin_example); 90 for a deep run on Linux, which downloads Gradle and its
+# Maven artifacts (about 1 GB) and builds the host's APKs.
 jobs:
   unit-tests:
     name: Unit tests
@@ -144,9 +147,9 @@ jobs:
   # Two jobs, from the `plan` job (lockCheckWorkspaces in
   # tools/ci_matrix/e2e_matrix.dart): macOS for the workspaces whose `//...`
   # may hold Apple targets, which only a Mac can analyse, and Linux for the
-  # root and the rest. The check runs Bazel without the user's `.bazelrc`, so
-  # it neither reads the restored repository cache nor quiets its log; it
-  # prints a line per step.
+  # root and the rest. The check runs Bazel with every rc file Bazel reads, so
+  # it uses the restored repository cache and quiets its log as the other jobs
+  # do; it prints a line per step.
   lockfiles:
     name: Lock files (${{ matrix.os }})
     needs: plan
@@ -287,6 +290,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      deep: ${{ steps.matrix.outputs.deep }}
       locks: ${{ steps.matrix.outputs.locks }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -294,8 +298,38 @@ jobs:
       - name: Build the E2E and lock check matrices
         id: matrix
         run: dart run tools/ci_matrix/ci_matrix.dart >> "$GITHUB_OUTPUT"
+  # The `deep` tier (each workspace's .bazelrc) of the e2e workspaces that have
+  # one, weekly like the root's (`Unit tests`). The `deep` tests are not in the
+  # jobs above, which run a plain `bazel test //...`. They are the only tests of
+  # a real Gradle build consuming our Android add-to-app output. Linux only: a
+  # Gradle host needs the JDK and Android SDK Bazel downloads, and the table
+  # (`deep` in tools/ci_matrix/e2e_matrix.dart) says what each workspace's run
+  # exercises. `--test_tag_filters=deep` keeps the ordinary tests, which the
+  # E2E jobs ran, from running again.
+  e2e-deep:
+    name: E2E deep (${{ matrix.workspace }}, ubuntu-latest)
+    needs: plan
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.deep) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: bazel-contrib/setup-bazel@104e3eea9447cdaa4b00d0fb46191a3985d26ab3 # 0.19.1
+        with:
+          cache-version: ${{ env.CACHE_VERSION }}
+          bazelrc: ${{ env.CI_BAZELRC }}
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      - name: bazel test --config=deep (e2e/${{ matrix.workspace }})
+        working-directory: e2e/${{ matrix.workspace }}
+        run: bazel test --config=deep --test_tag_filters=deep --build_tests_only //...
   e2e:
-    name: E2E (${{ matrix.workspace }}, ${{ matrix.os }})
+    # The targets join the name where an entry is not the whole module, so two
+    # entries of one module are two names.
+    name: E2E (${{ matrix.workspace }}${{ matrix.targets != '//...' && format(' {0}', matrix.targets) || '' }}, ${{ matrix.os }})
     needs: plan
     runs-on: ${{ matrix.os }}
     # Cold, a workspace fetches its own Flutter SDK, engine and toolchains.
@@ -341,12 +375,12 @@ jobs:
       # refuses a lock that lacks an entry the build needs; the `lockfiles` job
       # checks every lock for stale entries too.
       #
-      # The workspaces that run `build` have no test targets (see
-      # tools/ci_matrix/e2e_matrix.dart). The targets are `//...` unless the
-      # table names others for the system.
-      - name: bazel ${{ matrix.command }} ${{ matrix.targets }} (e2e/${{ matrix.workspace }})
+      # The targets are `//...` unless the table in
+      # tools/ci_matrix/e2e_matrix.dart names others; the flags select the
+      # tests of one tag where it runs only those on the system.
+      - name: bazel test ${{ matrix.flags }} ${{ matrix.targets }} (e2e/${{ matrix.workspace }})
         working-directory: e2e/${{ matrix.workspace }}
-        run: bazel ${{ matrix.command }} ${{ matrix.targets }}
+        run: bazel test ${{ matrix.flags }} ${{ matrix.targets }}
       # `bazel coverage` of a flutter_test, which `bazel test` never reaches:
       # the merged report names the sources of the test's package and of a
       # library in another by their workspace paths, and

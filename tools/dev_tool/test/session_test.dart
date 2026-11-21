@@ -7,6 +7,7 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/command_runner.dart';
 import 'package:flutter_bazel_dev_tool/compiler_config.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/frontend_server.dart';
 import 'package:flutter_bazel_dev_tool/machine_protocol.dart';
@@ -15,6 +16,7 @@ import 'package:flutter_bazel_dev_tool/hot_reload/source_watcher.dart';
 import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
 import 'package:flutter_bazel_dev_tool/run_plan.dart';
 import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/teardown.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:logging/logging.dart';
 import 'package:vm_service/vm_service.dart' show IsolateRef;
@@ -22,6 +24,13 @@ import 'package:test/test.dart';
 import 'package:watcher/watcher.dart';
 
 import 'fakes.dart';
+
+/// The run's ending, for a loop whose test has nothing for a teardown to stop.
+Future<void> _noTeardown() async {}
+
+/// The run's failure route, for a loop that is not expected to take it.
+void _unexpected(DevToolException error) =>
+    fail('the run ended on a failure: $error');
 
 void main() {
   group('parseDevToolsUrl', () {
@@ -241,7 +250,7 @@ void main() {
 
   group('runInteractiveSession', () {
     test(
-      'quit key stops all sessions and shuts down',
+      'quit key ends the run through its teardown',
       timeout: Timeout(Duration(seconds: 10)),
       () async {
         final fakeProcess = FakeProcess();
@@ -276,15 +285,14 @@ void main() {
         // Use a real temp directory so the watcher can start.
         final tmpDir = await Directory.systemTemp.createTemp('session_test_');
 
-        // Create a keyboard stream that sends 'q' after a short delay.
-        final keyboardController = StreamController<List<int>>();
-        Future.delayed(const Duration(milliseconds: 100), () {
-          keyboardController.add(utf8.encode('q'));
-          // Allow shutdown to complete by making the frontend server process exit.
-          Future.delayed(const Duration(milliseconds: 50), () {
-            fakeFrontendProcess.complete(0);
-          });
-        });
+        // What the run's teardown owns by the time the loop starts, registered
+        // in the order the run builds them.
+        final teardown = Teardown();
+        await teardown.add(frontendServer.shutdown);
+        await teardown.add(() => session.shutdown(protocol));
+
+        final keyboardController = StreamController<List<int>>()
+          ..add(utf8.encode('q'));
 
         final logs = <String>[];
 
@@ -296,9 +304,10 @@ void main() {
         try {
           await runInteractiveSession(
             sessions: [session],
-            frontendServer: frontendServer,
+            endRun: teardown.run,
             protocol: protocol,
             commandRunner: CommandRunner(),
+            onFailure: _unexpected,
             devToolsEnabled: false,
             dartExecutable: 'dart',
             hotReloadUnavailable: null,
@@ -314,6 +323,7 @@ void main() {
         }
 
         expect(stopped, contains('test_device'));
+        expect(fakeFrontendProcess.killed, isTrue);
         expect(logs.first, contains('Watching for file changes'));
       },
     );
@@ -344,18 +354,25 @@ void main() {
         // the keyboard, so the two keys arrive in order however long setup takes.
         final keys = StreamController<List<int>>();
         keys.add(utf8.encode('r'));
-        keys.add(utf8.encode('q'));
 
+        // `q` once the reload has answered: a `q` does not wait for a reload
+        // (see below), so sent together it could end the loop first.
         final logs = <String>[];
+        void log(String line) {
+          logs.add(line);
+          if (line == 'Hot reload successful') keys.add(utf8.encode('q'));
+        }
+
         await runInteractiveSession(
           sessions: [session],
-          frontendServer: null,
+          endRun: _noTeardown,
           protocol: MachineProtocol(enabled: false),
           commandRunner: commandRunner,
+          onFailure: _unexpected,
           devToolsEnabled: false,
           dartExecutable: 'dart',
           hotReloadUnavailable: null,
-          log: logs.add,
+          log: log,
           keyboardReader: () => keys.stream,
           setEchoMode: (_) {},
           setLineMode: (_) {},
@@ -376,27 +393,19 @@ void main() {
       },
     );
 
-    // A run that cannot reload still dispatches, so the ONE holder of the
-    // reason — the readiness gate, reached through the handler — is what
-    // answers, exactly as it does for the HTTP channel and the machine
-    // protocol. Swallowing the key leaves no way to tell a refusal from a
-    // keystroke the terminal never saw; refusing in the keyboard instead
-    // would put a second answer beside the gate's.
+    // A reload waiting for a rebuild can take minutes, and `q` is how the
+    // terminal ends a run: it must not wait for that reload, any more than a
+    // `daemon.shutdown` does. The reload here never answers at all.
     test(
-      'a run that will not reload still lets the keys reach the handler',
+      'q ends the run while an r is still running',
       timeout: Timeout(Duration(seconds: 10)),
       () async {
-        final dispatched = <String>[];
-        Map<String, dynamic>? restartParams;
+        final started = Completer<void>();
         final commandRunner = CommandRunner()
           ..register('app.hotReload', (params) async {
-            dispatched.add('app.hotReload');
-            return {'error': '`--no-hot` was passed'};
-          })
-          ..register('app.restart', (params) async {
-            dispatched.add('app.restart');
-            restartParams = params;
-            return {'error': '`--no-hot` was passed'};
+            started.complete();
+            await Completer<void>().future;
+            return {'message': 'never'};
           });
 
         final session = DeviceSession(
@@ -408,45 +417,280 @@ void main() {
 
         final keys = StreamController<List<int>>();
         keys.add(utf8.encode('r'));
-        keys.add(utf8.encode('R'));
-        keys.add(utf8.encode('q'));
+        unawaited(started.future.then((_) => keys.add(utf8.encode('q'))));
 
-        final logs = <String>[];
         await runInteractiveSession(
           sessions: [session],
-          frontendServer: null,
+          endRun: _noTeardown,
           protocol: MachineProtocol(enabled: false),
           commandRunner: commandRunner,
+          onFailure: _unexpected,
           devToolsEnabled: false,
           dartExecutable: 'dart',
-          hotReloadUnavailable: '`--no-hot` was passed',
-          log: logs.add,
+          hotReloadUnavailable: null,
+          log: (_) {},
+          keyboardReader: () => keys.stream,
+          setEchoMode: (_) {},
+          setLineMode: (_) {},
+        ).timeout(const Duration(seconds: 5));
+
+        expect(started.isCompleted, isTrue);
+      },
+    );
+
+    // The key's reload runs unawaited, so an error no command reports — a bug
+    // in a handler — has nothing above it to catch it. Unhandled, it ends the
+    // tool with exit code 255 and nothing stopped.
+    test(
+      'an r that throws ends the run as a failure, not a crash',
+      timeout: Timeout(Duration(seconds: 10)),
+      () async {
+        final commandRunner = CommandRunner()
+          ..register(
+            'app.hotReload',
+            (params) async => throw StateError('a bug in the handler'),
+          );
+        final failed = Completer<DevToolException>();
+        final keys = StreamController<List<int>>()..add(utf8.encode('r'));
+        unawaited(failed.future.then((_) => keys.add(utf8.encode('q'))));
+
+        await runInteractiveSession(
+          sessions: [
+            DeviceSession(
+              device: _TrackingDevice('test_device', onStop: () {}),
+              appInstance: AppInstance(process: FakeProcess()),
+              vmClient: null,
+              appId: 'app_1',
+            ),
+          ],
+          endRun: _noTeardown,
+          protocol: MachineProtocol(enabled: false),
+          commandRunner: commandRunner,
+          onFailure: failed.complete,
+          devToolsEnabled: false,
+          dartExecutable: 'dart',
+          hotReloadUnavailable: null,
+          log: (_) {},
           keyboardReader: () => keys.stream,
           setEchoMode: (_) {},
           setLineMode: (_) {},
         ).timeout(const Duration(seconds: 5));
 
         expect(
-          dispatched,
-          ['app.hotReload', 'app.restart'],
-          reason:
-              'swallowing the key leaves the user with no answer at all; '
-              'the handler is where the reason lives',
-        );
-        expect(
-          restartParams,
-          {'fullRestart': true},
-          reason: 'R is a restart, which app.restart only is when asked',
-        );
-        expect(
-          logs,
-          isNot(contains('Performing hot restart...')),
-          reason:
-              'announcing a restart and then refusing it reads worse than '
-              'saying nothing',
+          (await failed.future).message,
+          allOf(contains('Hot reload'), contains('a bug in the handler')),
         );
       },
     );
+
+    // `q` ends the run the way `daemon.shutdown` does: the teardown starts
+    // before anything is stopped, so the reload it overtakes is answered as
+    // shutting down rather than failing against a compiler already killed. A
+    // severe "Hot reload failed" would be the last line of a clean exit.
+    //
+    // Not under fake_async, though nothing here waits on time: cancelling the
+    // key stream completes through the root zone's microtask queue, which
+    // fake_async never drains.
+    test(
+      'a q pressed mid-apply does not report the reload as failed',
+      timeout: Timeout(Duration(seconds: 10)),
+      () async {
+        final records = <LogRecord>[];
+        final sub = Logger.root.onRecord.listen(records.add);
+        addTearDown(sub.cancel);
+        final teardown = Teardown();
+        final applying = Completer<void>();
+        final compilerKilled = Completer<void>();
+        final commandRunner = CommandRunner(stopping: teardown.started)
+          ..register('app.hotReload', (params) async {
+            applying.complete();
+            await compilerKilled.future;
+            throw StateError('the compiler was killed mid-apply');
+          });
+        var stopped = false;
+        final session = DeviceSession(
+          device: _TrackingDevice('test_device', onStop: () => stopped = true),
+          appInstance: AppInstance(process: FakeProcess()),
+          vmClient: null,
+          appId: 'app_1',
+        );
+        final protocol = MachineProtocol(enabled: false);
+        // Registered as production registers them: the compiler first, the
+        // session after it, so the session is stopped first.
+        unawaited(teardown.add(() async => compilerKilled.complete()));
+        unawaited(teardown.add(() => session.shutdown(protocol)));
+
+        final keys = StreamController<List<int>>()..add(utf8.encode('r'));
+        unawaited(applying.future.then((_) => keys.add(utf8.encode('q'))));
+        final logs = <String>[];
+        await runInteractiveSession(
+          sessions: [session],
+          endRun: teardown.run,
+          protocol: protocol,
+          commandRunner: commandRunner,
+          onFailure: _unexpected,
+          devToolsEnabled: false,
+          dartExecutable: 'dart',
+          hotReloadUnavailable: null,
+          log: logs.add,
+          keyboardReader: () => keys.stream,
+          setEchoMode: (_) {},
+          setLineMode: (_) {},
+        );
+
+        expect(applying.isCompleted, isTrue);
+        expect(stopped, isTrue);
+        expect(compilerKilled.isCompleted, isTrue);
+        expect(records.where((r) => r.level >= Level.WARNING), isEmpty);
+        expect(logs.where((line) => line.contains('failed')), isEmpty);
+      },
+    );
+
+    // A run that cannot reload still dispatches, so the ONE holder of the
+    // reason — the readiness gate, reached through the handler — is what
+    // answers, exactly as it does for the HTTP channel and the machine
+    // protocol. Swallowing the key leaves no way to tell a refusal from a
+    // keystroke the terminal never saw; refusing in the keyboard instead
+    // would put a second answer beside the gate's.
+    test(
+      'a run that will not reload still lets the keys reach the handler',
+      () {
+        fakeAsync((async) {
+          final dispatched = <String>[];
+          Map<String, dynamic>? restartParams;
+          final keys = StreamController<List<int>>();
+          final commandRunner = CommandRunner()
+            ..register('app.hotReload', (params) async {
+              dispatched.add('app.hotReload');
+              return {'error': '`--no-hot` was passed'};
+            })
+            ..register('app.restart', (params) async {
+              dispatched.add('app.restart');
+              restartParams = params;
+              return {'error': '`--no-hot` was passed'};
+            });
+
+          final session = DeviceSession(
+            device: _TrackingDevice('test_device', onStop: () {}),
+            appInstance: AppInstance(process: FakeProcess()),
+            vmClient: null,
+            appId: 'app_1',
+          );
+
+          final logs = <String>[];
+          unawaited(
+            runInteractiveSession(
+              sessions: [session],
+              endRun: _noTeardown,
+              protocol: MachineProtocol(enabled: false),
+              commandRunner: commandRunner,
+              onFailure: _unexpected,
+              devToolsEnabled: false,
+              dartExecutable: 'dart',
+              hotReloadUnavailable: '`--no-hot` was passed',
+              log: logs.add,
+              keyboardReader: () => keys.stream,
+              setEchoMode: (_) {},
+              setLineMode: (_) {},
+            ),
+          );
+          // Each key once the last has answered: one pressed while a request
+          // is still running is dropped.
+          keys.add(utf8.encode('r'));
+          async.flushMicrotasks();
+          keys.add(utf8.encode('R'));
+          async.flushMicrotasks();
+
+          expect(
+            dispatched,
+            ['app.hotReload', 'app.restart'],
+            reason:
+                'swallowing the key leaves the user with no answer at all; '
+                'the handler is where the reason lives',
+          );
+          expect(
+            restartParams,
+            {'fullRestart': true},
+            reason: 'R is a restart, which app.restart only is when asked',
+          );
+          expect(
+            logs,
+            isNot(contains('Performing hot restart...')),
+            reason:
+                'announcing a restart and then refusing it reads worse than '
+                'saying nothing',
+          );
+        });
+      },
+    );
+
+    // `flutter run`'s `TerminalHandler` drops a key pressed while the last
+    // one's request is still running, rather than queueing it: three `r`s
+    // pressed into a slow reload would otherwise be three reloads in a row,
+    // the last two of them unasked for by the time they ran. `q` is the
+    // exception, and stays live (see above).
+    test("a key pressed while the last key's request runs is dropped", () {
+      fakeAsync((async) {
+        final dispatched = <String>[];
+        var reload = Completer<Map<String, dynamic>>();
+        final commandRunner = CommandRunner()
+          ..register('app.hotReload', (params) {
+            dispatched.add('app.hotReload');
+            return reload.future;
+          })
+          ..register('app.restart', (params) async {
+            dispatched.add('app.restart');
+            return {'message': 'restarted'};
+          });
+        final keys = StreamController<List<int>>();
+        final logs = <String>[];
+        unawaited(
+          runInteractiveSession(
+            sessions: [
+              DeviceSession(
+                device: _TrackingDevice('test_device', onStop: () {}),
+                appInstance: AppInstance(process: FakeProcess()),
+                vmClient: null,
+                appId: 'app_1',
+              ),
+            ],
+            endRun: _noTeardown,
+            protocol: MachineProtocol(enabled: false),
+            commandRunner: commandRunner,
+            onFailure: _unexpected,
+            devToolsEnabled: false,
+            dartExecutable: 'dart',
+            hotReloadUnavailable: null,
+            log: logs.add,
+            keyboardReader: () => keys.stream,
+            setEchoMode: (_) {},
+            setLineMode: (_) {},
+          ),
+        );
+
+        for (final key in ['r', 'r', 'R', 'p', 'i']) {
+          keys.add(utf8.encode(key));
+        }
+        async.flushMicrotasks();
+        expect(dispatched, ['app.hotReload']);
+        expect(
+          logs.where((line) => line.contains('unavailable')),
+          isEmpty,
+          reason: 'p and i wait their turn like r and R',
+        );
+
+        reload.complete({'message': 'Hot reload successful'});
+        async.flushMicrotasks();
+        reload = Completer();
+        keys.add(utf8.encode('r'));
+        async.flushMicrotasks();
+        expect(
+          dispatched,
+          ['app.hotReload', 'app.hotReload'],
+          reason: 'the gate opens once the request has answered',
+        );
+      });
+    });
 
     // `p` and `i` are the only keys whose work is a bare VM-service call, and
     // the client refuses one it has no live connection for by throwing.
@@ -468,21 +712,30 @@ void main() {
           appId: 'app_1',
         );
 
-        final keys = StreamController<List<int>>();
-        keys.add(utf8.encode('p'));
-        keys.add(utf8.encode('i'));
-        keys.add(utf8.encode('q'));
-
+        // Each key once the last has answered: one pressed while a request
+        // is still running is dropped. `Timer.run`, so the key arrives after
+        // the microtasks that finish the request answering now.
+        final keys = StreamController<List<int>>()..add(utf8.encode('p'));
         final logs = <String>[];
+        void log(String line) {
+          logs.add(line);
+          if (line.contains('performance overlay')) {
+            Timer.run(() => keys.add(utf8.encode('i')));
+          } else if (line.contains('widget inspector')) {
+            keys.add(utf8.encode('q'));
+          }
+        }
+
         await runInteractiveSession(
           sessions: [session],
-          frontendServer: null,
+          endRun: _noTeardown,
           protocol: MachineProtocol(enabled: false),
           commandRunner: CommandRunner(),
+          onFailure: _unexpected,
           devToolsEnabled: false,
           dartExecutable: 'dart',
           hotReloadUnavailable: null,
-          log: logs.add,
+          log: log,
           keyboardReader: () => keys.stream,
           setEchoMode: (_) {},
           setLineMode: (_) {},
@@ -578,9 +831,10 @@ void main() {
               appId: 'app_1',
             ),
           ],
-          frontendServer: null,
+          endRun: _noTeardown,
           protocol: MachineProtocol(enabled: false),
           commandRunner: CommandRunner(),
+          onFailure: _unexpected,
           devToolsEnabled: false,
           dartExecutable: 'dart',
           hotReloadUnavailable: null,
@@ -665,6 +919,34 @@ void main() {
         await run.loop.timeout(const Duration(seconds: 5));
       });
 
+      // The reader reports why it could not read as an error on the stream.
+      // Unhandled, it ends the tool with exit code 255 and nothing stopped.
+      test('with a read error is a keyboard that has closed', () async {
+        final records = <LogRecord>[];
+        final sub = Logger.root.onRecord.listen(records.add);
+        addTearDown(sub.cancel);
+        final keys = StreamController<List<int>>();
+        final process = FakeProcess();
+        final run = loopOver(
+          keys,
+          process,
+          shutdownSignal: Completer<void>().future,
+        );
+
+        keys.addError(const StdinException('read of standard input failed'));
+        await keys.close();
+        await pumpEventQueue();
+
+        expect(
+          records.map((r) => '${(r.object as Map)['text']}'),
+          contains(contains('read of standard input failed')),
+        );
+        expect(run.logs.join('\n'), contains('stdin closed'));
+
+        process.complete(0);
+        await run.loop.timeout(const Duration(seconds: 5));
+      });
+
       test('ends the run when there is nothing left to control', () async {
         // No sessions and no shutdown signal: no app can exit and no command
         // can arrive, so waiting would be waiting forever. Returning is what
@@ -672,9 +954,10 @@ void main() {
         final keys = StreamController<List<int>>();
         final loop = runInteractiveSession(
           sessions: const [],
-          frontendServer: null,
+          endRun: _noTeardown,
           protocol: MachineProtocol(enabled: false),
           commandRunner: CommandRunner(),
+          onFailure: _unexpected,
           devToolsEnabled: false,
           dartExecutable: 'dart',
           hotReloadUnavailable: null,
@@ -697,9 +980,10 @@ void main() {
 
         await runInteractiveSession(
           sessions: [],
-          frontendServer: null,
+          endRun: _noTeardown,
           protocol: MachineProtocol(enabled: false),
           commandRunner: CommandRunner(),
+          onFailure: _unexpected,
           devToolsEnabled: false,
           dartExecutable: 'dart',
           hotReloadUnavailable: 'profile mode builds AOT',
@@ -737,9 +1021,10 @@ void main() {
         // immediately (no exit futures to await).
         await runInteractiveSession(
           sessions: [],
-          frontendServer: null,
+          endRun: _noTeardown,
           protocol: protocol,
           commandRunner: CommandRunner(),
+          onFailure: _unexpected,
           devToolsEnabled: false,
           dartExecutable: 'dart',
           hotReloadUnavailable: null,
@@ -776,9 +1061,10 @@ void main() {
         var loopReturned = false;
         final loop = runInteractiveSession(
           sessions: [session],
-          frontendServer: null,
+          endRun: _noTeardown,
           protocol: MachineProtocol(enabled: true),
           commandRunner: CommandRunner(),
+          onFailure: _unexpected,
           devToolsEnabled: false,
           dartExecutable: 'dart',
           hotReloadUnavailable: null,
@@ -1073,6 +1359,95 @@ void main() {
 
       expect(process.signals, contains(ProcessSignal.sigterm));
     });
+
+    // DevTools is a recorded child: one still exiting as the tool exits is
+    // reported as a child the teardown missed, and killed.
+    test('waits for DevTools to exit, up to the bound', () {
+      fakeAsync((async) {
+        final devTools = FakeProcess()..ignoresSigterm = true;
+        final device = _TrackingDevice('test_device', onStop: () {})
+          ..teardownBound = const Duration(seconds: 5);
+        final session = DeviceSession(
+          device: device,
+          appInstance: AppInstance(process: FakeProcess()),
+          vmClient: null,
+          appId: 'app-1',
+        )..devToolsProcess = devTools;
+        var done = false;
+        unawaited(
+          session
+              .shutdown(MachineProtocol(enabled: false, output: BufferSink()))
+              .then((_) => done = true),
+        );
+
+        async.flushMicrotasks();
+        expect(devTools.signals, [ProcessSignal.sigterm]);
+        expect(done, isFalse, reason: 'DevTools has not exited yet');
+
+        devTools.complete(0);
+        async.flushMicrotasks();
+        expect(done, isTrue);
+      });
+    });
+
+    test('a DevTools that will not exit holds the shutdown only as long as '
+        'the bound', () {
+      fakeAsync((async) {
+        final records = <LogRecord>[];
+        final sub = Logger.root.onRecord.listen(records.add);
+        addTearDown(sub.cancel);
+        final device = _TrackingDevice('test_device', onStop: () {})
+          ..teardownBound = const Duration(seconds: 5);
+        final session = DeviceSession(
+          device: device,
+          appInstance: AppInstance(process: FakeProcess()),
+          vmClient: null,
+          appId: 'app-1',
+        )..devToolsProcess = (FakeProcess()..ignoresSigterm = true);
+        var done = false;
+        unawaited(
+          session
+              .shutdown(MachineProtocol(enabled: false, output: BufferSink()))
+              .then((_) => done = true),
+        );
+
+        async.elapse(const Duration(seconds: 4));
+        expect(done, isFalse);
+        async.elapse(const Duration(seconds: 1));
+        expect(done, isTrue);
+        expect(
+          records.map((r) => (r.object as Map)['message']),
+          contains('teardown_step_timed_out'),
+        );
+      });
+    });
+
+    // `app.stop` runs beside everything, the run's teardown included, and the
+    // teardown shuts every session down again. Returning at once to it would
+    // let the process exit with the app still being stopped.
+    test('a second caller waits for the first to stop the app', () async {
+      final stopping = Completer<void>();
+      var stops = 0;
+      final session = DeviceSession(
+        device: _TrackingDevice('test_device', onStop: () => stops++),
+        appInstance: AppInstance(process: FakeProcess()),
+        vmClient: null,
+        appId: 'app-1',
+        dds: _GatedDds(stopping.future),
+      );
+      final protocol = MachineProtocol(enabled: false, output: BufferSink());
+
+      unawaited(session.shutdown(protocol));
+      var secondReturned = false;
+      final second = session.shutdown(protocol)
+        ..then((_) => secondReturned = true);
+      await pumpEventQueue();
+      expect(secondReturned, isFalse);
+
+      stopping.complete();
+      await second;
+      expect(stops, 1);
+    });
   });
 
   /// What the watcher does with an edit it cannot map.
@@ -1114,9 +1489,10 @@ void main() {
             appId: 'app_1',
           ),
         ],
-        frontendServer: null,
+        endRun: _noTeardown,
         protocol: MachineProtocol(enabled: false),
         commandRunner: commandRunner,
+        onFailure: _unexpected,
         devToolsEnabled: false,
         dartExecutable: 'dart',
         hotReloadUnavailable: null,
@@ -1347,10 +1723,7 @@ void main() {
   });
 }
 
-/// A DDS whose `shutdown()` never completes.
-///
-/// It closes its socket to the app's VM service on the way out
-/// (`dds_impl.dart:311`), and that peer is not ours to trust.
+/// A DDS whose `shutdown()` fails.
 class _FailingDds implements DartDevelopmentService {
   @override
   Future<void> shutdown() => throw StateError('the DDS would not shut down');
@@ -1359,6 +1732,22 @@ class _FailingDds implements DartDevelopmentService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// A DDS whose `shutdown()` finishes when [_done] does.
+class _GatedDds implements DartDevelopmentService {
+  final Future<void> _done;
+  _GatedDds(this._done);
+
+  @override
+  Future<void> shutdown() => _done;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A DDS whose `shutdown()` never completes.
+///
+/// It closes its socket to the app's VM service on the way out
+/// (`dds_impl.dart:311`), and that peer is not ours to trust.
 class _HangingDds implements DartDevelopmentService {
   @override
   Future<void> shutdown() => Completer<void>().future;

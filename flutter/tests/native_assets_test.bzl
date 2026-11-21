@@ -18,7 +18,7 @@ load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "PROGRAM_ASSETS_TOOLCHAINS", "program_assets_attrs")
 load("//flutter/private:common.bzl", "check_unreplaced_hooks")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
-load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name", "native_assets_target_string", "resolve_native_assets", "write_native_assets_manifest")
+load("//flutter/private:flutter_native_assets.bzl", "apple_framework_names", "native_asset_framework_name", "native_assets_target_string", "resolve_native_assets", "write_native_assets_manifest")
 
 # -- Pure-function tests for the manifest helpers ----------------------
 
@@ -40,23 +40,72 @@ def _target_string_unknown_impl(ctx):
 def _framework_name_impl(ctx):
     env = unittest.begin(ctx)
 
-    # Strips the `.dylib` extension; sanitizes nothing it doesn't need to.
+    # flutter_tools 3.50's cases for `frameworkUri` (native_assets_host_test.dart).
+    for filename, framework in [
+        ("libfoo.dylib", "foo"),
+        ("foo", "foo"),
+        ("foo_foo", "foo_foo"),
+        ("foo-foo", "foo-foo"),
+        ("foo$foo", "foofoo"),
+        ("foo.foo", "foo.foo"),
+        ("foo.1.2.3", "foo.1.2.3"),
+        ("libatoolongfilenameforaframework.dylib", "atoolongfilenameforaframework"),
+    ]:
+        asserts.equals(env, framework, native_asset_framework_name(filename), filename)
+
+    # A `.dylib` loses its extension and then its `lib`; periods before it stay.
     asserts.equals(env, "objective_c", native_asset_framework_name("objective_c.dylib"))
+    asserts.equals(env, "foo.bar", native_asset_framework_name("foo.bar.dylib"))
+    asserts.equals(env, "foo.bar", native_asset_framework_name("libfoo.bar.dylib"))
 
-    # Strips a leading `lib` only when it's a dylib (matches frameworkUri).
-    asserts.equals(env, "sqlite3", native_asset_framework_name("libsqlite3.dylib"))
-
-    # Sanitizes characters outside [A-Za-z0-9_-].
-    asserts.equals(env, "my-lib_2", native_asset_framework_name("my-lib_2.dylib"))
-    asserts.equals(env, "foobar", native_asset_framework_name("foo.bar.dylib"))
-
-    # A `lib` prefix is kept when there is no `.dylib` extension to strip.
+    # Anything else keeps its `lib` and its extension.
     asserts.equals(env, "libfoo", native_asset_framework_name("libfoo"))
+    asserts.equals(env, "libfoo.so", native_asset_framework_name("libfoo.so"))
+
+    # Only ASCII letters and digits, `.`, `_` and `-` are kept.
+    asserts.equals(env, "my-lib_2", native_asset_framework_name("my-lib_2.dylib"))
+    asserts.equals(env, "foobar", native_asset_framework_name("foo bar+é.dylib"))
+    return unittest.end(env)
+
+def _framework_names_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # flutter_tools 3.50's `framework name conflicts` cases: a name taken
+    # gains `1`, then `2`. Upstream's repeat one file name; an app's file
+    # names are distinct, so here distinct names reach one framework name.
+    files = [
+        struct(basename = name)
+        for name in [
+            "libfoo.dylib",
+            "foo.dylib",
+            "foo",
+            "libatoolongfilenameforaframework.dylib",
+            "atoolongfilenameforaframework.dylib",
+            # Repeats, as a library reached twice, are one library.
+            "foo",
+        ]
+    ]
+    asserts.equals(
+        env,
+        {
+            # In file-name order: `foo`, then `foo.dylib`, then `libfoo.dylib`.
+            "foo": "foo",
+            "foo.dylib": "foo1",
+            "libfoo.dylib": "foo2",
+            "atoolongfilenameforaframework.dylib": "atoolongfilenameforaframework",
+            "libatoolongfilenameforaframework.dylib": "atoolongfilenameforaframework1",
+        },
+        apple_framework_names(files),
+    )
+
+    # A name no other takes is the one its file name gives.
+    asserts.equals(env, {"libmul.dylib": "mul"}, apple_framework_names([struct(basename = "libmul.dylib")]))
     return unittest.end(env)
 
 _target_string_t0_test = unittest.make(_target_string_macos_arm64_impl)
 _target_string_t1_test = unittest.make(_target_string_unknown_impl)
 _framework_name_test = unittest.make(_framework_name_impl)
+_framework_names_test = unittest.make(_framework_names_impl)
 
 # -- Manifest probe ----------------------------------------------------
 
@@ -294,6 +343,7 @@ def native_assets_test_suite(name):
         _target_string_t0_test,
         _target_string_t1_test,
         _framework_name_test,
+        _framework_names_test,
     )
 
     native.test_suite(

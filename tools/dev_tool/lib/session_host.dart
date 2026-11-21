@@ -17,6 +17,7 @@ import 'dart:io';
 
 import 'agent_command.dart';
 import 'bazel.dart';
+import 'child_processes.dart';
 import 'chrome_profile.dart';
 import 'command_failure.dart';
 import 'command_runner.dart';
@@ -41,6 +42,9 @@ class SessionHost {
   /// Serialized dispatch for every transport (stdin protocol, HTTP channel,
   /// keyboard, file watcher).
   late final CommandRunner commandRunner = CommandRunner(
+    // A shutdown answers what is queued or running at once rather than after
+    // it: see `CommandRunner`'s library comment.
+    stopping: teardown.started,
     // Same lazy-read trick as onProgress below: `protocol` is built from this
     // object, so it can only be reached when the callback actually fires.
     onCommandsChanged: () => protocol.commandsChanged(),
@@ -328,11 +332,16 @@ class SessionHost {
       }
       await session.shutdown(protocol);
       return {'message': 'stopped', 'appId': appId};
-    });
+    }, control: true);
+    // Both are control commands: they run beside a reload rather than behind
+    // it. A reload held for a cold startup or a rebuild can take minutes, and
+    // a client ending the run is owed its answer now, not when that work it no
+    // longer wants has finished. Stopping the last app ends the run the same
+    // way, through [endWhenEveryAppHasEnded].
     commandRunner.register('daemon.shutdown', (_) async {
       await performCleanup();
       return {'message': 'shutdown'};
-    });
+    }, control: true);
   }
 
   /// Offer the `app.*` agent surface, for a run whose app carries the
@@ -567,13 +576,14 @@ class SessionHost {
   }
 }
 
-/// Exit now, ending any browser this process started first.
+/// Exit now, ending any browser and other child this process started first.
 ///
 /// The exit a second signal asks for does not wait for the orderly shutdown,
 /// and a browser left running by a tool that has gone is an orphan: nothing
-/// is left to stop it or to delete its profile.
+/// is left to stop it or to delete its profile. So is every other child.
 Never exitReleasingBrowsers(int code) {
   ChromeProfile.releaseAllNow();
+  ChildProcesses.killAllNow();
   exit(code);
 }
 

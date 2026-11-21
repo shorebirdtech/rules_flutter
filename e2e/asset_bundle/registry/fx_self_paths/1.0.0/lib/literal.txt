@@ -1,1 +1,1 @@
-lib copy, which the literal file wins over
+the copy in lib/, which the file as listed wins over

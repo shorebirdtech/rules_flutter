@@ -15,12 +15,19 @@ declaration to write.
 The library is a `flutter_pub_library` over the members of the cycle, or
 rules_dart's `pub_library` when none of them has anything of Flutter's.
 Either way its dependencies are the libraries of whatever the cycle depends on
-outside itself.
+outside itself. What those bring of Flutter's (a plugin, assets) reaches an
+application through a `pub_library` too: Flutter's rules read it across one
+with `flutter_info_forwarding_aspect`.
 """
 
 load("@rules_dart//dart/pub:pub_graph.bzl", "dependency_cycle", "dependency_graph", "read_pubspec_dependencies")
-load("//flutter/private:flutter_pub_index.bzl", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "library_repo", "owner_prefix", "read_index", "read_sibling_file", "source_repo")
-load("//flutter/private:pub_cycles.bzl", "DECLARE")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "read_pubspec_refusal")
+load("//flutter/private:failing_targets.bzl", "write_failing_build")
+load("//flutter/private:flutter_pub_index.bzl", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "MEMBER_STUB", "library_label", "library_repo", "owner_prefix", "pubspec_repo", "read_index", "read_sibling_file", "sibling_label", "source_repo")
+load("//flutter/private:lock_entry_kind.bzl", "ENGINE_PACKAGE")
+load("//flutter/private:pub_cycles.bzl", "DECLARE", "FROM_LOCK")
+
+visibility("//flutter/...")
 
 _MATERIAL_ICONS = "@rules_flutter//flutter:material_icons"
 
@@ -45,6 +52,15 @@ alias(
 )
 """.format(name = name, actual = actual)
 
+def _member_dependencies(member_dependencies):
+    """The `member_dependencies` attribute line of a library, sorted by member."""
+    if not member_dependencies:
+        return ""
+    return "    member_dependencies = {{{}}},\n".format(", ".join([
+        '"{}": {}'.format(m, _labels(sorted(member_dependencies[m])))
+        for m in sorted(member_dependencies)
+    ]))
+
 def _android_exports(android_libs):
     """The `exports` attribute line of a library: its members' Android libraries on Android."""
     if not android_libs:
@@ -55,7 +71,7 @@ def _android_exports(android_libs):
     }}),
 """.format(libs = _labels(android_libs))
 
-def make_library_build_content(name, members, deps, flutter, android_libs = []):
+def make_library_build_content(name, members, deps, flutter, android_libs = [], member_dependencies = {}):
     """BUILD content for the library of a dependency cycle.
 
     Args:
@@ -67,14 +83,17 @@ def make_library_build_content(name, members, deps, flutter, android_libs = []):
         (never one) also carries the runner `dart_test` uses.
       android_libs: Labels of the members' Android libraries, which a
         `flutter_pub_library` lists under `exports` on Android.
+      member_dependencies: For each member, by name, the packages its
+        pubspec depends on directly, which a `flutter_pub_library` lists so
+        each member's plugin depends on its own.
 
     Returns:
       BUILD.bazel content as a string.
     """
-    if name == _TEST_PACKAGE and not flutter:
+    if name == _TEST_PACKAGE:
         return _test_package_build_content(members, deps)
     load_statement, rule = (
-        ('load("@rules_flutter//flutter/private:flutter_pub_library.bzl", "flutter_pub_library")', "flutter_pub_library") if flutter else ('load("@rules_dart//dart/pub:pub_library.bzl", "pub_library")', "pub_library")
+        ('load("@rules_flutter//flutter/private:generated_repos.bzl", "flutter_pub_library")', "flutter_pub_library") if flutter else ('load("@rules_dart//dart/pub:pub_library.bzl", "pub_library")', "pub_library")
     )
     return """\
 {load_statement}
@@ -83,7 +102,7 @@ def make_library_build_content(name, members, deps, flutter, android_libs = []):
     name = "{name}",
     members = {members},
     deps = {deps},
-{exports}    visibility = ["//visibility:public"],
+{member_dependencies}{exports}    visibility = ["//visibility:public"],
 )
 """.format(
         load_statement = load_statement,
@@ -91,6 +110,7 @@ def make_library_build_content(name, members, deps, flutter, android_libs = []):
         name = name,
         members = _labels(members),
         deps = _labels(deps),
+        member_dependencies = _member_dependencies(member_dependencies) if flutter else "",
         exports = _android_exports(android_libs) if flutter else "",
     )
 
@@ -138,25 +158,81 @@ def overlay_in_cycle_error(package, cycle):
         others = ", ".join(["`{}`".format(p) for p in cycle if p != package]),
     )
 
+def unsupplied_dependency_error(index, graph, packages):
+    """The error for a package of a cycle depending on a package no lock lists.
+
+    Pub lists every package an app's dependencies reach in its lock, so a
+    package's pubspec names only packages the locks list. One that does not
+    would be built without the dependency it imports, and fail to compile
+    naming neither; its library fails instead, saying why.
+
+    Args:
+      index: The index, from `read_index`.
+      graph: Each package's pubspec dependencies, from `dependency_graph`.
+      packages: The packages of the cycle.
+
+    Returns:
+      The message, or None when every dependency is supplied.
+    """
+    for package in packages:
+        for dep in sorted(graph.get(package, [])):
+            if dep in index.built or dep in index.other:
+                continue
+            return (
+                "Pub package `{package}` {version} depends on `{dep}`, which no " +
+                "flutter_pub.from_lock() lock lists, so nothing supplies `{dep}` and " +
+                "`{package}` would be built without it. Pub lists every package an " +
+                "app's dependencies reach: run pub again for the lock that asks for " +
+                "`{package}` {version}:\n" +
+                "  bazel run @rules_flutter//flutter/pub -- get --directory=<the lock's directory>\n" +
+                "Locks: {locks}"
+            ).format(
+                package = package,
+                version = index.versions.get(package, "(from the Flutter SDK)"),
+                dep = dep,
+                locks = ", ".join(index.version_locks.get(package, index.locks)),
+            )
+    return None
+
 def _flutter_pub_library_repo_impl(ctx):
     package = ctx.attr.package_name
     index = read_index(ctx, ctx.attr.prefix)
 
-    # Every package this one reaches through built packages. The lock's other
-    # entries (`package:flutter`, entries nothing supplies) are leaves:
-    # they depend on built packages, never the other way round to a package
-    # that depends on them.
+    # Every package this one reaches through built packages, and through the
+    # packages `resolve` maps whose pubspec says what they depend on
+    # (`served`), as rules_dart's `pub.from_lock` plans: a cycle through one of
+    # those is refused, naming the target. The lock's other entries
+    # (`package:flutter`, entries nothing supplies, other mapped packages) are
+    # leaves: they depend on built packages, never the other way round to a
+    # package that depends on them.
+    def source(p):
+        if p in index.served:
+            return sibling_label(ctx, pubspec_repo(p, index.main_prefix))
+        return sibling_label(ctx, source_repo(p, owner_prefix(index, p)))
+
     graph = dependency_graph(
         package,
-        lambda p: [d for d in read_pubspec_dependencies(ctx, source_repo(p, owner_prefix(index, p))) if d in index.built or d in index.other],
-        follow = index.built,
+        # The engine supplies `sky_engine`; every other dependency must be a
+        # package of the locks (`unsupplied_dependency_error`).
+        lambda p: [d for d in read_pubspec_dependencies(ctx, source(p)) if d != ENGINE_PACKAGE],
+        follow = dict(index.built, **index.served),
     )
+
+    # A mapped package whose pubspec is missing inside the repository, or
+    # that pub refuses, stops every build reaching it, as in rules_dart.
+    for member in graph:
+        refusal = read_pubspec_refusal(ctx, source(member)) if member in index.served else None
+        if refusal:
+            write_failing_build(ctx, [package], refusal)
+            return ctx.repo_metadata(reproducible = True)
     cycle = dependency_cycle(
         graph,
         package,
         declared = index.cycles,
         advisory = index.advisory_cycles,
         declare = DECLARE,
+        served = index.served,
+        from_lock = FROM_LOCK,
     )
     if cycle.owner != package:
         ctx.file("BUILD.bazel", make_alias_build_content(
@@ -165,10 +241,24 @@ def _flutter_pub_library_repo_impl(ctx):
         ))
         return ctx.repo_metadata(reproducible = True)
 
+    unsupplied = unsupplied_dependency_error(index, graph, cycle.packages)
+    if unsupplied:
+        write_failing_build(ctx, [package], unsupplied)
+        return ctx.repo_metadata(reproducible = True)
+
     members = {
         member: json.decode(read_sibling_file(ctx, source_repo(member, owner_prefix(index, member)), MEMBER_FILE))
         for member in cycle.packages
     }
+    stubs = [m for m in cycle.packages if members[m]["kind"] == MEMBER_STUB]
+    if stubs:
+        # A package its SDK cannot supply: the cycle's library is its target,
+        # which fails, saying why, when a build uses it.
+        ctx.file("BUILD.bazel", make_alias_build_content(
+            package,
+            "@{}//:{}".format(source_repo(stubs[0], owner_prefix(index, stubs[0])), stubs[0]),
+        ))
+        return ctx.repo_metadata(reproducible = True)
     overlays = [m for m, info in members.items() if info["kind"] == MEMBER_OVERLAY]
     if overlays and len(cycle.packages) > 1:
         fail(overlay_in_cycle_error(overlays[0], cycle.packages))
@@ -191,6 +281,7 @@ def _flutter_pub_library_repo_impl(ctx):
         deps = sorted(deps),
         flutter = bool([m for m in members.values() if m["kind"] == MEMBER_FLUTTER]),
         android_libs = ["@{}//android:lib".format(source_repo(m, owner_prefix(index, m))) for m in cycle.packages if members[m].get("android_lib")],
+        member_dependencies = {m: graph.get(m, []) for m in cycle.packages},
     ))
     return ctx.repo_metadata(reproducible = True)
 

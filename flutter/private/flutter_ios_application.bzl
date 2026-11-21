@@ -20,23 +20,26 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 # native-asset frameworks that apple_dynamic_framework_import can't express
 # (it accepts a single .framework). This is the same helper that rule uses.
 # buildifier: disable=bzl-visibility
-load("@build_bazel_rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
+load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterSdkRecordInfo")
-load("//flutter/private:apple_xcode.bzl", "declare_dsym", "run_xcode_tool", "split_and_strip_aot_binary")
+load("//flutter/private:apple_xcode.bzl", "NATIVE_LIBRARY_SYMBOLS_ATTRS", "declare_dsym", "declare_library_dsym", "native_library_symbols", "process_native_library", "rewrite_install_names", "run_xcode_tool", "split_and_strip_aot_binary")
 load("//flutter/private:assemble_directory.bzl", "ASSEMBLE_DIRECTORY_ATTRS", "assemble_directory")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "candidate_code_asset_libraries", "native_asset_framework_name", "run_code_assets_tool")
+load("//flutter/private:flutter_native_assets.bzl", "APPLE_FRAMEWORK_NAMES_FILE", "AppleFrameworkNamesInfo", "CODE_ASSETS_TOOL_ATTRS", "add_apple_framework_args", "app_apple_framework_names", "bundled_library_debug_info", "candidate_code_asset_libraries", "run_code_assets_tool", "shipped_dsyms")
 load("//flutter/private:mobile_engine_check.bzl", "check_ios_engine")
+load("//flutter/private:native_libraries.bzl", "native_library_files")
 load("//flutter/private:program_analysis.bzl", "bundled_program_info")
+
+visibility("//flutter/...")
 
 def _flutter_ios_application_impl(ctx):
     """Bundles Flutter compilation outputs for iOS packaging."""
     app_info = ctx.attr.application[FlutterApplicationInfo]
     flutter_assets = app_info.flutter_assets
-    native_libs = app_info.native_libs
+    native_libs = native_library_files(app_info)
 
     outputs = [flutter_assets] + native_libs
     output_groups = {
@@ -317,8 +320,9 @@ def _flutter_ios_native_frameworks_impl(ctx):
     `native_libs` set (FFI `native_deps`) and every code-asset candidate
     contributed by Native Assets `dynamic_loading_bundle` declarations — is
     repackaged as `<name>.framework/<name>` (binary + Info.plist) with its
-    install name rewritten to `@rpath/<name>.framework/<name>`, matching
-    flutter_tools' `copyNativeCodeAssetsIOS`. The resulting
+    install name rewritten to `@rpath/<name>.framework/<name>`, and its links
+    to the others rewritten to theirs, matching flutter_tools'
+    `copyNativeCodeAssetsIOS`. The resulting
     `AppleFrameworkImportInfo` lets `ios_application` embed and code-sign each
     framework; the engine `dlopen`s the framework-relative path the
     native-assets manifest records (see flutter_native_assets.bzl).
@@ -326,38 +330,59 @@ def _flutter_ios_native_frameworks_impl(ctx):
     rules_apple has to know each framework it embeds when the app is
     analysed, and which code assets ship is known only when the app is built
     (a release build's link hooks choose), so every candidate is wrapped.
-    `flutter_application` has checked no two of these share a framework name.
+    Each framework's name is the one `apple_framework_names` gives its library,
+    as every rule that names one has it; the names are also written to
+    `rules_flutter_apple_frameworks.json`, for the dev tool to find each
+    library's framework in the running app.
     """
     app_info = ctx.attr.application[FlutterApplicationInfo]
     dylibs = list({
         lib: None
-        for lib in list(app_info.native_libs) + candidate_code_asset_libraries(app_info.program_assets)
+        for lib in list(native_library_files(app_info)) + candidate_code_asset_libraries(app_info.program_assets)
     }.keys())
     minimum_os_version = ctx.attr.minimum_os_version
 
+    symbols = native_library_symbols(ctx)
     framework_files = []
-    for dylib in dylibs:
-        name = native_asset_framework_name(dylib.basename)
+    always_dsyms = []
+    candidate_dsyms = []
+    native_libs = native_library_files(app_info)
+    by_file_name = app_apple_framework_names(native_library_files(app_info), app_info.program_assets)
+    names = {dylib: by_file_name[dylib.basename] for dylib in dylibs}
+    framework_names = ctx.actions.declare_file("%s/%s" % (ctx.label.name, APPLE_FRAMEWORK_NAMES_FILE))
+    ctx.actions.write(framework_names, json.encode_indent(by_file_name, indent = "  ") + "\n")
+    debug_info = bundled_library_debug_info(ctx.attr.application) if symbols.dsym else {}
 
+    # A library that links another bundled here records it by its old install
+    # name; each is rewritten to the framework the other ships in.
+    install_name_changes = rewrite_install_names(
+        ctx,
+        ctx.label.name + "_install_names",
+        [(dylib, "@rpath/%s.framework/%s" % (name, name)) for dylib, name in names.items()],
+    )
+    for dylib, name in names.items():
         binary = ctx.actions.declare_file("%s/%s.framework/%s" % (ctx.label.name, name, name))
         plist = ctx.actions.declare_file("%s/%s.framework/Info.plist" % (ctx.label.name, name))
 
         # Copy the dylib into the framework and rewrite its install name so the
         # dynamic linker resolves it from the embedded framework via @rpath.
-        run_xcode_tool(
+        # Its dSYM is `<name>.framework.dSYM`, as `flutter build ios` names it.
+        dsym = declare_library_dsym(ctx, ctx.label.name, name + ".framework", name) if symbols.dsym else None
+        process_native_library(
             ctx,
-            command = 'cp "$1" "$2" && xcrun install_name_tool -id "$3" "$2"',
-            arguments = [ctx.actions.args().add_all([
-                dylib,
-                binary,
-                "@rpath/%s.framework/%s" % (name, name),
-            ])],
-            inputs = [dylib],
-            outputs = [binary],
+            library = dylib,
+            output = binary,
+            symbols = symbols,
             mnemonic = "FlutterIOSNativeAssetFramework",
-            execution_requirements = PATH_MAPPING,
-            progress_message = "Wrapping %s into %s.framework" % (dylib.basename, name),
+            dsym = dsym,
+            debug_info = debug_info.get(dylib),
+            install_name = "@rpath/%s.framework/%s" % (name, name),
+            install_name_changes = install_name_changes,
         )
+        if dsym and dylib in native_libs:
+            always_dsyms.append(dsym)
+        elif dsym:
+            candidate_dsyms.append((dylib.basename, dsym))
 
         ctx.actions.write(plist, _NATIVE_ASSET_FRAMEWORK_INFO_PLIST.format(
             name = name,
@@ -368,13 +393,18 @@ def _flutter_ios_native_frameworks_impl(ctx):
         framework_files.append(binary)
         framework_files.append(plist)
 
+    dsyms = shipped_dsyms(ctx, app_info.program_assets, always_dsyms, candidate_dsyms)
     return [
         DefaultInfo(files = depset(framework_files)),
         framework_import_support.framework_import_info_with_dependencies(
             build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
             deps = [],
             framework_imports = framework_files,
+            # Those of the libraries that ship, which rules_apple puts in the
+            # app's `dsyms` output group.
+            dsyms = [dsyms] if dsyms else [],
         ),
+        AppleFrameworkNamesInfo(file = framework_names),
         # For the app to pass on to analysis (`flutter_apple_app`).
     ] + bundled_program_info(ctx.attr.application)
 
@@ -383,6 +413,8 @@ flutter_ios_native_frameworks = rule(
     attrs = dicts.add(
         apple_support.action_required_attrs(),
         apple_support.platform_constraint_attrs(),
+        NATIVE_LIBRARY_SYMBOLS_ATTRS,
+        CODE_ASSETS_TOOL_ATTRS,
         {
             "application": attr.label(
                 doc = "A flutter_application target providing FlutterApplicationInfo.",
@@ -396,9 +428,15 @@ flutter_ios_native_frameworks = rule(
         },
     ),
     # install_name_tool runs where the Apple C++ toolchain does.
-    fragments = ["apple"],
+    exec_groups = PORTABLE_EXEC_GROUPS,
+    fragments = ["apple", "cpp"],
     toolchains = use_cc_toolchain(mandatory = True),
-    doc = "Wraps native plugin/native-asset dylibs in signed .frameworks for iOS bundling.",
+    doc = """Wraps native plugin/native-asset dylibs in signed .frameworks for iOS bundling.
+
+Each binary is stripped of its local symbols and debugging map with
+`--objc_enable_binary_stripping` in `-c opt`, and its dSYM made with
+`--apple_generate_dsym`, as rules_apple treats the app's own binary. The dSYMs
+are in the `dsyms` output group of the app that bundles them.""",
 )
 
 # -- flutter_ios_dropped_frameworks (code assets a link hook dropped) ----------
@@ -411,6 +449,7 @@ def _flutter_ios_dropped_frameworks_impl(ctx):
     args.add("--output", output)
     if ctx.attr.conflict:
         args.add("--conflict", ctx.attr.conflict)
+    add_apple_framework_args(args, app_apple_framework_names(native_library_files(app_info), app_info.program_assets))
     run_code_assets_tool(
         ctx,
         "ios-dropped-frameworks",

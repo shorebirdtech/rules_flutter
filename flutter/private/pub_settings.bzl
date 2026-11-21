@@ -1,5 +1,7 @@
 """The `pub` extension's root-only statements: `flutter_pub.settings` and ignored hooks."""
 
+visibility("//flutter/...")
+
 def root_only_settings(modules):
     """The root's `flutter_pub.settings` and ignored hooks, refusing either from any other module.
 
@@ -61,7 +63,8 @@ def root_annotations(modules, maven_prefix):
 
     Returns:
       `struct(by_package, error)`: the annotation fields by package name (a
-      dict of `android_deps`, a list of label strings), and the message
+      dict of `android_deps`, a list of label strings, and
+      `build_config_fields`, field name to Java expression), and the message
       refusing the statements, None when there is none.
     """
     by_package = {}
@@ -87,7 +90,10 @@ def root_annotations(modules, maven_prefix):
                         "`android_deps`, which is not an artifact of `@rules_flutter_maven`. " +
                         "Write `\"@rules_flutter_maven//:<artifact target>\"`."
                     ) % (tag.package, dep))
-            by_package[tag.package] = {"android_deps": android_deps}
+            by_package[tag.package] = {
+                "android_deps": android_deps,
+                "build_config_fields": dict(tag.build_config_fields),
+            }
     return struct(by_package = by_package, error = None)
 
 def unknown_annotation(by_package, known):

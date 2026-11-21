@@ -12,10 +12,14 @@
 ///     by the next build, and the tool output a package directory collects
 ///     (`build/`, `.dart_tool/`, `android/.gradle/`, `android/build/`) neither
 ///     enters the repository nor fetches it again.
-///  3. A directory with a Bazel build of its own, or none at all, is refused
-///     when the package is fetched, saying what to do.
+///  3. A directory with a Bazel build of its own, with no pubspec, or none
+///     at all, is refused by the builds that use the package, saying what to
+///     do; the package's repository still fetches (`bazel fetch --all`).
 ///  4. An ignored package leaves the hub loading, and a target that depends
 ///     on it fails at analysis with the reason the module gives.
+///  5. Its repository is local, inside the repository or out, as a
+///     `local_repository` is: `bazel vendor` leaves it out. Outside, by an
+///     absolute path too, it is built from the directory it names.
 @Tags(['e2e'])
 library;
 
@@ -71,6 +75,29 @@ PubInputsFixture _fixture({
   extraLockEntries: pathEntry('greeting', path),
 );
 
+/// That `greeting`'s repository is local, and `bazel vendor` leaves it out.
+Future<void> _expectLocal(PubInputsWorkspace ws) async {
+  const repo = '@@rules_flutter++pub+flutter_pub__greeting';
+  final shown = await ws.bazel(['mod', 'show_repo', repo]);
+  expect(shown.succeeded, isTrue, reason: '$shown');
+  expect(
+    RegExp(r'^(\w+)\($', multiLine: true).firstMatch(shown.stdout)![1],
+    'flutter_pub_path_package',
+  );
+  final vendor = await Directory.systemTemp.createTemp('path_vendor_');
+  addTearDown(() => vendor.delete(recursive: true));
+  final vendored = await ws.bazel([
+    'vendor',
+    '--vendor_dir=${vendor.path}',
+    '--repo=$repo',
+  ]);
+  expect(vendored.succeeded, isTrue, reason: '$vendored');
+  expect(
+    vendor.listSync().map((e) => p.basename(e.path)),
+    isNot(contains('rules_flutter++pub+flutter_pub__greeting')),
+  );
+}
+
 void main() {
   group('a package built from its pubspec', () {
     test('is its directory in this repository', () async {
@@ -84,6 +111,7 @@ void main() {
           p.join(ws.root, 'packages', 'greeting', 'lib'),
         ).resolveSymbolicLinksSync(),
       );
+      await _expectLocal(ws);
     });
 
     test('is its directory outside the repository', () async {
@@ -101,6 +129,60 @@ void main() {
       ws.writeLock(ws.lockWith(pathEntry('greeting', relative)));
       final build = await ws.bazel(['build', '//:app']);
       expect(build.succeeded, isTrue, reason: '$build');
+      await _expectLocal(ws);
+
+      // An absolute path, as a lock written on this machine may hold.
+      ws.writeLock(
+        ws.lockWith(pathEntry('greeting', outside.path, relative: false)),
+      );
+      final absolute = await ws.bazel(['build', '//:app']);
+      expect(absolute.succeeded, isTrue, reason: '$absolute');
+      final spoke = await ws.spokeDirectory('greeting');
+      expect(
+        Directory(p.join(spoke.path, 'lib')).resolveSymbolicLinksSync(),
+        Directory(p.join(outside.path, 'lib')).resolveSymbolicLinksSync(),
+      );
+    });
+
+    test('are several, under one directory beside the repository', () async {
+      // A monorepo's sibling checkout, as `../other/packages/<name>` from the
+      // workspace root: the lock's paths lead out through it.
+      final ws = await _fixture(
+        package: {},
+        buildFromPubspec: const ['greeting', 'farewell'],
+      ).materialize();
+      final sibling = Directory('${ws.root}_sibling');
+      addTearDown(() => sibling.delete(recursive: true));
+      final files = {
+        ..._package('${sibling.path}/packages/greeting'),
+        '${sibling.path}/packages/farewell/pubspec.yaml':
+            'name: farewell\nversion: 1.0.0\nenvironment:\n  sdk: ^3.0.0\n',
+        '${sibling.path}/packages/farewell/lib/farewell.dart': 'int bye = 2;\n',
+      };
+      for (final MapEntry(:key, :value) in files.entries) {
+        File(key)
+          ..createSync(recursive: true)
+          ..writeAsStringSync(value);
+      }
+      final up = '../../../${p.basename(sibling.path)}/packages';
+      ws.writeLock(
+        ws.lockWith(
+          pathEntry('greeting', '$up/greeting') +
+              pathEntry('farewell', '$up/farewell'),
+        ),
+      );
+      final build = await ws.bazel(['build', '//:app', '@pubhub//:farewell']);
+      expect(build.succeeded, isTrue, reason: '$build');
+      for (final name in ['greeting', 'farewell']) {
+        final spoke = await ws.spokeDirectory(name);
+        expect(
+          Directory(p.join(spoke.path, 'lib')).resolveSymbolicLinksSync(),
+          Directory(
+            p.join(sibling.path, 'packages', name, 'lib'),
+          ).resolveSymbolicLinksSync(),
+        );
+      }
+      await _expectLocal(ws);
     });
 
     test('follows its directory, and not the tool output in it', () async {
@@ -178,10 +260,22 @@ void main() {
         fixture: _fixture(path: '../../packages/missing'),
         says: ['packages/missing does not exist', '`resolve`', '`ignored`'],
       ),
+      'no pubspec': (
+        fixture: _fixture(
+          path: '../../packages/empty',
+          files: {'packages/empty/lib/greeting.dart': 'int value = 1;\n'},
+        ),
+        says: ['packages/empty has no pubspec.yaml', '`resolve`', '`ignored`'],
+      ),
     };
     for (final MapEntry(:key, :value) in refusals.entries) {
       test('is refused for $key', () async {
         final ws = await value.fixture.materialize();
+        final fetch = await ws.bazel([
+          'fetch',
+          '--repo=@@rules_flutter++pub+flutter_pub__greeting',
+        ]);
+        expect(fetch.succeeded, isTrue, reason: '$fetch');
         final result = await ws.bazel(['build', '//:app']);
         expect(result.succeeded, isFalse, reason: '$result');
         for (final fragment in value.says) {

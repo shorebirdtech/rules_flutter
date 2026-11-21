@@ -1,7 +1,7 @@
 import 'package:codegen_e2e/user.dart';
 import 'package:dep_lib/catalog.dart';
 import 'package:dep_part/settings.dart';
-import 'package:flutter/widgets.dart';
+import 'package:material_ui/material_ui.dart';
 
 void main() {
   runApp(const CodegenApp(user: User('Ada Lovelace', 36)));
@@ -25,24 +25,17 @@ class CodegenApp extends StatelessWidget {
     // reload.
     const settings = Settings('dark');
     const catalog = Catalog('demo');
-    // Widgets only: Flutter 3.50 deprecates package:flutter/material.dart
-    // for package:material_ui, which 3.47 has no copy of, and this example
-    // runs on both.
-    return Directionality(
-      textDirection: TextDirection.ltr,
-      child: ColoredBox(
-        color: const Color(0xFFFFFFFF),
-        child: DefaultTextStyle(
-          style: const TextStyle(color: Color(0xFF000000), fontSize: 14),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('${user.toJson()}'),
-                Text('${settings.toJson()}'),
-                Text('fields:${catalog.fieldSummary}'),
-              ],
-            ),
+    return MaterialApp(
+      title: 'Codegen Example',
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('${user.toJson()}'),
+              Text('${settings.toJson()}'),
+              Text('fields:${catalog.fieldSummary}'),
+            ],
           ),
         ),
       ),

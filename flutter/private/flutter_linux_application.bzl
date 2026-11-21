@@ -29,8 +29,11 @@ load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir", "linux_mu
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "plugin_link_flags")
 load("//flutter/private:mobile_engine_check.bzl", "check_desktop_engine")
+load("//flutter/private:native_libraries.bzl", "native_library_files")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "registrant_include_dirs")
+
+visibility("//flutter/...")
 
 # GTK3 include subdirectories within the Chromium sysroot.
 _GTK3_INCLUDE_SUBDIRS = [
@@ -436,7 +439,7 @@ def _flutter_linux_bundle_impl(ctx):
 
     # The `native_deps` libraries always ship; the code assets are placed by
     # the bundle tool, which reads which of them ship (`code_asset_os`).
-    native_libs = list(app_info.native_libs)
+    native_libs = list(native_library_files(app_info))
     code_assets = program_assets_action_args(ctx.actions, app_info.program_assets, data = False)
     is_debug = app_info.is_debug
 
@@ -456,10 +459,18 @@ def _flutter_linux_bundle_impl(ctx):
         )
     engine_files = flutter_sdk_info.engine_library[DefaultInfo].files.to_list()
 
+    # Only the engine's shared library ships in `lib/`, as the CMake install
+    # step of `flutter build linux` puts `libflutter_linux_gtk.so` there: the
+    # engine's headers are for compiling the runner and plugins.
+    engine_runtime_files = [f for f in engine_files if f.extension == "so"]
+
     # Build the bundle config JSON for the Dart bundler tool. Both
-    # `native_libs` (the legacy FFI cc_library outputs) and the code assets
-    # that ship (Native Assets dynamic_loading_bundle libraries) land at
-    # `lib/<basename>` next to `libapp.so`.
+    # `native_libs` (the `native_deps` libraries) and the code assets that
+    # ship (Native Assets dynamic_loading_bundle libraries) land at
+    # `lib/<basename>` next to `libapp.so`, placed by one step
+    # (`code_assets.dart`'s `place`): each library's runpath entries relative
+    # to `$ORIGIN` become `$ORIGIN`, so one that links another finds it
+    # there, as Bazel's `$ORIGIN/_solib_<cpu>/...` would not.
     # Every path in the bundle config is a `file_ref`, which Bazel fills in
     # when it writes the config, path-mapped where the action is.
     refs = []
@@ -469,8 +480,8 @@ def _flutter_linux_bundle_impl(ctx):
         aot_output_path = file_ref(refs, app_info.aot_output) if app_info.aot_output else None,
         aot_dst = "lib/libapp.so",
         icu_data_path = file_ref(refs, icu_data),
-        engine_basenames = [(file_ref(refs, f), f.basename) for f in engine_files],
-        native_basenames = [(file_ref(refs, lib), lib.basename) for lib in native_libs],
+        engine_basenames = [(file_ref(refs, f), f.basename) for f in engine_runtime_files],
+        native_basenames = [],
     )
     extra_inputs = []
     if is_debug and app_info.kernel_dill:
@@ -507,9 +518,10 @@ def _flutter_linux_bundle_impl(ctx):
             {"src": file_ref(refs, flutter_assets), "dst": "data/flutter_assets"},
         ],
         "code_asset_os": "linux",
+        "libraries": [file_ref(refs, lib) for lib in native_libs],
     }
 
-    inputs = [ctx.file._bundle_tool, flutter_assets, icu_data, runner_binary] + ctx.files._bundle_tool_imports + extra_inputs + native_libs + engine_files
+    inputs = [ctx.file._bundle_tool, flutter_assets, icu_data, runner_binary] + ctx.files._bundle_tool_imports + extra_inputs + native_libs + engine_runtime_files
 
     args = ctx.actions.args()
     args.add(ctx.file._bundle_tool)
@@ -530,9 +542,16 @@ def _flutter_linux_bundle_impl(ctx):
     )
 
     application = ctx.attr.application
+    groups = application[OutputGroupInfo] if OutputGroupInfo in application else None
 
-    # The program's own Dart files, for rules_dart's analysis of the app.
-    return [DefaultInfo(files = depset([bundle_dir]))] + (
+    return [
+        DefaultInfo(files = depset([bundle_dir])),
+        # The `.symbols` of the snapshot the bundle ships, with
+        # `--@rules_dart//dart:split_debug_info`: the application is built in
+        # this target's configuration.
+        OutputGroupInfo(debug_info = groups.debug_info if groups and "debug_info" in groups else depset()),
+    ] + (
+        # The program's own Dart files, for rules_dart's analysis of the app.
         [application[DartAnalyzableInfo]] if DartAnalyzableInfo in application else []
     )
 

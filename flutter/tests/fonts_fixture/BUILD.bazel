@@ -45,6 +45,27 @@ fonts_bundled_test(
     target_under_test = ":two_fonts",
 )
 
+# A program reaching the library through two of its deps lists each family
+# once.
+flutter_library(
+    name = "reaches_two_fonts",
+    srcs = ["lib/fixture.dart"],
+    tags = ["manual"],
+    deps = [":two_fonts"],
+)
+
+fonts_bundled_test(
+    name = "two_fonts_reached_twice_test",
+    size = "small",
+    also_through = ":reaches_two_fonts",
+    files = {
+        "packages/font_package/fonts/Bold.ttf": "fonts/Bold.ttf",
+        "packages/font_package/fonts/Regular.ttf": "fonts/Regular.ttf",
+    },
+    manifest = '[{"family":"packages/font_package/F","fonts":[{"asset":"packages/font_package/fonts/Regular.ttf"},{"asset":"packages/font_package/fonts/Bold.ttf","style":"italic","weight":700}]}]',
+    target_under_test = ":two_fonts",
+)
+
 # In a program of the library's own package (its own `flutter_test`, say) the
 # fonts are the program's: the family and the files are bare, as the
 # package's pubspec declares them.
@@ -58,6 +79,27 @@ fonts_bundled_test(
     manifest = '[{"family":"F","fonts":[{"asset":"fonts/Regular.ttf"},{"asset":"fonts/Bold.ttf","style":"italic","weight":700}]}]',
     own_package = True,
     target_under_test = ":two_fonts",
+)
+
+# A library with fonts and no Dart, as an app's own fonts can be: `srcs` is
+# left out.
+flutter_library(
+    name = "fonts_only",
+    fonts = [":f"],
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+)
+
+fonts_bundled_test(
+    name = "fonts_only_test",
+    size = "small",
+    files = {
+        "fonts/Bold.ttf": "fonts/Bold.ttf",
+        "fonts/Regular.ttf": "fonts/Regular.ttf",
+    },
+    manifest = '[{"family":"F","fonts":[{"asset":"fonts/Regular.ttf"},{"asset":"fonts/Bold.ttf","style":"italic","weight":700}]}]',
+    own_package = True,
+    target_under_test = ":fonts_only",
 )
 
 # No `package_name`: the Dart package name derived from the BUILD file's path
@@ -92,10 +134,11 @@ assets_owner_test(
 )
 
 # A font of another package keeps that package's path; only the family is this
-# package's, which is what flutter_tools writes to FontManifest.json.
+# package's, which is what flutter_tools writes to FontManifest.json. The file
+# is under that package's `lib/`, where flutter_tools finds it.
 flutter_font(
     name = "other",
-    src = "//flutter/tests/fonts_fixture/other:fonts/Other.ttf",
+    src = "//flutter/tests/fonts_fixture/other:lib/fonts/Other.ttf",
     asset = "packages/other/fonts/Other.ttf",
 )
 
@@ -116,7 +159,7 @@ flutter_library(
 fonts_bundled_test(
     name = "font_of_other_package_test",
     size = "small",
-    files = {"packages/other/fonts/Other.ttf": "other/fonts/Other.ttf"},
+    files = {"packages/other/fonts/Other.ttf": "other/lib/fonts/Other.ttf"},
     manifest = '[{"family":"packages/font_package/F","fonts":[{"asset":"packages/other/fonts/Other.ttf"}]}]',
     target_under_test = ":font_of_other_package",
 )
@@ -126,7 +169,7 @@ fonts_bundled_test(
 fonts_bundled_test(
     name = "font_of_other_package_own_package_test",
     size = "small",
-    files = {"packages/other/fonts/Other.ttf": "other/fonts/Other.ttf"},
+    files = {"packages/other/fonts/Other.ttf": "other/lib/fonts/Other.ttf"},
     manifest = '[{"family":"F","fonts":[{"asset":"packages/other/fonts/Other.ttf"}]}]',
     own_package = True,
     target_under_test = ":font_of_other_package",

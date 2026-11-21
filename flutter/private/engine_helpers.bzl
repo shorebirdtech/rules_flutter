@@ -1,10 +1,11 @@
 """Shared engine helpers for Flutter repository rules.
 
 Centralizes engine filegroup templates, binary name detection, platform
-mapping, and macOS double-zip extraction used by the engine repository rules.
+mapping, and the macOS double zip, used by the repositories of the engine
+artifacts.
 """
 
-load(":versions.bzl", "flutter_has_const_finder")
+visibility("//flutter/...")
 
 # -- Engine filegroup templates ------------------------------------------------
 # One template per OS. `{name}` is the target's name, which says the build
@@ -206,22 +207,20 @@ def engine_arch_for_os(os_name, arch):
 
 # -- macOS double-zip extraction -----------------------------------------------
 
-def extract_macos_inner_framework(repository_ctx, base_dir = "engine"):
-    """Extract the inner FlutterMacOS.framework.zip from a macOS engine download.
+def macos_inner_framework(base_dir = "engine"):
+    """The inner FlutterMacOS.framework.zip of a macOS engine download.
 
     macOS engine artifacts are double-zipped: the outer zip contains
-    FlutterMacOS.framework.zip which must be extracted to get the actual
-    .framework directory.
+    FlutterMacOS.framework.zip, which is extracted in its place to get the
+    actual .framework directory.
 
     Args:
-        repository_ctx: The repository_rule context.
         base_dir: Directory where the outer zip was extracted (default "engine").
+
+    Returns:
+        A `nested_archives` entry of `archive_repo`.
     """
-    repository_ctx.extract(
-        archive = base_dir + "/FlutterMacOS.framework.zip",
-        output = base_dir + "/FlutterMacOS.framework",
-    )
-    repository_ctx.delete(base_dir + "/FlutterMacOS.framework.zip")
+    return {base_dir + "/FlutterMacOS.framework.zip": base_dir + "/FlutterMacOS.framework"}
 
 # -- Engine file discovery helpers for desktop rules --------------------------
 
@@ -295,21 +294,3 @@ def find_engine_header_dir(engine_files, header_suffix):
             idx = f.path.rfind(header_suffix)
             return f.path[:idx].rstrip("/")
     return None
-
-def const_finder_attr(flutter_version, path):
-    """The `const_finder` line of a generated `flutter_host_tools`.
-
-    Empty from Flutter 3.50 on, whose `font-subset.zip` no longer carries the
-    snapshot: those toolchains shake icons from the uses the AOT kernel
-    compile records instead (see `flutter_build_assets`).
-
-    Args:
-        flutter_version: The Flutter release the tools are for.
-        path: The snapshot's label or path in the generated BUILD file.
-
-    Returns:
-        A BUILD-file line (with its indent), or "".
-    """
-    if not flutter_has_const_finder(flutter_version):
-        return ""
-    return '    const_finder = "{}",'.format(path)

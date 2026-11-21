@@ -15,6 +15,8 @@ load("@rules_dart//dart:utils.bzl", "dart_program_assets_actions", "program_kern
 load("//flutter/private:common.bzl", "program_package", "program_package_files")
 load("//flutter/private:constants.bzl", "ANDROID_MIN_SDK_VERSION", "IOS_MINIMUM_OS_VERSION", "MACOS_MINIMUM_OS_VERSION")
 
+visibility("//flutter/...")
+
 def link_hooks_plan(program, deps, links):
     """Whether a program is linked, decided before its compile.
 
@@ -58,7 +60,8 @@ def program_assets(ctx, program, deps, plan, recorded_uses, name, code_config = 
         program: The program, from `flutter_program_inputs`.
         deps: The `deps` whose closure is linked, as given to `link_hooks_plan`.
         plan: What `link_hooks_plan` returned.
-        recorded_uses: The recorded-uses JSON File when `plan.runs`, else None.
+        recorded_uses: The recorded-uses JSON File, which the hooks read when
+            `plan.runs`; None when nothing reads it.
         name: Prefix for the outputs, unique within the package.
         code_config: What every link hook is told of the target's code
             assets (`native_code_config(...)` for a native one), or None for the

@@ -29,11 +29,12 @@ The latest tag is the current stable release.
 
 **Files**:
 
-- `flutter/private/versions.bzl` — `FLUTTER_VERSIONS`, `FLUTTER_SDK_EXACT_PINS`,
-  `FLUTTER_SDK_PACKAGES` and `ARTIFACT_CHECKSUMS`
+- `flutter/private/versions.bzl` — `FLUTTER_VERSIONS`, `FLUTTER_SDK_PACKAGES`
+  and `ARTIFACT_CHECKSUMS`
 - `MODULE.bazel` — `flutter_version` in the `flutter.toolchain()` call, and the
   `flutter_outline.toolchain()` calls below it (see step 5)
-- Every `e2e/*/MODULE.bazel` — their own `flutter.toolchain()` calls
+- Every `e2e/*/MODULE.bazel` — their own `flutter.toolchain()` calls, and the
+  `flutter_version` of `flutter.custom_framework()` in `e2e/custom_engine`
 - `README.md` — the Requirements table, the `MODULE.bazel` snippets under
   Getting started and further down, and the `FlutterSdkInfo.version` example
   under Providers
@@ -48,7 +49,7 @@ The latest tag is the current stable release.
 2. Run `bazel run //tools/update_flutter_version -- <new-version>`. It looks up
    the engine revision from the tag, downloads and hashes each artifact, and
    prints the Starlark to put in `flutter/private/versions.bzl`, including the
-   exact pins of the SDK's own packages and the list of those packages.
+   list of the SDK's own packages.
 3. Copy the printed snippets into `flutter/private/versions.bzl`.
 4. Update `flutter_version` in `MODULE.bazel`, the e2e workspaces and the
    README.
@@ -128,8 +129,10 @@ Dart versions those need. Then `bazel test //...` in `e2e/smoke`.
 
 Every workspace's `MODULE.bazel.lock` is checked: the root's and each e2e
 workspace's (their `.bazelrc` sets `--lockfile_mode=error`). The tools run
-Bazel without the gitignored `.bazelrc.user`, whose `--override_module` lines
-would otherwise put a local checkout's module graph into a lock.
+Bazel with every rc file Bazel reads, the gitignored `.bazelrc.user` included,
+whose `--override_module` lines would put a local checkout's module graph into
+a lock. Move the `.bazelrc.user` files aside (root and every e2e workspace)
+before a refresh or a check, and put them back afterwards.
 
 **Procedure**:
 
@@ -204,8 +207,8 @@ against the tree.
 
 **Trigger**: Periodic (monthly) or when a managed tool releases a version we need.
 
-**Files**: none in this repository. `git-cliff`, `prek`, `typos` and `yamlfmt`
-are pinned in rules_dart's `overhead/multitool.lock.json`, which every
+**Files**: none in this repository. `actionlint`, `buildifier`, `git-cliff`, `prek`, `shellcheck`, `typos` and
+`yamlfmt` are pinned in rules_dart's `overhead/multitool.lock.json`, which every
 repository that takes overhead as a dev dependency shares. Bump them there
 (rules_dart's CHORES.md has the procedure), then bump the `commit` of the
 `overhead` `git_override` in `MODULE.bazel` and the `uses:` refs in
@@ -219,7 +222,7 @@ fails if they differ. A new overhead commit can change `tools/preset.bazelrc`
 
 ## Git Hook Bumps
 
-**Trigger**: New versions of the git hooks (buildifier, etc.).
+**Trigger**: New versions of the git hooks (prettier, the pre-commit-hooks set).
 
 **Files**: `.pre-commit-config.yaml`
 
@@ -228,11 +231,8 @@ manual until you have actually seen a Renovate PR land here.
 
 Reconcile the revs that track something else in this repo:
 
-- `keith/pre-commit-buildifier` is the only buildifier in this repository; pick
-  the newest tag of the mirror. The fourth component is the mirror's own
-  packaging revision and it tags only some of them.
-- The commit-message, yamlfmt and typos hooks are local hooks that run
-  overhead's pinned tools (see § "Tool Version Bumps").
+- The commit-message, buildifier, yamlfmt, typos and actionlint hooks are local
+  hooks that run overhead's pinned tools (see § "Tool Version Bumps").
 - `pre-commit/mirrors-prettier` is archived upstream; `v3.1.0` is the last
   stable tag and is expected to stay pinned.
 

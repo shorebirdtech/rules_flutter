@@ -25,7 +25,8 @@ directory:
   * macOS:   `<App>.app/Contents/Frameworks/<basename>`
   * iOS:     `<App>.app/Frameworks/<name>.framework/<name>`: iOS forbids loose
              embedded dylibs, so each library is wrapped in a framework of its
-             own (flutter_tools' `frameworkUri`)
+             own (flutter_tools' `frameworkUri`), which the manifest names by
+             its install name, `@rpath/<name>.framework/<name>`
   * Linux:   `<bundle>/lib/<basename>`
   * Windows: next to the runner exe
   * Android: `lib/<abi>/<basename>` inside the APK
@@ -35,14 +36,16 @@ framework on iOS, and every id's entry names it, so the loader opens one image
 for all of them.
 
 A `flutter_test` keeps upstream's `flutter test` route: its manifest, written
-here (`write_native_assets_manifest`), is compiled into its kernel through the
-frontend_server's `--native-assets`.
+here (`write_native_assets_manifest`), is the `NativeAssetsManifest.json` of the
+test's assets directory, which flutter_tester reads.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_program_assets_actions", "program_kernel_code_assets")
+load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "dart_program_assets_actions", "program_assets_action_args", "program_kernel_code_assets")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "portable_tools")
+
+visibility("//flutter/...")
 
 # Map (target_os, arch) → the Target string Dart's
 # `Target.fromArchitectureAndOS` would produce. Keep this mirrored
@@ -91,11 +94,15 @@ flutter_application(
 ```
 """
 
+_FRAMEWORK_NAME_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+
 def native_asset_framework_name(filename):
     """Derive the framework name for a bundled native-asset dylib on Apple.
 
     Mirrors flutter_tools' `frameworkUri` (native_assets_host.dart): strip a
-    trailing `.dylib`, drop a leading `lib`, and sanitize to `[A-Za-z0-9_-]`.
+    trailing `.dylib` and then a leading `lib`, and keep only
+    `[A-Za-z0-9._-]`, the characters a bundle identifier may hold. A file that
+    is not a `.dylib` keeps its `lib`: `libfoo.so` is `libfoo.so`.
     iOS embeds each `dynamic_loading_bundle` dylib as `<name>.framework/<name>`.
     The manifest path and the framework-assembly rule both call this so they
     agree on the name.
@@ -111,11 +118,92 @@ def native_asset_framework_name(filename):
         name = name[:-len(".dylib")]
         if name.startswith("lib"):
             name = name[len("lib"):]
-    sanitized = ""
-    for c in name.elems():
-        if c.isalnum() or c == "_" or c == "-":
-            sanitized += c
-    return sanitized
+    return "".join([c for c in name.elems() if c in _FRAMEWORK_NAME_CHARACTERS])
+
+# The file an Apple app's framework rule writes `apple_framework_names` to,
+# which `flutter_native_hot_patch_aspect` hands the dev tool.
+APPLE_FRAMEWORK_NAMES_FILE = "rules_flutter_apple_frameworks.json"
+
+AppleFrameworkNamesInfo = provider(
+    doc = "The framework each bundled library of an Apple app ships in.",
+    fields = {"file": "File: `APPLE_FRAMEWORK_NAMES_FILE`, a JSON object from library file name to framework name."},
+)
+
+def apple_framework_names(libraries):
+    """The framework each of an Apple app's bundled libraries ships in, by file name.
+
+    flutter_tools' `frameworkUri` (native_assets_host.dart) over the libraries
+    in the order of their file names: each is named by
+    `native_asset_framework_name`, and a name an earlier one took gains `1`,
+    `2`, ... up to 999, as `foo.dylib` and `libfoo.dylib` ship as `foo` and
+    `foo1`. flutter_tools names them in the order its build hooks reported
+    them; file-name order is the one every rule that names a framework can
+    reproduce from the same libraries, so the bundle, the manifest, the list
+    of frameworks to drop and the dev tool agree.
+
+    Args:
+      libraries: Files: every library the app bundles, its `native_deps` and
+        every code-asset candidate, repeats allowed.
+
+    Returns:
+      A dict from file name to framework name.
+    """
+    taken = {}
+    names = {}
+    for file_name in sorted({library.basename: None for library in libraries}.keys()):
+        base = native_asset_framework_name(file_name)
+        name = base
+        if name in taken:
+            for i in range(1, 1000):
+                name = "%s%d" % (base, i)
+                if name not in taken:
+                    break
+            if name in taken:
+                fail("Failed to rename %s in native assets packaging." % base)
+        taken[name] = True
+        names[file_name] = name
+    return names
+
+def app_apple_framework_names(native_libs, program_assets):
+    """`apple_framework_names` of an app: its `native_deps` libraries and every code-asset candidate.
+
+    Args:
+      native_libs: The app's `native_deps` libraries (of `FlutterApplicationInfo.native_libraries`).
+      program_assets: The app's `DartProgramAssetsInfo`.
+
+    Returns:
+      A dict from file name to framework name.
+    """
+    return apple_framework_names(list(native_libs) + candidate_code_asset_libraries(program_assets))
+
+def app_macos_framework_names(native_libs, program_assets):
+    """The frameworks of a macOS app: those of `app_apple_framework_names` its code assets ship in.
+
+    flutter_tools 3.50 wraps each code asset of a macOS app in a framework of
+    its own, as it does on iOS. A `native_deps` library is not one: it ships
+    as itself in `Contents/Frameworks`, where `DynamicLibrary.open` finds it
+    by its file name, and so does a code asset whose library is one, which
+    the process then loads once. The names are the iOS app's, so the two
+    apps agree on them.
+
+    Args:
+      native_libs: The app's `native_deps` libraries.
+      program_assets: The app's `DartProgramAssetsInfo`.
+
+    Returns:
+      A dict from file name to framework name.
+    """
+    loose = {library.basename: None for library in native_libs}
+    return {
+        file_name: name
+        for file_name, name in app_apple_framework_names(native_libs, program_assets).items()
+        if file_name not in loose
+    }
+
+def add_apple_framework_args(args, names):
+    """Adds `--framework <file name> <name>` to `args` for each of `names`, as `code_assets.dart` reads them."""
+    for file_name, name in sorted(names.items()):
+        args.add_all("--framework", [file_name, name])
 
 def _path_list_for(asset, layout):
     """Return the manifest path-list shape for `asset`.
@@ -123,7 +211,7 @@ def _path_list_for(asset, layout):
     For `dynamic_loading_bundle` the engine's `KernelAssetAbsolutePath` is the
     path it `dlopen`s. An app's manifest names it in its bundle
     (`code_assets.dart`, which ships it in `flutter_assets`); this one is a
-    test's, compiled into its kernel.
+    test's, in the test's assets directory.
 
     Under `layout = "runfiles"` there is no bundle — a `flutter_test` runs out
     of Bazel's runfiles tree — so the entry is the library's runfiles-relative
@@ -284,48 +372,134 @@ def candidate_code_asset_libraries(program_assets):
         if asset.link_mode == "dynamic_loading_bundle" and asset.file != None
     }.keys())
 
-def check_bundled_library_names(label, libraries, target_os):
-    """Fails when two of an app's bundled libraries would land on one path.
+def bundled_library_debug_info(application):
+    """What the dSYM of each library an application bundles is made from.
 
-    A bundle places every library by its file name (on iOS by the framework
-    name derived from it), so two different libraries under one name cannot
-    both ship. Checked over every candidate, kept or not, because which a
-    link hook keeps is known only when the bundle is built: the check holds
-    whatever it keeps.
+    Its `native_libraries` and every code-asset candidate's library (see
+    `candidate_code_asset_libraries`). A library whose link made its dSYM
+    (rustc's, of a `rust_shared_library`), or whose code asset's target
+    states one (`DartCodeAssetInfo.dsym`), has that dSYM; any other has what
+    it was linked from, which `dsymutil` reads the dSYM out of. One whose
+    objects are gone (`DartCodeAssetInfo.link_inputs_gone`: rustc's, without
+    its dSYM) has nothing to read, and its dSYM is its symbol table. Any other
+    library with neither fails the build, saying why: its dSYM would silently
+    lack the lines of whatever it was linked from, which the build could see.
+
+    Args:
+      application: The application Target, with `FlutterApplicationInfo`.
+
+    Returns:
+      dict[File, struct(link_inputs, dsym)]: `link_inputs` a depset[File],
+      empty for a prebuilt library, which was linked from nothing in the
+      build; `dsym` the `.dSYM` directory to use as it is, or None.
+    """
+    app_info = application[FlutterApplicationInfo]
+    link_inputs = {}
+    dsyms = {}
+    for record in app_info.native_libraries:
+        if record.dsym != None:
+            dsyms[record.library] = record.dsym
+            continue
+        if record.link_inputs == None:
+            fail("%s bundles %s, and what it was linked from, which its dSYM is read from, is unknown: %s" % (
+                application.label,
+                record.library.short_path,
+                record.link_inputs_unset_reason,
+            ))
+        link_inputs[record.library] = [record.link_inputs]
+    for asset in code_asset_candidates(app_info.program_assets):
+        if asset.link_mode != "dynamic_loading_bundle" or asset.file == None or asset.file in dsyms:
+            continue
+
+        # The dSYM the library's link made, or one its target states
+        # (`DartDsymInfo`), is its dSYM as it is.
+        if asset.dsym != None:
+            dsyms[asset.file] = asset.dsym
+            link_inputs.pop(asset.file, None)
+            continue
+
+        # rules_dart gives None when what the library was linked from is
+        # gone (a `rust_shared_library` without rustc's dSYM, whose objects
+        # the `Rustc` action deleted): its dSYM is its symbol table, as a
+        # prebuilt library's, and as a `native_deps` one's is.
+        if asset.link_inputs == None and asset.link_inputs_gone:
+            link_inputs.setdefault(asset.file, []).append(depset())
+            continue
+
+        # Otherwise None means the build cannot see the link, and says why.
+        if asset.link_inputs == None:
+            fail("%s bundles %s for the code asset %s, and what it was linked from, which its dSYM is read from, is unknown: %s" % (
+                application.label,
+                asset.file.short_path,
+                asset.asset_id,
+                asset.link_inputs_unset_reason,
+            ))
+        link_inputs.setdefault(asset.file, []).append(asset.link_inputs)
+    return {
+        lib: struct(link_inputs = depset(transitive = inputs), dsym = None)
+        for lib, inputs in link_inputs.items()
+    } | {
+        lib: struct(link_inputs = None, dsym = dsym)
+        for lib, dsym in dsyms.items()
+    }
+
+def _bundled_name(basename):
+    """The file a library is bundled as, with case ignored.
+
+    A bundle is a directory the build machine writes and the target's reads,
+    and on macOS (iOS's build machine) and Windows either may ignore case: two
+    names that differ only in case are one file there, and one library would
+    overwrite the other. A Linux or Android bundle is built on those machines
+    too, so names are compared without case for every platform.
+    """
+    return basename.lower()
+
+def _bundled_as(name, other):
+    """How a message names the file two libraries would both be bundled as."""
+    if name == other:
+        return "`%s`" % name
+    return "`%s` and `%s`, which differ only in case and are one file wherever case is ignored, as on macOS and Windows" % (other, name)
+
+def check_bundled_library_names(label, libraries):
+    """Fails when two of an app's bundled libraries have one file name.
+
+    Two different libraries under one file name cannot both ship, as
+    flutter_tools' application check fails on two code assets of one file
+    name. Names that differ only in case count as one (`_bundled_name`).
+    (On iOS two file names may lead to one framework name; the second is
+    renamed, `apple_framework_names`.) Checked over every candidate, kept or
+    not, because which a link hook keeps is known only when the bundle is
+    built: the check holds whatever it keeps.
 
     Args:
       label: The application's label, for the message.
       libraries: Files: the code-asset candidates' libraries and the
         `native_deps` libraries, in any order, repeats allowed.
-      target_os: The platform the app is built for.
     """
     by_name = {}
     for library in libraries:
-        names = [("`%s`" % library.basename, library.basename)]
-        if target_os == "ios":
-            framework = native_asset_framework_name(library.basename)
-            names.append(("the framework `%s.framework`" % framework, framework + ".framework"))
-        for what, key in names:
-            other = by_name.get(key)
-            if other == None:
-                by_name[key] = library
-                continue
-            if other == library:
-                continue
-            if other.owner == library.owner:
-                fail((
-                    "%s: %s reaches this target in two configurations " +
-                    "(%s and %s), so two builds of it would both be " +
-                    "bundled as %s. Name the one to ship in this " +
-                    "target's `code_assets`, or reset the setting that " +
-                    "changes on the way to the other."
-                ) % (label, library.owner, other.path, library.path, what))
+        key = _bundled_name(library.basename)
+        other = by_name.get(key)
+        if other == None:
+            by_name[key] = library
+            continue
+        if other == library:
+            continue
+        what = _bundled_as(library.basename, other.basename)
+        if other.owner == library.owner:
             fail((
-                "%s: two native libraries would both be bundled as %s: " +
-                "%s and %s. A bundle places each library by its file name, " +
-                "so only one of them can ship. Rename one, or serve both ids " +
-                "from one library by naming it in this target's `code_assets`."
-            ) % (label, what, other.owner, library.owner))
+                "%s: %s reaches this target in two configurations " +
+                "(%s and %s), so two builds of it would both be " +
+                "bundled as %s. Name the one to ship in this " +
+                "target's `code_assets`, or reset the setting that " +
+                "changes on the way to the other."
+            ) % (label, library.owner, other.path, library.path, what))
+        fail((
+            "%s: two native libraries would both be bundled as %s: " +
+            "%s and %s. A bundle places each library by its file name, " +
+            "so only one of them can ship. Rename one, or serve both ids " +
+            "from one library by naming it in this target's `code_assets`."
+        ) % (label, what, other.owner, library.owner))
 
 def resolve_native_assets(ctx, package, deps, code_assets):
     """The one asset per id a program loads, with each library staged once.
@@ -417,13 +591,13 @@ def _stage_code_assets(ctx, assets):
         if library != None:
             link = links.get(library)
             if link == None:
-                other = by_basename.get(library.basename)
+                other = by_basename.get(_bundled_name(library.basename))
                 if other == None:
                     link = ctx.actions.declare_file(
                         "%s_code_assets/%s" % (ctx.label.name, library.basename),
                     )
                     ctx.actions.symlink(output = link, target_file = library)
-                    by_basename[library.basename] = struct(library = library, link = link)
+                    by_basename[_bundled_name(library.basename)] = struct(library = library, link = link)
                 elif other.library.owner == library.owner:
                     fail((
                         "%s: %s reaches this target in two configurations " +
@@ -435,11 +609,11 @@ def _stage_code_assets(ctx, assets):
                 else:
                     fail((
                         "%s: two code-asset libraries would both be bundled as " +
-                        "`%s`: %s and %s. A bundle places each library by its " +
+                        "%s: %s and %s. A bundle places each library by its " +
                         "file name, so only one of them can ship. Rename one, " +
                         "or serve both ids from one library by naming it in " +
                         "this target's `code_assets`."
-                    ) % (ctx.label, library.basename, other.library.owner, library.owner))
+                    ) % (ctx.label, _bundled_as(library.basename, other.library.basename), other.library.owner, library.owner))
                 links[library] = link
         staged.append(struct(
             asset_id = asset.asset_id,
@@ -487,6 +661,51 @@ def run_code_assets_tool(ctx, command, arguments, inputs, outputs, mnemonic, pro
         execution_requirements = PATH_MAPPING,
         progress_message = progress_message,
     )
+
+def shipped_dsyms(ctx, program_assets, always, candidates):
+    """The dSYMs of the libraries an Apple app bundles, less those of the code assets it drops.
+
+    Every candidate's library is prepared, with its dSYM, before anything
+    knows which ship: a release build's link hooks choose. `flutter build`
+    makes a dSYM only for a code asset it bundles, so this directory holds the
+    dSYM bundles of those that ship, each under its own name, for rules_apple's
+    `dsyms` output group, as rules_apple hands on an imported xcframework's
+    dSYMs as a directory.
+
+    Args:
+      ctx: Rule context with `CODE_ASSETS_TOOL_ATTRS` and `PORTABLE_EXEC_GROUPS`.
+      program_assets: The program's `DartProgramAssetsInfo`.
+      always: The `declare_library_dsym` structs of the libraries that always
+        ship, the `native_deps` ones.
+      candidates: Pairs of a code-asset library's file name and its
+        `declare_library_dsym` struct.
+
+    Returns:
+      The directory, or None when there is no dSYM.
+    """
+    if not always and not candidates:
+        return None
+    output = ctx.actions.declare_directory(ctx.label.name + "_shipped_dsyms")
+    code_assets = program_assets_action_args(ctx.actions, program_assets, data = False, code = "names")
+    args = ctx.actions.args()
+    args.add_all("--output", [output], expand_directories = False)
+    args.add_all([d.plist for d in always], before_each = "--always")
+    for file_name, dsym in candidates:
+        args.add("--candidate-dsym", file_name)
+        args.add(dsym.plist)
+    run_code_assets_tool(
+        ctx,
+        "dsyms",
+        [args, code_assets.args],
+        depset(
+            [f for d in always for f in d.files] + [f for _, d in candidates for f in d.files],
+            transitive = [code_assets.inputs],
+        ),
+        [output],
+        mnemonic = "FlutterShippedDsyms",
+        progress_message = "Collecting the dSYMs of the libraries %{label} ships",
+    )
+    return output
 
 # -- Tier 2 standalone rule ----------------------------------------------------
 

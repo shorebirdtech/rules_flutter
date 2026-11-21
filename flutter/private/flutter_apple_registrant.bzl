@@ -16,10 +16,14 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "xcframework_info_plist")
+load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "MODULE_APP_SETTINGS_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "xcframework_info_plist")
 load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "run_xcode_tool")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
+load("//flutter/private:flutter_info.bzl", "plugins_on_platform")
+load("//flutter/private:swiftpm_app_settings.bzl", "check_swift_package_environment")
+
+visibility("//flutter/...")
 
 _NAME = "FlutterPluginRegistrant"
 
@@ -122,7 +126,7 @@ _INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 
 def _native_plugins(plugins):
     result = []
-    for plugin in plugins:
+    for plugin in plugins_on_platform(plugins, "ios"):
         info = plugin.platforms.get("ios")
         if info and info.plugin_class and info.plugin_class != "none":
             result.append(struct(name = plugin.name, plugin_class = info.plugin_class))
@@ -141,6 +145,7 @@ def _engine_framework_dir(files, slice):
     fail("The iOS engine has no slice for %s" % slice.id)
 
 def _registrant_xcframework_impl(ctx):
+    check_swift_package_environment(ctx)
     plugins = _native_plugins(ctx.attr.application[FlutterApplicationInfo].plugins)
     header = ctx.actions.declare_file(ctx.label.name + "/GeneratedPluginRegistrant.h")
     source = ctx.actions.declare_file(ctx.label.name + "/GeneratedPluginRegistrant.m")
@@ -165,9 +170,12 @@ def _registrant_xcframework_impl(ctx):
             requested_features = ctx.features,
             unsupported_features = ctx.disabled_features,
         )
+
+        # Every framework of `plugins`: a plugin's interface imports the
+        # modules it depends on, of its own and of Swift packages.
         search = ["-F" + _engine_framework_dir(engine_files, slice)] + [
             "-F%s/%s" % (found[m].path, slice.id)
-            for m in sorted(modules)
+            for m in sorted(found)
         ]
         _, outputs = cc_common.compile(
             name = "%s_slices/%s" % (ctx.label.name, slice.id),
@@ -178,7 +186,7 @@ def _registrant_xcframework_impl(ctx):
             language = "objc",
             private_hdrs = [header],
             user_compile_flags = ["-fmodules", "-fobjc-arc"] + search,
-            additional_inputs = engine_files + [found[m] for m in sorted(modules)],
+            additional_inputs = engine_files + [found[m] for m in sorted(found)],
         )
         objects = outputs.objects or outputs.pic_objects
         archive = ctx.actions.declare_file("%s_slices/%s/%s" % (ctx.label.name, slice.id, _NAME))
@@ -226,6 +234,7 @@ flutter_ios_registrant_xcframework = rule(
     attrs = dicts.add(
         XCODE_TOOL_ATTRS,
         BUNDLE_ATTRS,
+        MODULE_APP_SETTINGS_ATTRS,
         {
             "application": attr.label(
                 doc = "The `flutter_application` whose plugins the registrant registers.",
@@ -313,7 +322,7 @@ public func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {{
 
 def _swift_package_registrant_impl(ctx):
     plugins = []
-    for plugin in (ctx.attr.application[FlutterApplicationInfo].plugins if ctx.attr.register_plugins else []):
+    for plugin in (plugins_on_platform(ctx.attr.application[FlutterApplicationInfo].plugins, ctx.attr.platform) if ctx.attr.register_plugins else []):
         info = plugin.platforms.get(ctx.attr.platform)
         if info and info.plugin_class and info.plugin_class != "none":
             plugins.append(struct(name = plugin.name, plugin_class = info.plugin_class))

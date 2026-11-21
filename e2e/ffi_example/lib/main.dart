@@ -1,11 +1,12 @@
 import 'dart:io';
 
 import 'package:add_plugin/add_plugin.dart';
+import 'package:chain_asset/chain_asset.dart';
 import 'package:count_a/count_a.dart';
 import 'package:count_b/count_b.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mul_plugin/mul_plugin.dart';
 import 'package:pick/pick.dart';
 import 'package:prebuilt_asset/prebuilt_asset.dart';
@@ -69,11 +70,16 @@ Future<void> main() async {
   // library: 2 when both ids reached one loaded image of it, 1 when each got a
   // copy of its own. `negate` is a code asset whose library is a prebuilt
   // file rather than a `cc_shared_library`. `pick` is a code asset a link
-  // hook kept out of two because the app constructs its `Op`.
+  // hook kept out of two because the app constructs its `Op`. On iOS, macOS,
+  // Linux and Windows, `chain` is a code asset whose library links another
+  // code asset's, which it finds only where the bundle put it: on iOS by the
+  // name the bundle rewrote its link to, on macOS through the runner's
+  // `@executable_path/../Frameworks` rpath, on Linux by the `$ORIGIN` runpath
+  // the bundle gave it, on Windows beside the exe.
   //
   // Success is `ffi_example_result add(3,4)=7 mul(3,4)=12 sqlite=HELLO
-  // shared=2 negate(5)=-5 kept(20)=21`; a load failure records the error
-  // instead.
+  // shared=2 negate(5)=-5 kept(20)=21`, with ` chain(1)=202` on iOS, macOS,
+  // Linux and Windows; a load failure records the error instead.
   String marker;
   int addResult;
   int mulResult;
@@ -85,10 +91,16 @@ Future<void> main() async {
     sqliteVersion = parts[1];
     bumpThroughA();
     final shared = bumpThroughB();
+    final chains =
+        Platform.isIOS ||
+        Platform.isMacOS ||
+        Platform.isLinux ||
+        Platform.isWindows;
     marker =
         'ffi_example_result add(3,4)=$addResult mul(3,4)=$mulResult '
         'sqlite=${parts[0]} shared=$shared negate(5)=${negate(5)} '
-        '${const Op('kept').name}(20)=${pickKept(20)}';
+        '${const Op('kept').name}(20)=${pickKept(20)}'
+        '${chains ? ' chain(1)=${chainTop(1)}' : ''}';
   } on Object catch (e) {
     // Deliberately broad: a native library that fails to load throws an Error
     // (ArgumentError from asset-id resolution or DynamicLibrary.open), not an

@@ -6,6 +6,8 @@ target platform the iOS rules must still cope with.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
+load("//flutter:dev_files.bzl", "DEV_FILES_GROUP", "flutter_dev_files_aspect")
+load("//flutter:providers.bzl", "FlutterApplicationInfo")
 
 def _analyses_impl(ctx):
     env = analysistest.begin(ctx)
@@ -67,6 +69,54 @@ _fastbuild_test = _analyses_under("fastbuild", False)
 _fastbuild_profile_test = _analyses_under("fastbuild", True)
 _opt_test = _analyses_under("opt", False)
 _opt_profile_test = _analyses_under("opt", True)
+
+# Each `flutter_application` below a target, with the output directory of the
+# configuration it is analysed in.
+_ApplicationConfigurationsInfo = provider(
+    doc = "The `flutter_application`s below a target, each as `<label> in <bin dir>`.",
+    fields = {"applications": "depset of strings"},
+)
+
+def _application_configurations_aspect_impl(target, ctx):
+    direct = []
+    if FlutterApplicationInfo in target:
+        direct.append("%s in %s" % (target.label, ctx.bin_dir.path))
+    transitive = []
+    for attr_name in dir(ctx.rule.attr):
+        attr = getattr(ctx.rule.attr, attr_name)
+        for dep in attr if type(attr) == "list" else [attr]:
+            if type(dep) == "Target" and _ApplicationConfigurationsInfo in dep:
+                transitive.append(dep[_ApplicationConfigurationsInfo].applications)
+    return [_ApplicationConfigurationsInfo(applications = depset(direct, transitive = transitive))]
+
+_application_configurations_aspect = aspect(
+    implementation = _application_configurations_aspect_impl,
+    attr_aspects = ["*"],
+)
+
+def _one_application_configuration_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    applications = target[_ApplicationConfigurationsInfo].applications.to_list()
+
+    # Counted by configuration: what forwards the application (iOS's
+    # intermediates) is another label in the same one.
+    configurations = {a.rpartition(" in ")[2]: None for a in applications}
+    asserts.equals(
+        env,
+        1,
+        len(configurations),
+        ("%s should reach its flutter_application in the one configuration " +
+         "its bundle is built in; a second configuration analyses and builds " +
+         "the application and its native code again: %s") % (target.label, applications),
+    )
+    return analysistest.end(env)
+
+_one_application_configuration_dbg_test = analysistest.make(
+    _one_application_configuration_impl,
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    extra_target_under_test_aspects = [_application_configurations_aspect],
+)
 
 _COMMAND_LINES = {
     "dbg": _dbg_test,
@@ -152,3 +202,122 @@ def skipped_test(name, target, on_linux = False):
     """
     rule = _skipped_linux_test if on_linux else _skipped_dbg_test
     rule(name = name, target_under_test = target)
+
+def one_application_configuration_test(name, target):
+    """A test that `target`, an app, reaches its `flutter_application` in one configuration, in `-c dbg`.
+
+    Every edge from the app to the application, the bundle's and its checks',
+    must arrive in the configuration the bundle is built in. An edge that
+    arrives in another one analyses the application again there, and a build
+    of the app (the dev tool's included) compiles its native code twice.
+
+    Args:
+        name: The test's name.
+        target: The app.
+    """
+    _one_application_configuration_dbg_test(name = name, target_under_test = target)
+
+def _split_debug_info_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    groups = target[OutputGroupInfo]
+    symbols = groups.debug_info.to_list() if "debug_info" in groups else []
+    asserts.equals(
+        env,
+        [ctx.attr.symbols],
+        [f.basename for f in symbols],
+        ("%s's `debug_info` output group should hold one split debug info " +
+         "file, named as `flutter build` names it") % target.label,
+    )
+
+    # The shipped App binary's dSYM is made in the configuration the bundle
+    # builds its application in, from that application's snapshot.
+    shipped = [
+        f
+        for f in (groups.dsyms.to_list() if "dsyms" in groups else [])
+        if f.path.endswith("/App.framework.dSYM/Contents/Resources/DWARF/App")
+    ]
+    asserts.equals(env, 1, len(shipped), "the bundle has the dSYM of one App binary: %s" % shipped)
+    if symbols and len(shipped) == 1:
+        asserts.equals(
+            env,
+            shipped[0].root.path,
+            symbols[0].root.path,
+            ("the `.symbols` should be the application's in the configuration " +
+             "whose snapshot the bundle ships, as its App binary is"),
+        )
+    return analysistest.end(env)
+
+_SPLIT_DEBUG_INFO_SETTINGS = {
+    "//command_line_option:apple_generate_dsym": True,
+    "//command_line_option:compilation_mode": "opt",
+    str(Label("//flutter:obfuscate")): True,
+    str(Label("@rules_dart//dart:split_debug_info")): True,
+}
+
+_split_debug_info_test = analysistest.make(
+    _split_debug_info_impl,
+    attrs = {"symbols": attr.string(mandatory = True)},
+    config_settings = _SPLIT_DEBUG_INFO_SETTINGS,
+)
+
+_split_debug_info_ios_device_test = analysistest.make(
+    _split_debug_info_impl,
+    attrs = {"symbols": attr.string(mandatory = True)},
+    config_settings = _SPLIT_DEBUG_INFO_SETTINGS | {"//command_line_option:ios_multi_cpus": ["arm64"]},
+)
+
+def split_debug_info_test(name, target, symbols, ios_device = False):
+    """A test that `target`, an app, has its program's `.symbols` in its `debug_info` output group.
+
+    Built `-c opt`, obfuscated, with `--@rules_dart//dart:split_debug_info`
+    and `--apple_generate_dsym`. The file must be the one of the application
+    in the configuration its shipped App binary (whose dSYM the bundle has)
+    is built in: another configuration compiles another snapshot.
+
+    Args:
+        name: The test's name.
+        target: The app.
+        symbols: The file's basename, as `flutter build` names it
+            (`app.darwin-arm64.symbols`).
+        ios_device: Build for an arm64 iOS device.
+    """
+    rule = _split_debug_info_ios_device_test if ios_device else _split_debug_info_test
+    rule(name = name, target_under_test = target, symbols = symbols)
+
+def _dev_config_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    files = getattr(target[OutputGroupInfo], DEV_FILES_GROUP).to_list()
+    asserts.equals(
+        env,
+        [ctx.attr.dev_config],
+        [f.basename for f in files if f.basename.endswith("_dev_config.json")],
+        ("the dev files of %s should hold the dev config of the application " +
+         "it runs, and no other: the dev tool reads the one in the app's " +
+         "configuration") % target.label,
+    )
+    return analysistest.end(env)
+
+_dev_config_test = analysistest.make(
+    _dev_config_impl,
+    attrs = {"dev_config": attr.string(mandatory = True)},
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    extra_target_under_test_aspects = [flutter_dev_files_aspect],
+)
+
+def dev_config_test(name, target, dev_config):
+    """A test that the dev files the dev tool builds through `target` hold one dev config, in `-c dbg`.
+
+    The dev tool builds `flutter_dev_files_aspect`'s group through the app and
+    reads the `_dev_config.json` in the configuration the app reports. That
+    must be the one of the application the app runs, alone: an app over a
+    `flutter_application_variant` reaches the application it varies too, in
+    the same configuration.
+
+    Args:
+        name: The test's name.
+        target: The app.
+        dev_config: The basename of the dev config (`<application>_dev_config.json`).
+    """
+    _dev_config_test(name = name, target_under_test = target, dev_config = dev_config)

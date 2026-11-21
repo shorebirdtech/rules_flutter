@@ -14,6 +14,8 @@ load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:exec_groups.bzl", "PORTABLE")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 
+visibility("//flutter/...")
+
 # The package the engine's licence file is listed under: flutter_tools reads it
 # from `sky_engine`, which every Flutter app depends on.
 _ENGINE_PACKAGE = "sky_engine"
@@ -27,7 +29,7 @@ NOTICES_ATTRS = {
         allow_single_file = True,
     ),
     "_engine_license": attr.label(
-        default = Label("@flutter_sky_engine//sky_engine:LICENSE"),
+        default = Label("@flutter_sky_engine//:LICENSE"),
         allow_single_file = True,
     ),
 }

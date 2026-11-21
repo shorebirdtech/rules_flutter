@@ -1,10 +1,15 @@
 @Tags(['e2e', 'macos'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
 import 'editable_workspace.dart';
+
+/// The app under test.
+const _app = E2eApp('hello_world');
 
 /// End-to-end: a session whose LAUNCH-TIME bazel build failed still reloads.
 ///
@@ -56,7 +61,7 @@ void main() {
     test(
       'a session whose dev build failed reloads once the code is fixed',
       () async {
-        final ws = await editableWorkspace('hello_world');
+        final ws = await editableWorkspace(_app);
         final appMain = ws.file('lib/main.dart');
         final original = appMain.readAsStringSync();
         const anchor = "'count: \$_counter'";
@@ -182,6 +187,7 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 15)),
+      skip: !Platform.isMacOS ? 'macOS only' : null,
     );
   });
 }

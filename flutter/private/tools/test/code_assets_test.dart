@@ -6,6 +6,8 @@ import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
 import '../code_assets.dart';
+import '../elf_runpath.dart' show ElfDynamic;
+import 'elf_fixture.dart';
 import '../zip_archive.dart' show readZip;
 
 void main() {
@@ -113,15 +115,36 @@ void main() {
         'Contents/Frameworks/libfoo.dylib',
       );
       expect(
-        CodeAssetPlacement('ios').bundlePath('libfoo.dylib'),
-        'Frameworks/foo.framework/foo',
+        CodeAssetPlacement(
+          'ios',
+          frameworks: AppleFrameworks({'libfoo.dylib': 'foo1'}),
+        ).bundlePath('libfoo.dylib'),
+        'Frameworks/foo1.framework/foo1',
+      );
+    });
+
+    test('places a macOS code asset in its framework, any other as itself', () {
+      final placement = CodeAssetPlacement(
+        'macos',
+        frameworks: AppleFrameworks({'libadd.dylib': 'add'}),
+      );
+      expect(
+        placement.bundlePath('libadd.dylib'),
+        'Contents/Frameworks/add.framework/add',
+      );
+      expect(
+        placement.bundlePath('libmul.dylib'),
+        'Contents/Frameworks/libmul.dylib',
       );
     });
 
     test('names a library by its path in the code-asset directory', () {
       expect(CodeAssetPlacement('macos').pathInDirectory('a.dylib'), 'a.dylib');
       expect(
-        CodeAssetPlacement('ios').pathInDirectory('objective_c.dylib'),
+        CodeAssetPlacement(
+          'ios',
+          frameworks: AppleFrameworks({'objective_c.dylib': 'objective_c'}),
+        ).pathInDirectory('objective_c.dylib'),
         'objective_c.framework/objective_c',
       );
     });
@@ -131,12 +154,17 @@ void main() {
       expect(() => CodeAssetPlacement('fuchsia'), throwsArgumentError);
     });
 
-    test('derives framework names as flutter_tools does', () {
-      expect(frameworkName('objective_c.dylib'), 'objective_c');
-      expect(frameworkName('libsqlite3.dylib'), 'sqlite3');
-      expect(frameworkName('my-lib_2.dylib'), 'my-lib_2');
-      expect(frameworkName('foo.bar.dylib'), 'foobar');
-      expect(frameworkName('libfoo'), 'libfoo');
+    test('names an iOS library by the framework analysis named', () {
+      final frameworks = AppleFrameworks.fromArgs([
+        '--framework', 'libfoo.dylib', 'foo', //
+        '--framework', 'foo.dylib', 'foo1',
+      ]);
+      expect(frameworks.of('foo.dylib'), 'foo1');
+      expect(() => frameworks.of('libbar.dylib'), throwsStateError);
+      expect(
+        () => CodeAssetPlacement('ios').pathInDirectory('libfoo.dylib'),
+        throwsArgumentError,
+      );
     });
   });
 
@@ -153,12 +181,111 @@ void main() {
         ..createSync(recursive: true)
         ..writeAsStringSync('native');
       final out = '${dir.path}/out';
-      place(program, CodeAssetPlacement('linux'), out, [always.path]);
-      final linux = [
+      place(program, CodeAssetPlacement('windows'), out, [always.path]);
+      final placed = [
         for (final f in Directory(out).listSync(recursive: true))
           if (f is File) f.path.substring(out.length + 1),
       ]..sort();
-      expect(linux, ['libadd.so', 'libnative.so', 'libtrim.so']);
+      expect(placed, ['libadd.so', 'libnative.so', 'libtrim.so']);
+    });
+
+    test('places a library that ships from its copy of the same name', () {
+      final dir = Directory.systemTemp.createTempSync('code_assets');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final params = fixture('program.params');
+      final program = ProgramCodeAssets.read(
+        params,
+        base: File(params).parent.path,
+      );
+      final copy = File('${dir.path}/stripped/libadd.so')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('stripped');
+      final out = '${dir.path}/out';
+      place(
+        program,
+        CodeAssetPlacement('windows'),
+        out,
+        [],
+        copies: [copy.path],
+      );
+      expect(File('$out/libadd.so').readAsStringSync(), 'stripped');
+      expect(File('$out/libtrim.so').existsSync(), isTrue);
+    });
+
+    test('refuses two libraries whose names differ only in case', () {
+      // One file on a filesystem that ignores case, as macOS's and Windows'
+      // do: the second would overwrite the first. Every platform's bundle
+      // can be written on one.
+      final dir = Directory.systemTemp.createTempSync('code_assets');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      String library(String path) =>
+          (File('${dir.path}/$path')
+                ..createSync(recursive: true)
+                ..writeAsStringSync(path))
+              .path;
+      final upper = library('a/Foo.dll');
+      final lower = library('b/foo.dll');
+      for (final os in ['windows', 'android']) {
+        expect(
+          () => place(
+            _empty(dir),
+            CodeAssetPlacement(os, abi: 'arm64-v8a'),
+            '${dir.path}/out_$os',
+            [upper, lower],
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('differ only in case'),
+            ),
+          ),
+          reason: os,
+        );
+      }
+    });
+
+    test('places a macOS code asset in its framework, from its copy', () {
+      final dir = Directory.systemTemp.createTempSync('code_assets');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final params = fixture('program.params');
+      final program = ProgramCodeAssets.read(
+        params,
+        base: File(params).parent.path,
+      );
+      final copy = File('${dir.path}/prepared/add.framework/add')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('prepared');
+      final out = '${dir.path}/out';
+      place(
+        program,
+        CodeAssetPlacement(
+          'macos',
+          frameworks: AppleFrameworks({'libadd.so': 'add'}),
+        ),
+        out,
+        [],
+        copiesAs: {'libadd.so': copy.path},
+      );
+      // Each one's place in the bundle, `/`-separated whatever the host's.
+      final placed = [
+        for (final f in Directory(out).listSync(recursive: true))
+          if (f is File)
+            f.path
+                .substring(out.length + 1)
+                .replaceAll(Platform.pathSeparator, '/'),
+      ]..sort();
+      expect(placed, [
+        'add.framework/Resources/Info.plist',
+        'add.framework/add',
+        'libtrim.so',
+      ]);
+      expect(File('$out/add.framework/add').readAsStringSync(), 'prepared');
+      final plist = File(
+        '$out/add.framework/Resources/Info.plist',
+      ).readAsStringSync();
+      expect(plist, contains('<string>io.flutter.flutter.native-assets.add'));
+      expect(plist, contains('<key>CFBundleExecutable</key>\n\t<string>add<'));
     });
 
     test('refuses a file that holds the code assets by name', () {
@@ -172,6 +299,90 @@ void main() {
       expect(
         () => place(program, CodeAssetPlacement('linux'), dir.path, []),
         throwsStateError,
+      );
+    });
+  });
+
+  group('place on Linux', () {
+    // What Bazel links a `cc_shared_library` with a dynamic dependency with.
+    const bazelRunpath =
+        r'$ORIGIN/_solib_k8/_U:$ORIGIN/libtop.so.runfiles/_main/_solib_k8/_U';
+
+    String library(Directory dir, String name, List<int> bytes) =>
+        (File('${dir.path}/in/$name')
+              ..createSync(recursive: true)
+              ..writeAsBytesSync(bytes))
+            .path;
+
+    test('a library finds the code assets it links by \$ORIGIN', () {
+      final dir = Directory.systemTemp.createTempSync('code_assets');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final top = library(
+        dir,
+        'libtop.so',
+        elfLibrary(
+          needed: ['libbase.so', 'libc.so.6'],
+          soname: 'libtop.so',
+          runpath: bazelRunpath,
+        ),
+      );
+      final base = library(
+        dir,
+        'libbase.so',
+        elfLibrary(needed: ['libc.so.6'], soname: 'libbase.so'),
+      );
+      final out = '${dir.path}/out';
+      place(_empty(dir), CodeAssetPlacement('linux'), out, [top, base]);
+      final placed = ElfDynamic.read(
+        File('$out/libtop.so').readAsBytesSync(),
+        'libtop.so',
+      );
+      expect(placed.runpath, r'$ORIGIN');
+      expect(placed.needed, ['libbase.so', 'libc.so.6']);
+      expect(
+        ElfDynamic.read(File('$out/libbase.so').readAsBytesSync(), 'b').runpath,
+        isNull,
+      );
+    });
+
+    test('refuses a library that links one beside it with no \$ORIGIN', () {
+      final dir = Directory.systemTemp.createTempSync('code_assets');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final top = library(
+        dir,
+        'libtop.so',
+        elfLibrary(needed: ['libbase.so'], runpath: '/opt/lib'),
+      );
+      final base = library(dir, 'libbase.so', elfLibrary());
+      expect(
+        () => place(
+          _empty(dir),
+          CodeAssetPlacement('linux'),
+          '${dir.path}/out',
+          [top, base],
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('libtop.so links libbase.so'), contains(r'$ORIGIN')),
+          ),
+        ),
+      );
+    });
+
+    test('refuses a library that is not ELF', () {
+      final dir = Directory.systemTemp.createTempSync('code_assets');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final text = library(dir, 'libtext.so', 'not a library'.codeUnits);
+      expect(
+        () => place(
+          _empty(dir),
+          CodeAssetPlacement('linux'),
+          '${dir.path}/out',
+          [text],
+        ),
+        throwsFormatException,
       );
     });
   });
@@ -265,15 +476,49 @@ void main() {
 
     test('names an iOS library by its framework', () {
       final manifest = jsonDecode(
-        nativeAssetsManifest(program(), 'ios', 'ios_arm64'),
+        nativeAssetsManifest(
+          program(),
+          'ios',
+          'ios_arm64',
+          frameworks: AppleFrameworks({
+            'libadd.so': 'libadd.so',
+            'libtrim.so': 'libtrim.so1',
+          }),
+        ),
       ) as Map<String, Object?>;
       final section =
           (manifest['native-assets']! as Map)['ios_arm64']
               as Map<String, Object?>;
       expect(section['package:pick/add'], [
         'absolute',
-        'libaddso.framework/libaddso',
+        '@rpath/libadd.so.framework/libadd.so',
       ]);
+      // A framework analysis renamed, as flutter_tools renames one whose name
+      // another library's took.
+      expect(section['package:trim/ops'], [
+        'absolute',
+        '@rpath/libtrim.so1.framework/libtrim.so1',
+      ]);
+    });
+
+    test('names a macOS code asset in a framework by the framework', () {
+      final manifest = jsonDecode(
+        nativeAssetsManifest(
+          program(),
+          'macos',
+          'macos_arm64',
+          frameworks: AppleFrameworks({'libadd.so': 'add'}),
+        ),
+      ) as Map<String, Object?>;
+      final section =
+          (manifest['native-assets']! as Map)['macos_arm64']
+              as Map<String, Object?>;
+      expect(section['package:pick/add'], [
+        'absolute',
+        '@rpath/add.framework/add',
+      ]);
+      // A `native_deps` library, which ships as itself.
+      expect(section['package:trim/ops'], ['absolute', 'libtrim.so']);
     });
 
     test('is empty with nothing to ship, and needs a target otherwise', () {
@@ -344,6 +589,54 @@ void main() {
     });
   });
 
+  test('shippedDsyms copies the dSYMs of what ships, none of what dropped', () {
+    final dir = Directory.systemTemp.createTempSync('code_assets');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final params = fixture('code_names.params');
+    final program = ProgramCodeAssets.read(
+      params,
+      base: File(params).parent.path,
+    );
+    String dsym(String bundle) {
+      final plist = File('${dir.path}/in/$bundle.dSYM/Contents/Info.plist')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(bundle);
+      File('${dir.path}/in/$bundle.dSYM/Contents/Resources/DWARF/$bundle')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('dwarf');
+      return plist.path;
+    }
+
+    final shipped = program.shippedFileNames.first;
+    final out = '${dir.path}/out';
+    shippedDsyms(
+      program,
+      out,
+      [dsym('libnative.dylib')],
+      {
+        shipped: dsym(shipped),
+        'libmul.so': dsym('libmul.so'),
+      },
+    );
+    // Each one's place in the bundle, `/`-separated whatever the host's.
+    final copied = [
+      for (final f in Directory(out).listSync(recursive: true))
+        if (f is File)
+          f.path
+              .substring(out.length + 1)
+              .replaceAll(Platform.pathSeparator, '/'),
+    ]..sort();
+    expect(
+      copied,
+      [
+        'libnative.dylib.dSYM/Contents/Info.plist',
+        'libnative.dylib.dSYM/Contents/Resources/DWARF/libnative.dylib',
+        '$shipped.dSYM/Contents/Info.plist',
+        '$shipped.dSYM/Contents/Resources/DWARF/$shipped',
+      ]..sort(),
+    );
+  });
+
   test('iosDroppedFrameworks lists the framework of each dropped library', () {
     final params = fixture('code_names.params');
     final program = ProgramCodeAssets.read(
@@ -351,7 +644,13 @@ void main() {
       base: File(params).parent.path,
     );
     expect(program.droppedFileNames, {'libmul.so'});
-    expect(iosDroppedFrameworks(program), 'libmulso.framework\n');
+    expect(
+      iosDroppedFrameworks(
+        program,
+        AppleFrameworks({'libmul.so': 'libmul.so1'}),
+      ),
+      'libmul.so1.framework\n',
+    );
   });
 
   test('an app with its own post-processor fails only when one is dropped', () {
@@ -363,12 +662,16 @@ void main() {
       base: File(params).parent.path,
     );
     expect(
-      () => iosDroppedFrameworks(program, conflict: '//app:post'),
+      () => iosDroppedFrameworks(
+        program,
+        AppleFrameworks({'libmul.so': 'libmul.so'}),
+        conflict: '//app:post',
+      ),
       throwsA(
         isA<StateError>().having(
           (e) => e.message,
           'message',
-          allOf(contains('//app:post'), contains('libmulso.framework')),
+          allOf(contains('//app:post'), contains('libmul.so.framework')),
         ),
       ),
     );
@@ -379,9 +682,20 @@ void main() {
     expect(
       iosDroppedFrameworks(
         ProgramCodeAssets.read(none.path),
+        AppleFrameworks({}),
         conflict: '//app:post',
       ),
       '',
     );
   });
+}
+
+/// A program that ships no code assets, so only `place`'s `always` libraries
+/// are placed.
+ProgramCodeAssets _empty(Directory dir) {
+  final file = File('${dir.path}/empty.params')
+    ..writeAsStringSync(
+      '--format\n$programAssetsFormat\n--paths\nexec\n--holds\ncode\n',
+    );
+  return ProgramCodeAssets.read(file.path);
 }

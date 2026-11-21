@@ -15,6 +15,8 @@ come from the release the toolchain pins (`versions.bzl`). The app's are its
 load("//flutter/private:app_version.bzl", "DEFAULT_BUILD_NAME", "DEFAULT_BUILD_NUMBER")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
 
+visibility("//flutter/...")
+
 APP_BUILD_NAME_DEFINE = "FLUTTER_BUILD_NAME"
 APP_BUILD_NUMBER_DEFINE = "FLUTTER_BUILD_NUMBER"
 
@@ -32,9 +34,9 @@ SDK_DEFINE_KEYS = (
 VERSION_DEFINE_KEYS = (APP_BUILD_NAME_DEFINE, APP_BUILD_NUMBER_DEFINE) + SDK_DEFINE_KEYS
 
 # What `flutter --version` reports for a release tag, and the repository it is
-# cloned from.
-_CHANNEL = "stable"
-_GIT_URL = "https://github.com/flutter/flutter.git"
+# cloned from: what a framework that does not say otherwise is.
+RELEASE_CHANNEL = "stable"
+RELEASE_GIT_URL = "https://github.com/flutter/flutter.git"
 
 # `FlutterVersion.frameworkRevisionShort` and `engineRevisionShort`.
 _SHORT_REVISION = 10
@@ -43,7 +45,7 @@ def sdk_dart_defines(flutter_version):
     """The defines that describe the Flutter SDK `flutter_version`, as `flutter_tools` adds them.
 
     Args:
-        flutter_version: A key of `FLUTTER_VERSIONS`, such as `3.47.9`.
+        flutter_version: A key of `FLUTTER_VERSIONS`, such as `3.50.0`.
 
     Returns:
         The `KEY=VALUE` defines, in `SDK_DEFINE_KEYS` order.
@@ -53,14 +55,14 @@ def sdk_dart_defines(flutter_version):
         fail("Flutter %s is not a version versions.bzl lists: %s" % (flutter_version, ", ".join(FLUTTER_VERSIONS.keys())))
     return [
         "FLUTTER_VERSION=" + flutter_version,
-        "FLUTTER_CHANNEL=" + _CHANNEL,
-        "FLUTTER_GIT_URL=" + _GIT_URL,
+        "FLUTTER_CHANNEL=" + RELEASE_CHANNEL,
+        "FLUTTER_GIT_URL=" + RELEASE_GIT_URL,
         "FLUTTER_FRAMEWORK_REVISION=" + meta.framework_revision[:_SHORT_REVISION],
         "FLUTTER_ENGINE_REVISION=" + meta.engine_revision[:_SHORT_REVISION],
         "FLUTTER_DART_VERSION=" + meta.dart_version,
     ]
 
-def custom_sdk_dart_defines(version, framework_revision, engine_revision, dart_version):
+def custom_sdk_dart_defines(version, framework_revision, engine_revision, dart_version, channel, repository_url):
     """The defines that describe an SDK whose pieces are not all the release's.
 
     Args:
@@ -68,18 +70,38 @@ def custom_sdk_dart_defines(version, framework_revision, engine_revision, dart_v
         framework_revision: Its commit, or empty.
         engine_revision: The engine's commit, or empty.
         dart_version: The Dart the engine bundles, or empty.
+        channel: The framework's channel, as `flutter --version` reports it.
+        repository_url: The repository it is from, or None when it has none,
+            which flutter_tools writes as `null`.
 
     Returns:
         The `KEY=VALUE` defines, in `SDK_DEFINE_KEYS` order.
     """
     return [
         "FLUTTER_VERSION=" + version,
-        "FLUTTER_CHANNEL=" + _CHANNEL,
-        "FLUTTER_GIT_URL=" + _GIT_URL,
+        "FLUTTER_CHANNEL=" + channel,
+        "FLUTTER_GIT_URL=" + (repository_url if repository_url != None else "null"),
         "FLUTTER_FRAMEWORK_REVISION=" + framework_revision[:_SHORT_REVISION],
         "FLUTTER_ENGINE_REVISION=" + engine_revision[:_SHORT_REVISION],
         "FLUTTER_DART_VERSION=" + dart_version,
     ]
+
+def sdk_engine_revision(engine, version):
+    """The commit of an SDK's engine, wherever the SDK reports it.
+
+    Args:
+        engine: The engine's decoded `flutter_engine.json`, or `{}` for the
+            release's engine.
+        version: The release the SDK takes what its sources do not give
+            from, or empty.
+
+    Returns:
+        What the engine's record says, else the release's.
+    """
+    if "engine_revision" in engine:
+        return engine["engine_revision"]
+    meta = FLUTTER_VERSIONS.get(version) if version else None
+    return meta.engine_revision if meta else ""
 
 def app_version_dart_defines(build_name, build_number):
     """The defines `appBuildName` and `appBuildNumber` read.

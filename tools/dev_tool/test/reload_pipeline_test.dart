@@ -8,6 +8,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/compiler_config.dart';
@@ -461,6 +462,122 @@ void main() {
         );
       },
     );
+
+    // A cold start can spend minutes building and compiling before the gate
+    // settles, and a client that sends a reload in that window is owed the
+    // verdict of that startup, not a guess made from a clock.
+    //
+    // The pipeline is made inside the fake clock's zone: a future made
+    // outside it completes on the real event loop, which never turns here.
+    test('a request during a long startup waits for the startup', () {
+      fakeAsync((async) {
+        final pipeline = ReloadPipeline(
+          host: SessionHost(isMachine: false, logger: Logger('test')),
+        );
+        final release = pipeline.holdForStartup();
+        Map<String, dynamic>? answer;
+        pipeline.hotReload(const {}).then((a) => answer = a);
+
+        async.elapse(const Duration(minutes: 3));
+        expect(answer, isNull, reason: 'the startup is still running');
+
+        pipeline.ready.signalUnavailable('Initial compile failed.');
+        release();
+        async.flushMicrotasks();
+        expect(answer, containsPair('error', 'Initial compile failed.'));
+      });
+    });
+
+    // The other side of holding a request for the startup: a client that
+    // ends the run while one is held is answered at once, and so is the
+    // held request. Through the host's own commands, because which commands
+    // skip the queue is the host's decision.
+    test('a shutdown during a long startup answers at once, and so does a '
+        'request it held', () {
+      fakeAsync((async) {
+        final host = SessionHost(isMachine: false, logger: Logger('test'));
+        final pipeline = ReloadPipeline(host: host);
+        host.registerReloadCommands(pipeline);
+        host.registerLifecycleCommands();
+        pipeline.holdForStartup();
+
+        Object? held;
+        host.commandRunner
+            .run('app.hotReload', {})
+            .then<void>(
+              (a) => held = a,
+              onError: (Object e) => held = e,
+            );
+        async.elapse(const Duration(minutes: 3));
+        expect(held, isNull, reason: 'the startup is still running');
+
+        Map<String, dynamic>? shutdown;
+        host.commandRunner.run('daemon.shutdown', {}).then((a) => shutdown = a);
+        async.flushMicrotasks();
+
+        expect(shutdown, {'message': 'shutdown'});
+        expect(
+          held,
+          isA<CommandFailure>().having(
+            (e) => e.kind,
+            'kind',
+            CommandFailureKind.shuttingDown,
+          ),
+        );
+      });
+    });
+
+    // The answer is not the whole of it: the abandoned request has to stop
+    // waiting too. The tool exits when nothing is left pending, so a request
+    // still waiting out the gate's bound keeps a run that has answered its
+    // shutdown alive for the rest of that bound.
+    test('a request held when the run ends stops waiting', () {
+      fakeAsync((async) {
+        final host = SessionHost(isMachine: false, logger: Logger('test'));
+        final pipeline = ReloadPipeline(host: host);
+        host.registerReloadCommands(pipeline);
+        host.registerLifecycleCommands();
+        pipeline.holdForStartup();
+
+        Map<String, dynamic>? work;
+        pipeline.hotReload(const {}).then((a) => work = a);
+        async.elapse(const Duration(seconds: 20));
+
+        unawaited(host.commandRunner.run('daemon.shutdown', {}));
+        async.flushMicrotasks();
+
+        expect(
+          work,
+          containsPair('error', 'The run is shutting down'),
+          reason: 'the request itself, not only its answer, has ended',
+        );
+        expect(async.pendingTimers, isEmpty);
+      });
+    });
+
+    test('a startup that ends without settling releases its waiters', () {
+      fakeAsync((async) {
+        final pipeline = ReloadPipeline(
+          host: SessionHost(isMachine: false, logger: Logger('test')),
+        );
+        final release = pipeline.holdForStartup();
+        Map<String, dynamic>? answer;
+        pipeline.hotReload(const {}).then((a) => answer = a);
+
+        async.elapse(const Duration(minutes: 3));
+        expect(answer, isNull, reason: 'the startup is still running');
+
+        release();
+        async.flushMicrotasks();
+        expect(
+          answer,
+          containsPair('error', 'Hot reload is still starting up.'),
+        );
+        // Both callers end their hold twice: where the startup finishes, and
+        // again on the way out of the run.
+        release();
+      });
+    });
   });
 
   // A reload that is stuck and one that is slow must not look alike: every phase

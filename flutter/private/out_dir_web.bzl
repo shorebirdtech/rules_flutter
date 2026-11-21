@@ -19,6 +19,8 @@ SDK's, which is why the pieces are checked against it (`sdk_check.dart`).
 
 load("//flutter/private:engine_out_dirs.bzl", "dict_text", "link_into", "out_dir_provenance", "select_out_dir")
 
+visibility("//flutter/...")
+
 # The files of the web SDK tree a web application names, by their target in
 # the `web` package, and where each is in the repository (the linked
 # `flutter_web_sdk` directory is `web-sdk/`, the Dart SDK `dart-sdk/`).
@@ -27,7 +29,7 @@ WEB_TREE_FILES = {
     "dart2js_platform.dill": "web-sdk/kernel/dart2js_platform.dill",
     "ddc_outline.dill": "web-sdk/kernel/ddc_outline.dill",
     "libraries.json": "web-sdk/libraries.json",
-    "ddc_dart_sdk.js": "web-sdk/kernel/ddcLibraryBundle-canvaskit/dart_sdk.js",
+    "ddc_dart_sdk.js": "web-sdk/kernel/ddc/canary/dart_sdk.js",
     "ddc_module_loader.js": "dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js",
     "dart_stack_trace_mapper.js": "dart-sdk/lib/dev_compiler/web/dart_stack_trace_mapper.js",
 }
@@ -38,8 +40,9 @@ _REQUIRED = [
     "kernel/dart2js_platform.dill",
     "kernel/dart2wasm_platform.dill",
     "kernel/ddc_outline.dill",
-    "kernel/ddcLibraryBundle-canvaskit/dart_sdk.js",
+    "kernel/ddc/canary/dart_sdk.js",
     "flutter_js/flutter.js",
+    "flutter_js/flutter.js.map",
 ]
 
 # The BUILD text of the root package, which the `web` package's slices name.

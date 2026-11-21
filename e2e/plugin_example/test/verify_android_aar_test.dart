@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:rules_flutter_e2e_testing/archive.dart';
 import 'package:rules_flutter_e2e_testing/bundle_check.dart';
+import 'package:rules_flutter_e2e_testing/elf.dart';
 import 'package:rules_flutter_e2e_testing/runfiles_paths.dart';
 
 /// The Android package of both modules.
@@ -75,6 +76,14 @@ const _pluginDependencies = {
     'androidx.annotation:annotation:1.10.0:runtime',
     'androidx.browser:browser:1.9.0:runtime',
   ],
+};
+
+/// The native libraries of each plugin that has any: package:jni's
+/// `native_deps`, which its Java side loads with
+/// `System.loadLibrary("dartjni")`. `flutter build aar` puts them in the
+/// plugin's AAR.
+const _pluginNativeLibraries = {
+  'jni': ['libdartjni.so'],
 };
 
 /// The plugins written in Kotlin, whose POMs name the standard library.
@@ -277,10 +286,16 @@ void _verifyRepo(
   final jniAbis = {
     for (final e in entries.where((e) => e.startsWith('jni/'))) e.split('/')[1],
   };
+  // A debug module is kernel, and its plugins' libraries are in their own
+  // AARs, so it has no native library of its own.
+  final wantedAbis = mode == 'debug' ? <String>[] : abis;
   check.expect(
-    '$label: the module AAR has native libraries for ${abis.join(', ')} '
-    'and no other ABI',
-    condition: jniAbis.length == abis.length && jniAbis.containsAll(abis),
+    wantedAbis.isEmpty
+        ? '$label: the module AAR has no native library'
+        : '$label: the module AAR has native libraries for '
+              '${abis.join(', ')} and no other ABI',
+    condition:
+        jniAbis.length == wantedAbis.length && jniAbis.containsAll(wantedAbis),
     detail: 'jni/ has $jniAbis',
   );
   for (final abi in abis) {
@@ -288,7 +303,18 @@ void _verifyRepo(
       '$label: the module AAR ${mode == 'debug' ? 'has no' : 'has'} jni/$abi/libapp.so',
       condition: entries.contains('jni/$abi/libapp.so') == (mode != 'debug'),
     );
+    // A plugin's native libraries are in the plugin's AAR, as `flutter build
+    // aar` puts them, and not in the module's.
+    for (final library in [
+      for (final p in plugins) ...?_pluginNativeLibraries[p],
+    ]) {
+      check.expect(
+        "$label: the module AAR has no jni/$abi/$library, a plugin's",
+        condition: !entries.contains('jni/$abi/$library'),
+      );
+    }
   }
+  _checkStripped(check, '$label: the module AAR', aar, entries);
   final manifest = File('${aar.path}/AndroidManifest.xml').readAsStringSync();
   check
     ..expect(
@@ -316,7 +342,30 @@ void _verifyRepo(
   );
 
   for (final plugin in plugins) {
-    _verifyPlugin(check, scratch, repo, label, mode, plugin);
+    _verifyPlugin(check, scratch, repo, label, mode, abis, plugin);
+  }
+}
+
+/// Checks that every native library of the AAR extracted to [aar] is
+/// stripped, as a Gradle build strips what it packages into an AAR, in every
+/// build type.
+void _checkStripped(
+  BundleCheck check,
+  String what,
+  Directory aar,
+  Set<String> entries,
+) {
+  for (final library in entries.where(
+    (e) => e.startsWith('jni/') && e.endsWith('.so'),
+  )) {
+    final problem = ElfImage.fromFile(
+      File('${aar.path}/$library'),
+    ).unstrippedSections();
+    check.expect(
+      '$what has $library stripped',
+      condition: problem == null,
+      detail: problem,
+    );
   }
 }
 
@@ -330,6 +379,7 @@ void _verifyPlugin(
   String repo,
   String label,
   String mode,
+  List<String> abis,
   String plugin,
 ) {
   final group = _pluginGroup(plugin);
@@ -341,9 +391,12 @@ void _verifyPlugin(
   final kotlinStdlib = RegExp(
     r'^org\.jetbrains\.kotlin:kotlin-stdlib:[^:]+:compile$',
   );
+  final embedding = RegExp(
+    '^io\\.flutter:flutter_embedding_$mode:1\\.0\\.0-[0-9a-f]{40}:compile\$',
+  );
   final kotlin = plugin == 'annotated_plugin' || _kotlin.contains(plugin);
   final declared = plugin == 'annotated_plugin'
-      // What `flutter_pub.annotation` in MODULE.bazel says its `platform(...)`
+      // What `flutter_pub.annotation` in MODULE.bazel says its version catalog
       // declaration stands for, at the version the build resolves.
       ? ['androidx.browser:browser:1.9.0:runtime']
       : _pluginDependencies[plugin] ?? const <String>[];
@@ -354,15 +407,22 @@ void _verifyPlugin(
       condition:
           _one(pom, 'groupId') == group &&
           _one(pom, 'artifactId') == '${plugin}_$mode' &&
-          dependencies.where((d) => !kotlinStdlib.hasMatch(d)).join(',') ==
+          dependencies
+                  .where((d) => !kotlinStdlib.hasMatch(d))
+                  .where((d) => !d.startsWith('io.flutter:'))
+                  .join(',') ==
               declared.join(',') &&
           dependencies.where(kotlinStdlib.hasMatch).length == (kotlin ? 1 : 0),
       detail: 'dependencies: $dependencies',
     )
     ..expect(
-      "$label: $plugin's POM does not list the embedding, which a plugin "
-      'compiles against only',
-      condition: !dependencies.any((d) => d.startsWith('io.flutter:')),
+      "$label: $plugin's POM lists io.flutter:flutter_embedding_$mode at "
+      "compile scope, at the engine's version, and no other engine artifact, "
+      "as Flutter's Gradle build adds the embedding to every plugin's api",
+      condition:
+          dependencies.where(embedding.hasMatch).length == 1 &&
+          dependencies.where((d) => d.startsWith('io.flutter:')).length == 1,
+      detail: 'dependencies: $dependencies',
     );
 
   final aarFile = '$repo/$base.aar';
@@ -378,6 +438,19 @@ void _verifyPlugin(
     ]),
     detail: 'entries: $entries',
   );
+  final jni = entries.where((e) => e.startsWith('jni/')).toSet();
+  final wantedJni = {
+    for (final abi in abis)
+      for (final library in _pluginNativeLibraries[plugin] ?? const [])
+        'jni/$abi/$library',
+  };
+  check.expect(
+    "$label: $plugin's AAR has its own native libraries for each ABI, and "
+    'no others',
+    condition: jni.length == wantedJni.length && jni.containsAll(wantedJni),
+    detail: 'expected $wantedJni, got $jni',
+  );
+  _checkStripped(check, "$label: $plugin's AAR", aar, entries);
   final classes = _files(_extract(scratch, '${aar.path}/classes.jar'))
       .where((c) => c.endsWith('.class'))
       .toSet();

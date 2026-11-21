@@ -58,10 +58,11 @@ rewrite would quietly drift.
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:flutter_pub_index.bzl", "library_label", "read_index")
-load("//flutter/private:framework_source.bzl", "framework_root", "read_framework", "unset_message", "write_unset_stub")
+load("//flutter/private:framework_source.bzl", "framework_root", "read_framework", "unusable_message", "write_failing_stub")
 load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME")
 load("//flutter/private:pinned.bzl", "pinned")
-load("//flutter/private:versions.bzl", "flutter_version_at_least")
+
+visibility("//flutter/...")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
 # edges are cut. Listed explicitly rather than globbed: the subset boundary is
@@ -94,45 +95,22 @@ _SUBSET_SRCS = [
 # `//flutter/private/gen_l10n:pubspec.lock`.
 _SUBSET_DEPS = ["file", "intl", "meta", "path", "process", "stack_trace", "yaml"]
 
-# Every patch any version applies, so editing one refetches the repository.
-_ALL_PATCHES = [
-    Label("//flutter/private/gen_l10n/patches:" + name)
-    for name in [
-        "gen_l10n.patch",
-        "localizations_utils.patch",
-        "localizations_utils_3_50.patch",
-        "signals.patch",
-        "process.patch",
-        "features.patch",
-        "io.patch",
-        "io_3_50.patch",
-    ]
+_PATCHES = [
+    Label("//flutter/private/gen_l10n/patches:gen_l10n.patch"),
+    Label("//flutter/private/gen_l10n/patches:localizations_utils.patch"),
+    Label("//flutter/private/gen_l10n/patches:signals.patch"),
+    Label("//flutter/private/gen_l10n/patches:process.patch"),
+    Label("//flutter/private/gen_l10n/patches:features.patch"),
+    Label("//flutter/private/gen_l10n/patches:io.patch"),
 ]
-
-def _patches(version):
-    """The cuts for `version`'s flutter_tools.
-
-    Flutter 3.50 moved the surrounding lines of two of them (an import
-    `localizations_utils.dart` dropped, `base/io.dart`'s networking section),
-    so those two have a 3.50 copy that removes the same code.
-    """
-    at_3_50 = flutter_version_at_least(version, 3, 50)
-    return [
-        Label("//flutter/private/gen_l10n/patches:gen_l10n.patch"),
-        Label("//flutter/private/gen_l10n/patches:localizations_utils_3_50.patch") if at_3_50 else Label("//flutter/private/gen_l10n/patches:localizations_utils.patch"),
-        Label("//flutter/private/gen_l10n/patches:signals.patch"),
-        Label("//flutter/private/gen_l10n/patches:process.patch"),
-        Label("//flutter/private/gen_l10n/patches:features.patch"),
-        Label("//flutter/private/gen_l10n/patches:io_3_50.patch") if at_3_50 else Label("//flutter/private/gen_l10n/patches:io.patch"),
-    ]
 
 def _flutter_gen_l10n_repo_impl(repository_ctx):
     version = repository_ctx.attr.flutter_version
 
     if repository_ctx.attr.framework_json:
-        unset = unset_message(repository_ctx)
-        if unset:
-            write_unset_stub(repository_ctx, ["gen_l10n"], unset)
+        unusable = unusable_message(repository_ctx)
+        if unusable:
+            write_failing_stub(repository_ctx, ["gen_l10n"], unusable)
             return
 
         # A framework source: the files of the subset, copied (the patches
@@ -151,7 +129,7 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
     # `-p1` strips the leading `a/`, leaving the `lib/src/...` paths the
     # stripped tarball already uses. A patch that no longer applies stops the
     # build — see this file's header on bumping Flutter.
-    for patch in _patches(version):
+    for patch in _PATCHES:
         repository_ctx.patch(repository_ctx.path(patch), strip = 1)
 
     srcs = "\n".join(['        "%s",' % s for s in _SUBSET_SRCS])
@@ -204,7 +182,7 @@ flutter_gen_l10n_repo = repository_rule(
                   "which refuses a version with no recorded checksum.",
         ),
         "_patches": attr.label_list(
-            default = _ALL_PATCHES,
+            default = _PATCHES,
             doc = "Declared so a patch edit refetches the repository.",
         ),
     },

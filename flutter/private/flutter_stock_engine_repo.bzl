@@ -20,12 +20,14 @@ copy serves them all.
 
 load("//flutter/private:artifact_urls.bzl", "engine_artifact_url")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
-load("//flutter/private:engine_helpers.bzl", "const_finder_attr", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_binary_name")
+load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_binary_name")
 load("//flutter/private:engine_labels.bzl", "ENGINE_MODES", "android_arches", "android_engine_cpu", "desktop_engine_dir", "native_target")
 load("//flutter/private:out_dir_web.bzl", "WEB_TREE_FILES")
 load("//flutter/private:pinned.bzl", "pinned")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
+
+visibility("//flutter/...")
 
 _LOAD = 'load("@rules_flutter//flutter:engine.bzl", "flutter_android_engine_slice", "flutter_gen_snapshot", "flutter_host_tools", "flutter_ios_engine_slice", "flutter_linux_engine_slice", "flutter_macos_engine_slice", "flutter_platform_kernel", "flutter_web_sdk", "flutter_windows_engine_slice")\n\n'
 
@@ -38,7 +40,7 @@ _ENGINE_RULES = {
 def _dict(d):
     return "{" + ", ".join(['"{}": "{}"'.format(k, v) for k, v in sorted(d.items())]) + "}"
 
-def _host_tools(host, repo, provenance, flutter_version):
+def _host_tools(host, repo, provenance):
     meta = HOST_PLATFORMS[host]
     exe = ".exe" if meta.os == "windows" else ""
     return """flutter_host_tools(
@@ -59,7 +61,6 @@ def _host_tools(host, repo, provenance, flutter_version):
     impellerc = "@{repo}//:host-tools/impellerc{exe}",
     shader_lib = "@{repo}//:shader_lib_files",
     shader_include_dir = "host-tools/shader_lib",
-{const_finder}
     font_subset = "@{repo}//:font-subset-tools/font-subset{exe}",
     provenance = {provenance},
     visibility = ["//visibility:public"],
@@ -71,7 +72,6 @@ def _host_tools(host, repo, provenance, flutter_version):
         dart = dart_binary_name(host),
         dartaotruntime = dartaotruntime_binary_name(host),
         exe = exe,
-        const_finder = const_finder_attr(flutter_version, "@{}//:font-subset-tools/const_finder.dart.snapshot".format(repo)),
         provenance = _dict(provenance),
     )
 
@@ -211,11 +211,7 @@ def _web_sdk(name, provenance):
     visibility = ["//visibility:public"],
 )
 """.format(repo = repo)
-
-    # The release's web SDK repository finds the DDC SDK at whichever path its
-    # release keeps it (flutter_web_sdk_repo.bzl), and names it by one alias.
-    files = dict(WEB_TREE_FILES, **{"ddc_dart_sdk.js": "ddc_library_bundle_dart_sdk_js"})
-    for target, path in sorted(files.items()):
+    for target, path in sorted(WEB_TREE_FILES.items()):
         text += """
 alias(
     name = "{target}",
@@ -235,13 +231,21 @@ flutter_web_sdk(
 )
 """.format(provenance = _dict(provenance))
 
-def stock_engine_packages(name, provenance, flutter_version):
+def _sky_engine(name):
+    """The `sky_engine` package: aliases into the release's `sky_engine.zip` repository."""
+    return "".join(["""alias(
+    name = "{target}",
+    actual = "@{name}_stock_sky_engine//sky_engine:{target}",
+    visibility = ["//visibility:public"],
+)
+""".format(name = name, target = target) for target in ["sky_engine", "LICENSE"]])
+
+def stock_engine_packages(name, provenance):
     """The packages of the stock engine source: each BUILD file's slice targets.
 
     Args:
         name: The stock SDK's repository name prefix (`flutter`).
         provenance: The provenance every slice carries.
-        flutter_version: The Flutter release the engine is of.
 
     Returns:
         A dict from package path to the BUILD text of its slice targets.
@@ -252,7 +256,7 @@ def stock_engine_packages(name, provenance, flutter_version):
         packages[path] = packages.get(path, "") + "\n" + text
 
     for host in HOST_PLATFORMS:
-        add("host/" + host, _host_tools(host, "{}_{}".format(name, host), provenance, flutter_version))
+        add("host/" + host, _host_tools(host, "{}_{}".format(name, host), provenance))
 
     # The engines, and where the platform's own gen_snapshot is.
     for platform in DESKTOP_ENGINE_PLATFORMS:
@@ -309,6 +313,7 @@ def stock_engine_packages(name, provenance, flutter_version):
         add("macos/" + mode, _macos_xcframework("{}_macos_xcframework_{}".format(name, mode), mode, provenance))
 
     add("web", _web_sdk(name, provenance))
+    add("sky_engine", _sky_engine(name))
 
     # The mobile engines. Only the iOS engine of the device and the simulator
     # is one repository for all hosts.
@@ -347,7 +352,7 @@ def _flutter_stock_engine_repo_impl(repository_ctx):
     }) + "\n")
     repository_ctx.file("BUILD.bazel", 'exports_files(["flutter_engine.json"], visibility = ["//visibility:public"])\n')
 
-    for path, text in stock_engine_packages(name, provenance, repository_ctx.attr.flutter_version).items():
+    for path, text in stock_engine_packages(name, provenance).items():
         repository_ctx.file(path + "/BUILD.bazel", _LOAD + text)
 
     # Pinned downloads and files written from the attributes alone, so Bazel

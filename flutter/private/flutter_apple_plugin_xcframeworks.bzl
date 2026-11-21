@@ -9,8 +9,10 @@ it ships, in the build mode of the configuration.
 A plugin's framework holds only that plugin's code. It is linked here, slice by
 slice, from the plugin's own static libraries: Flutter is linked dynamically
 (`@rpath/Flutter.framework/Flutter`, not copied in), and another plugin the
-plugin uses is that plugin's own framework. The framework has the module the
-host imports:
+plugin uses is that plugin's own framework. So is each module of a Swift
+package the plugins depend on, and each module of a plugin's own besides the
+one named after it, as upstream makes each pod a plugin depends on a framework
+of its own. The framework has the module the host imports:
 
 - a Swift plugin: `Headers/<module>-Swift.h`, a module map naming it, and
   `Modules/<module>.swiftmodule/<triple>.swiftinterface`, compiled with
@@ -21,22 +23,51 @@ host imports:
 - a plugin of both: one module of the two, the Swift part its `Swift`
   submodule, as Xcode builds a mixed framework.
 
-Plus `Info.plist`, the plugin's privacy manifest and resource bundles, and
-in profile and release a dSYM.
+Plus `Info.plist`, the plugin's privacy manifest and resource bundles.
+
+In profile and release, each slice of a plugin's framework and of a code
+asset has its dSYM in `dSYMs/`, read from the objects its binary was linked
+from, as `flutter build ios-framework` and `macos-framework` make one in every
+such build. A code asset's binary is stripped of its local symbols and
+debugging map, as upstream's `copyNativeCodeAssetsIOS` and `MacOS` strip it,
+and a plugin's is not, as upstream's `xcodebuild build` of the Pods project
+leaves it. A debug slice, the iOS simulator's in every mode, gets neither.
 """
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "framework_resources", "framework_root", "xcframework_info_plist")
-load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "run_xcode_tool")
+load("//flutter/private:apple_add_to_app.bzl", "BUNDLE_ATTRS", "MODULE_APP_SETTINGS_ATTRS", "SLICES", "SLICES_TRANSITION", "assemble_bundle", "framework_resources", "framework_root", "xcframework_info_plist")
+load("//flutter/private:apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "declare_library_dsym", "process_native_library", "rewrite_install_names", "run_xcode_tool")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION", "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
-load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "candidate_code_asset_libraries", "native_asset_framework_name", "run_code_assets_tool")
+load("//flutter/private:flutter_apple_plugin_library.bzl", "FlutterAppleLinkedTargetsInfo", "linked_targets_aspect")
+load("//flutter/private:flutter_native_assets.bzl", "CODE_ASSETS_TOOL_ATTRS", "app_apple_framework_names", "app_macos_framework_names", "bundled_library_debug_info", "candidate_code_asset_libraries", "run_code_assets_tool")
+load("//flutter/private:native_libraries.bzl", "native_library_files")
+load("//flutter/private:swiftpm_app_settings.bzl", "FlutterSwiftPMAppLibrariesInfo", "SWIFTPM_APP_LIBRARIES", "app_library_entry", "check_swift_package_environment")
 load("//flutter/private:unbuilt_native_code.bzl", "fail_on_unbuilt_native_code")
 
+visibility("//flutter/...")
+
 _MINIMUM_OS_VERSION = {"ios": IOS_MINIMUM_OS_VERSION, "macos": MACOS_MINIMUM_OS_VERSION}
+
+# What a slice's binaries get, as `native_library_symbols` structs: in a
+# debug slice nothing. Outside debug, a plugin's framework a dSYM and no
+# stripping, as upstream builds it with `xcodebuild build` in the Pods
+# project, whose release configurations are `DEBUG_INFORMATION_FORMAT =
+# dwarf-with-dsym` and `STRIP_INSTALLED_PRODUCT = NO`; a code asset a dSYM and
+# `strip -x -S`, as upstream's `dsymutilDylib` and `stripDylib`.
+_DEBUG_SYMBOLS = struct(dsym = False, strip = False)
+_PLUGIN_SYMBOLS = struct(dsym = True, strip = False)
+_CODE_ASSET_SYMBOLS = struct(dsym = True, strip = True)
+
+def _dsym_steps(dsym, path):
+    """The steps that put a `declare_library_dsym` bundle at `path`, `<slice>/dSYMs/<bundle>.dSYM`."""
+    return [
+        ("file", path + "/" + f.path[f.path.index(".dSYM/") + len(".dSYM/"):], f)
+        for f in dsym.files
+    ]
 
 # The engine framework a plugin links, by platform.
 _FLUTTER = {"ios": "Flutter", "macos": "FlutterMacOS"}
@@ -146,6 +177,159 @@ def _plugin_module(entry):
         swift = module.swift if swift_header else None,
     )
 
+def _dependency_units(entries, linked_targets):
+    """The modules the plugins link besides their own, each a framework of its own.
+
+    `flutter build ios-framework` builds each pod a plugin depends on as a
+    framework of its own beside the plugin's, so two plugins on one pod share
+    it. A Swift package's unit is its module (one SwiftPM target): the targets
+    a plugin's library is linked from (`FlutterAppleLinkedTargetsInfo`) that
+    own a static library, grouped by the module each is. A plugin's own
+    targets are its framework, but for those of another module (a plugin's
+    Package.swift of two targets, its Swift and its Objective-C, say), which
+    its interface imports by that module's name.
+
+    Args:
+        entries: The `apple_plugin_libraries` structs of one slice.
+        linked_targets: `FlutterAppleLinkedTargetsInfo.targets` of the slice's
+            application and app-settings libraries, which may hold targets
+            of plugin implementations the application did not choose.
+
+    Returns:
+        A list of entry-like structs: `label`, `package` (the module's name,
+        which names its framework), `cc_info`, `swift_module`,
+        `module_headers`, `owners` (the labels of its targets), `statics`
+        (their own static libraries), `dependency` (whether it is no
+        plugin's).
+    """
+
+    # The targets the chosen plugins link: the owners of their libraries.
+    linked = {}
+    for e in entries:
+        for linker_input in e.cc_info.linking_context.linker_inputs.to_list():
+            linked[str(linker_input.owner)] = True
+    records = {}
+    for record in linked_targets.to_list():
+        if str(record.label) in linked:
+            records.setdefault(str(record.label), record)
+
+    by_name = {}
+    for key in sorted(records.keys()):
+        record = records[key]
+        statics = []
+        for linker_input in record.cc_info.linking_context.linker_inputs.to_list():
+            if linker_input.owner == record.label:
+                statics.extend(_static_libraries(linker_input))
+        if not statics:
+            continue
+        modules = record.swift_info.direct_modules if record.swift_info else []
+        if len(modules) > 1:
+            fail("%s is the modules %s, and a framework is one" % (record.label, ", ".join([m.name for m in modules])))
+        module = modules[0] if modules else None
+        plugin = [e for e in entries if _same_package(record.label, e.label)]
+        if plugin and (not module or module.name == plugin[0].package):
+            continue
+        name = module.name if module else record.label.name
+        by_name.setdefault(name, []).append(struct(record = record, module = module, statics = statics, dependency = not plugin))
+
+    units = []
+    for name, parts in sorted(by_name.items()):
+        # A module of Swift and C-family sources is two targets, its Swift
+        # module and its Clang one.
+        swift = [p for p in parts if p.module and p.module.swift]
+        clang = [p for p in parts if not (p.module and p.module.swift)]
+        if len(swift) > 1 or len(clang) > 1:
+            fail("The targets %s are all the module %s" % (", ".join([str(p.record.label) for p in parts]), name))
+        units.append(struct(
+            label = parts[0].record.label,
+            package = name,
+            cc_info = cc_common.merge_cc_infos(cc_infos = [p.record.cc_info for p in parts]),
+            swift_module = swift[0].module if swift else None,
+            module_headers = clang[0].record.cc_info.compilation_context.direct_public_headers if clang and clang[0].module else [],
+            owners = [p.record.label for p in parts],
+            statics = [lib for p in parts for lib in p.statics],
+            dependency = parts[0].dependency,
+        ))
+    return units
+
+def _vendored_xcframeworks(entries, linked_targets):
+    """The prebuilt dynamic xcframeworks the plugins link: a dict from a slice's binary path to its xcframework.
+
+    A Swift package's `binaryTarget` of a dynamic framework, which
+    rules_swift_package_manager imports with `apple_dynamic_xcframework_import`,
+    as a pod's `vendored_frameworks` is one. `flutter build ios-framework`
+    copies a vendored xcframework into the layout as it is, and so does
+    add-to-app: the plugin's framework links the slice's framework.
+
+    Returns:
+        A dict from the path of a binary in an xcframework to a struct of
+        `name` (the xcframework's, without the extension), `root` (its
+        path) and `files` (every file of it).
+    """
+    linked = {}
+    for e in entries:
+        for linker_input in e.cc_info.linking_context.linker_inputs.to_list():
+            linked[str(linker_input.owner)] = True
+    vendored = {}
+    for record in linked_targets.to_list():
+        if not record.xcframework_files or str(record.label) not in linked:
+            continue
+        for linker_input in record.cc_info.linking_context.linker_inputs.to_list():
+            if linker_input.owner != record.label:
+                continue
+            for lib in linker_input.libraries:
+                binary = lib.resolved_symlink_dynamic_library or lib.dynamic_library
+                if not binary or ".xcframework/" not in binary.path:
+                    continue
+                root = binary.path[:binary.path.index(".xcframework/") + len(".xcframework")]
+                vendored[binary.path] = struct(
+                    name = root.rsplit("/", 1)[-1][:-len(".xcframework")],
+                    root = root,
+                    files = [f for f in record.xcframework_files if f.path.startswith(root + "/")],
+                )
+    return vendored
+
+def _vendored_steps(prebuilt):
+    """The steps that copy a prebuilt xcframework's files into its copy.
+
+    A versioned (macOS) framework's links arrive as files, since a glob
+    follows them: `Versions/Current/` and the entries at its top. These rules
+    keep a versioned framework as its version directory alone, whose links the
+    export makes (`framework_root`), so those copies are left out, and the
+    exported framework has the links it was signed with.
+    """
+    paths = [(f.path[len(prebuilt.root) + 1:], f) for f in prebuilt.files]
+    versioned = {
+        path.split(".framework/", 1)[0]: True
+        for path, _ in paths
+        if ".framework/Versions/" in path
+    }
+    steps = []
+    for path, f in paths:
+        if ".framework/" in path:
+            framework, inside = path.split(".framework/", 1)
+            if framework in versioned and (not inside.startswith("Versions/") or inside.startswith("Versions/Current/")):
+                continue
+        steps.append(("file", path, f))
+    return steps
+
+def _dependency_module(unit):
+    """`_plugin_module` of a Swift package's module."""
+    swift = unit.swift_module
+    swift_header = None
+    if swift and swift.clang and swift.clang.compilation_context:
+        for header in swift.clang.compilation_context.direct_public_headers:
+            if header.basename == unit.package + "-Swift.h":
+                swift_header = header
+    return struct(
+        name = unit.package,
+        # A Swift package's public headers directory may hold its own
+        # module map, which the framework's replaces.
+        objc_headers = [h for h in unit.module_headers if h.extension == "h" and not h.basename.endswith("-Swift.h")],
+        swift_header = swift_header,
+        swift = swift.swift if swift else None,
+    )
+
 def _module_map(name, module):
     umbrella = 'framework module {name} {{\n  umbrella header "{name}-umbrella.h"\n\n  export *\n  module * {{ export * }}\n}}\n'.format(name = name)
     swift = '{framework}module {name}{sub} {{\n  header "{name}-Swift.h"\n  requires objc\n}}\n'
@@ -179,20 +363,32 @@ def _umbrella_header(platform_type, headers):
         for h in headers
     ])
 
-def _resource_steps(entry, resources_root):
-    info = getattr(entry, "resource_info", None)
-    if not info:
-        return []
-    for kind in _RESOURCE_KINDS:
-        if getattr(info, kind, None):
-            fail(("%s: the plugin %s has %s resources, which an add-to-app framework " +
-                  "does not compile yet. Only plain files are copied.") % (entry.label, entry.package, kind))
-    steps = []
-    for kind in _COPIED_RESOURCES:
-        for parent_dir, _, files in getattr(info, kind, []) or []:
-            for f in files.to_list():
-                steps.append(("file", "%s/%s%s" % (resources_root, parent_dir + "/" if parent_dir else "", f.basename), f))
-    return steps
+def _resources(entries, unit_of_label):
+    """The resources of each framework: a dict from unit name to (path in the framework, File) pairs.
+
+    A plugin's library carries the resources of every target it is linked
+    from. Each goes to the framework of the target that owns it: a Swift
+    package module's resource bundle to that module's framework, where its
+    `Bundle.module` looks, and the rest to the plugin's.
+    """
+    resources = {}
+    for entry in entries:
+        info = getattr(entry, "resource_info", None)
+        if not info:
+            continue
+        for kind in _RESOURCE_KINDS:
+            if getattr(info, kind, None):
+                fail(("%s: the plugin %s has %s resources, which an add-to-app framework " +
+                      "does not compile yet. Only plain files are copied.") % (entry.label, entry.package, kind))
+        owners = {path: owner for path, owner in info.owners.to_list()}
+        for kind in _COPIED_RESOURCES:
+            for parent_dir, _, files in getattr(info, kind, []) or []:
+                for f in files.to_list():
+                    unit = unit_of_label.get(str(owners.get(f.short_path)), entry.package)
+                    path = "%s%s" % (parent_dir + "/" if parent_dir else "", f.basename)
+                    if (path, f) not in resources.setdefault(unit, []):
+                        resources[unit].append((path, f))
+    return resources
 
 def _link(ctx, slice, toolchain, module, libraries, flags, additional, dependencies):
     """Links one plugin's dynamic library for one slice."""
@@ -256,61 +452,71 @@ def _archive(ctx, slice, module, libraries):
     )
     return archive
 
-def _dsym(ctx, slice, module, binary):
-    """The dSYM bundle of a framework binary, as `dsymutil` writes it."""
-    bundle = "%s_slices/%s/dsym/%s.framework.dSYM" % (ctx.label.name, slice.id, module.name)
-    plist = ctx.actions.declare_file(bundle + "/Contents/Info.plist")
-    dwarf = ctx.actions.declare_file(bundle + "/Contents/Resources/DWARF/" + module.name)
-    run_xcode_tool(
-        ctx,
-        command = 'xcrun dsymutil "$1" -o "$2"',
-        arguments = [ctx.actions.args().add(binary).add(plist.dirname.rsplit("/", 1)[0])],
-        inputs = [binary],
-        outputs = [plist, dwarf],
-        mnemonic = "FlutterPluginDsym",
-        progress_message = "Extracting the dSYM of %s.framework for %s" % (module.name, slice.id),
-    )
-    return [plist, dwarf]
+def _slice_plugins(ctx, slice, app_info, app_libraries, linked_targets, toolchain, symbols):
+    """The frameworks of one slice.
 
-def _slice_plugins(ctx, slice, app_info, toolchain, debug):
-    """The plugin frameworks of one slice: a dict from module name to its steps."""
+    Returns:
+        A struct of `built` (a dict from module name to its framework's
+        steps) and `vendored` (the prebuilt xcframeworks they link, by name).
+    """
     platform = slice.platform_type
-    entries = [e for e in app_info.apple_plugin_libraries.to_list() if e.platform == platform]
+
+    # A plugin whose Package.swift decides its defines from the app is built
+    # for the module, in the slice's configuration, as an app builds it for
+    # itself (`swiftpm_app_settings.bzl`).
+    entries = [
+        app_library_entry(e, app_libraries)
+        for e in app_info.apple_plugin_libraries.to_list()
+        if e.platform == platform
+    ]
     fail_on_unbuilt_native_code(entries)
     for e in entries:
-        if getattr(e, "app_library", None):
-            fail(("%s: the plugin %s decides its build from the app's Info.plist or environment " +
-                  "(its Package.swift reads them), which add-to-app does not support yet.") % (e.label, e.package))
         if not e.cc_info:
             fail("%s: the plugin %s has no C-family or Swift library" % (e.label, e.package))
 
     modules = {e.package: _plugin_module(e) for e in entries}
+    vendored = _vendored_xcframeworks(entries, linked_targets)
+    used_vendored = {}
+    dependencies = _dependency_units(entries, linked_targets)
+    for d in dependencies:
+        if d.package in modules:
+            fail("%s: the module %s of a Swift package the plugins depend on has the name of the plugin %s, and the two frameworks would collide" % (d.label, d.package, d.package))
+        modules[d.package] = _dependency_module(d)
 
     # Each plugin's own static libraries: those of the targets in its
-    # library's package. Another plugin's are that plugin's framework.
+    # library's package. Each dependency module's: those of its targets.
+    # Another unit's are that unit's framework.
     owner_of = {}
     for e in entries:
         for linker_input in e.cc_info.linking_context.linker_inputs.to_list():
             if _same_package(linker_input.owner, e.label):
                 for lib in _static_libraries(linker_input):
                     owner_of[lib.path] = e.package
+    unit_of_label = {}
+    for d in dependencies:
+        for owner in d.owners:
+            unit_of_label[str(owner)] = d.package
+        for lib in d.statics:
+            owner_of[lib.path] = d.package
 
-    by_package = {e.package: e for e in entries}
+    by_package = {e.package: e for e in entries + dependencies}
 
     def plugin_of(owner):
+        if str(owner) in unit_of_label:
+            return unit_of_label[str(owner)]
         for e in entries:
             if _same_package(owner, e.label):
                 return e.package
         return None
 
-    # What each plugin links: its own libraries and flags, the plugins it
-    # uses, and the engine.
+    # What each unit links: its own libraries and flags, the units it uses,
+    # and the engine.
     plans = {}
     for package, entry in by_package.items():
         libraries = []
         flags = []
         additional = []
-        engine = []
+        frameworks = []
         uses = {}
         foreign = {}
         for linker_input in entry.cc_info.linking_context.linker_inputs.to_list():
@@ -322,12 +528,20 @@ def _slice_plugins(ctx, slice, app_info, toolchain, debug):
                 if lib.dynamic_library and not (lib.static_library or lib.pic_static_library)
             ]
             for real in dynamics:
+                # The engine's framework, or a prebuilt xcframework's, which
+                # the layout carries as it is.
                 marker = "/%s.framework/" % _FLUTTER[platform]
-                if marker not in real.path:
-                    fail("%s: the plugin %s links the dynamic library %s, which add-to-app does not package yet" % (entry.label, package, real.path))
-                framework_dir = real.path[:real.path.index(marker)]
-                if framework_dir not in engine:
-                    engine.append(framework_dir)
+                if marker in real.path:
+                    framework = (real.path[:real.path.index(marker)], _FLUTTER[platform])
+                elif real.path in vendored:
+                    framework_path = real.path[:real.path.rindex(".framework/") + len(".framework")]
+                    directory, framework_name = framework_path.rsplit("/", 1)
+                    framework = (directory, framework_name[:-len(".framework")])
+                    used_vendored[vendored[real.path].name] = vendored[real.path]
+                else:
+                    fail("%s: %s links the dynamic library %s, which add-to-app does not package yet" % (entry.label, package, real.path))
+                if framework not in frameworks:
+                    frameworks.append(framework)
                 additional.append(real)
             if statics:
                 lib_owner = owner_of.get(statics[0].path)
@@ -345,9 +559,9 @@ def _slice_plugins(ctx, slice, app_info, toolchain, debug):
             flags.extend(linker_input.user_link_flags)
             additional.extend(linker_input.additional_inputs)
         if foreign:
-            fail(("%s: the plugin %s links %s, which are not plugins. Add-to-app packages a " +
-                  "plugin's own code; a Swift package or library a plugin depends on would be " +
-                  "an xcframework of its own, which add-to-app does not build yet.") % (
+            # Every target a plugin's library is linked from is a unit, so
+            # only a library no target's CcInfo owns lands here.
+            fail("%s: %s links %s, which no target it depends on owns" % (
                 entry.label,
                 package,
                 ", ".join(sorted(foreign.keys())),
@@ -356,7 +570,7 @@ def _slice_plugins(ctx, slice, app_info, toolchain, debug):
             libraries = libraries,
             flags = flags,
             additional = additional,
-            engine = engine,
+            frameworks = frameworks,
             uses = sorted(uses.keys()),
         )
 
@@ -370,44 +584,60 @@ def _slice_plugins(ctx, slice, app_info, toolchain, debug):
             placed[p] = True
             order.append(p)
     if len(order) != len(plans):
-        fail("Apple plugins %s link each other in a cycle" % ", ".join(sorted([p for p in plans if p not in placed])))
+        fail("The Apple plugins and Swift package modules %s link each other in a cycle" % ", ".join(sorted([p for p in plans if p not in placed])))
 
+    resources = _resources(entries, unit_of_label)
     built = {}
     for package in order:
         entry = by_package[package]
         module = modules[package]
         plan = plans[package]
-        dependencies = [(d, _FLUTTER[platform]) for d in plan.engine]
+        dependencies = list(plan.frameworks)
         additional = list(plan.additional)
         for other in plan.uses:
             dependencies.append((built[other].binary_dir, other))
             additional.append(built[other].binary)
 
+        dsym = None
         if ctx.attr.static:
             binary = _archive(ctx, slice, module, plan.libraries)
-            dsym_files = []
         else:
             linked = _link(ctx, slice, toolchain, module, plan.libraries, plan.flags, additional, dependencies)
 
-            # A copy named as the framework names it, for a plugin that links
-            # this one to find with `-F`.
+            # The binary the framework ships, named as the framework names
+            # it, for a plugin that links this one to find with `-F`. Its
+            # debugging map names the plugin's own static libraries, which
+            # its dSYM is read from.
             binary = ctx.actions.declare_file("%s_slices/%s/link/%s.framework/%s" % (ctx.label.name, slice.id, module.name, module.name))
-            ctx.actions.symlink(output = binary, target_file = linked)
-            dsym_files = [] if debug else _dsym(ctx, slice, module, linked)
+            if symbols.dsym or symbols.strip:
+                dsym = declare_library_dsym(ctx, "%s_slices/%s/dsym" % (ctx.label.name, slice.id), module.name + ".framework", module.name) if symbols.dsym else None
+                process_native_library(
+                    ctx,
+                    library = linked,
+                    output = binary,
+                    symbols = symbols,
+                    mnemonic = "FlutterPluginFramework",
+                    dsym = dsym,
+                    debug_info = struct(link_inputs = depset(plan.libraries + plan.additional), dsym = None),
+                )
+            else:
+                ctx.actions.symlink(output = binary, target_file = linked)
 
-        steps = _framework_steps(ctx, slice, entry, module, binary)
-        for f in dsym_files:
-            rest = f.path[f.path.index(".dSYM/") + len(".dSYM/"):]
-            steps.append(("file", "%s/dSYMs/%s.framework.dSYM/%s" % (slice.id, module.name, rest), f))
+        steps = _framework_steps(ctx, slice, entry, module, binary, resources.get(package, []))
+        if dsym:
+            steps.extend(_dsym_steps(dsym, "%s/dSYMs/%s.framework.dSYM" % (slice.id, module.name)))
         built[package] = struct(
             steps = steps,
             binary = binary,
             binary_dir = binary.dirname.rsplit("/", 1)[0],
-            has_dsym = bool(dsym_files),
+            has_dsym = bool(dsym),
         )
-    return built
+    for name in used_vendored:
+        if name in built:
+            fail("The prebuilt %s.xcframework has the name of a framework built from %s" % (name, by_package[name].label))
+    return struct(built = built, vendored = used_vendored)
 
-def _framework_steps(ctx, slice, entry, module, binary):
+def _framework_steps(ctx, slice, entry, module, binary, resource_files):
     name = module.name
     static = ctx.attr.static
     root = framework_root(slice, name, static)
@@ -416,12 +646,16 @@ def _framework_steps(ctx, slice, entry, module, binary):
     steps = [("file", "%s/%s" % (root, name), binary)]
 
     plist = ctx.actions.declare_file(directory + "/Info.plist")
-    _framework_info_plist(ctx, plist, name, "io.flutter.flutter.plugins.", slice.platform_type)
+    prefix = "io.flutter.flutter.swift-packages." if getattr(entry, "dependency", False) else "io.flutter.flutter.plugins."
+    _framework_info_plist(ctx, plist, name, prefix, slice.platform_type)
     steps.append(("file", resources + "/Info.plist", plist))
 
-    modulemap = ctx.actions.declare_file(directory + "/module.modulemap")
-    ctx.actions.write(modulemap, _module_map(name, module))
-    steps.append(("file", root + "/Modules/module.modulemap", modulemap))
+    # A Swift module with no Objective-C interface is its `.swiftmodule`
+    # alone, as Xcode builds one.
+    if module.objc_headers or module.swift_header:
+        modulemap = ctx.actions.declare_file(directory + "/module.modulemap")
+        ctx.actions.write(modulemap, _module_map(name, module))
+        steps.append(("file", root + "/Modules/module.modulemap", modulemap))
 
     if module.objc_headers:
         umbrella = ctx.actions.declare_file(directory + "/%s-umbrella.h" % name)
@@ -431,12 +665,12 @@ def _framework_steps(ctx, slice, entry, module, binary):
             steps.append(("file", "%s/Headers/%s" % (root, header.basename), header))
 
     if module.swift_header:
+        steps.append(("file", "%s/Headers/%s-Swift.h" % (root, name), module.swift_header))
+    if module.swift:
         interface = module.swift.swiftinterface
         if not interface:
-            fail("%s: the plugin %s has no Swift module interface; it is compiled without library evolution" % (entry.label, entry.package))
-        swift_header = "%s/Headers/%s-Swift.h" % (root, name)
+            fail("%s: %s has no Swift module interface; it is compiled without library evolution" % (entry.label, entry.package))
         swiftmodule = "%s/Modules/%s.swiftmodule/%s" % (root, name, slice.triple)
-        steps.append(("file", swift_header, module.swift_header))
         steps.append(("file", swiftmodule + ".swiftinterface", interface))
         if module.swift.swiftdoc:
             steps.append(("file", swiftmodule + ".swiftdoc", module.swift.swiftdoc))
@@ -446,18 +680,28 @@ def _framework_steps(ctx, slice, entry, module, binary):
         fail("%s: the plugin %s has %d privacy manifests, and a framework holds one" % (entry.label, entry.package, len(privacy)))
     for manifest in privacy:
         steps.append(("file", resources + "/PrivacyInfo.xcprivacy", manifest))
-    steps.extend(_resource_steps(entry, resources))
+    steps.extend([("file", "%s/%s" % (resources, path), f) for path, f in resource_files])
     return steps
 
 def _plugin_xcframeworks_impl(ctx):
+    check_swift_package_environment(ctx)
     platform = ctx.attr._platform
     slices = SLICES[platform]
     per_package = {}
+    vendored = {}
     for slice in slices:
         app_info = ctx.split_attr.application[slice.id][FlutterApplicationInfo]
         debug = slice.debug or app_info.is_debug
-        for package, framework in _slice_plugins(ctx, slice, app_info, ctx.split_attr._cc_toolchain[slice.id], debug).items():
+        app_libraries = ctx.split_attr._app_settings_libraries[slice.id][FlutterSwiftPMAppLibrariesInfo]
+        linked_targets = depset(transitive = [
+            ctx.split_attr.application[slice.id][FlutterAppleLinkedTargetsInfo].targets,
+            ctx.split_attr._app_settings_libraries[slice.id][FlutterAppleLinkedTargetsInfo].targets,
+        ])
+        result = _slice_plugins(ctx, slice, app_info, app_libraries, linked_targets, ctx.split_attr._cc_toolchain[slice.id], _DEBUG_SYMBOLS if debug else _PLUGIN_SYMBOLS)
+        for package, framework in result.built.items():
             per_package.setdefault(package, {})[slice.id] = framework
+        for name, xcframework in result.vendored.items():
+            vendored.setdefault(name, xcframework)
 
     outputs = []
     for package, frameworks in sorted(per_package.items()):
@@ -484,6 +728,19 @@ def _plugin_xcframeworks_impl(ctx):
             progress_message = "Assembling %s.xcframework for %%{label}" % package,
         )
         outputs.append(xcframework)
+
+    # A prebuilt xcframework, copied as it is, as upstream copies a pod's
+    # vendored one, with every slice it has and its own signature.
+    for name, prebuilt in sorted(vendored.items()):
+        xcframework = ctx.actions.declare_directory("%s/%s.xcframework" % (ctx.label.name, name))
+        assemble_bundle(
+            ctx,
+            xcframework,
+            _vendored_steps(prebuilt),
+            mnemonic = "FlutterVendoredXCFramework",
+            progress_message = "Copying %s.xcframework for %%{label}" % name,
+        )
+        outputs.append(xcframework)
     return [DefaultInfo(files = depset(outputs))]
 
 def _plugin_xcframeworks_rule(platform):
@@ -492,12 +749,16 @@ def _plugin_xcframeworks_rule(platform):
         attrs = dicts.add(
             XCODE_TOOL_ATTRS,
             BUNDLE_ATTRS,
+            MODULE_APP_SETTINGS_ATTRS,
             {
                 "application": attr.label(
                     doc = "The `flutter_application` whose Apple plugins are packaged.",
                     mandatory = True,
                     providers = [FlutterApplicationInfo],
                     cfg = SLICES_TRANSITION[platform],
+                    # The targets the plugins are linked from, of which the
+                    # Swift package modules' frameworks are made.
+                    aspects = [linked_targets_aspect],
                 ),
                 "minimum_os_version": attr.string(
                     doc = "The minimum %s version of the frameworks." % ("iOS" if platform == "ios" else "macOS"),
@@ -507,6 +768,15 @@ def _plugin_xcframeworks_rule(platform):
                     doc = "Static frameworks, each binary an archive of the plugin's objects, as " +
                           "`flutter build %s-framework --static` makes them. Link them; do not " % platform +
                           "embed them.",
+                ),
+                # The plugins whose Package.swift decides its defines from the
+                # app, built in each slice's configuration, which carries the
+                # module's `info_plist` and `swift_package_environment`.
+                "_app_settings_libraries": attr.label(
+                    default = SWIFTPM_APP_LIBRARIES,
+                    cfg = SLICES_TRANSITION[platform],
+                    providers = [FlutterSwiftPMAppLibrariesInfo],
+                    aspects = [linked_targets_aspect],
                 ),
                 "_cc_toolchain": attr.label(
                     default = "@rules_cc//cc:current_cc_toolchain",
@@ -529,6 +799,7 @@ flutter_ios_plugin_xcframeworks = _plugin_xcframeworks_rule("ios")
 flutter_macos_plugin_xcframeworks = _plugin_xcframeworks_rule("macos")
 
 def _code_asset_xcframeworks_impl(ctx):
+    check_swift_package_environment(ctx)
     platform = ctx.attr._platform
     slices = SLICES[platform]
 
@@ -537,20 +808,64 @@ def _code_asset_xcframeworks_impl(ctx):
     # candidate. Which candidates ship is known only to the action below,
     # which reads each slice's program assets. `flutter_application` has
     # checked that no two of a slice's share a name.
+    #
+    # A library the app wraps in a framework (on iOS each, on macOS each code
+    # asset's) is named by it, `apple_framework_names` of the slice's
+    # libraries, as the slice's own manifest names it; a library is one
+    # framework in every slice, so the slices must agree on its name. Any
+    # other is named by its file name.
     per_name = {}
     file_names = {}
     always = {}
     program_assets = {}
+    framework_of = {}
+    wrapped = {}
     for slice in slices:
         app_info = ctx.split_attr.application[slice.id][FlutterApplicationInfo]
         program_assets[slice.id] = app_info.program_assets
-        for dylib in list(app_info.native_libs) + candidate_code_asset_libraries(app_info.program_assets):
-            name = native_asset_framework_name(dylib.basename) if platform == "ios" else dylib.basename
+        frameworks = (app_apple_framework_names if platform == "ios" else app_macos_framework_names)(native_library_files(app_info), app_info.program_assets)
+        for file_name, framework in frameworks.items():
+            other = framework_of.setdefault(file_name, (framework, slice.id))
+            if other[0] != framework:
+                fail((
+                    "%s: %s ships as `%s.framework` in the %s slice and as " +
+                    "`%s.framework` in the %s slice, since the slices bundle " +
+                    "different libraries whose framework names collide. One " +
+                    "xcframework holds a library for every slice, under one name."
+                ) % (ctx.label, file_name, other[0], other[1], framework, slice.id))
+        for dylib in list(native_library_files(app_info)) + candidate_code_asset_libraries(app_info.program_assets):
+            name = frameworks.get(dylib.basename, dylib.basename)
             per_name.setdefault(name, {})[slice.id] = dylib
             file_names[name] = dylib.basename
-        for dylib in app_info.native_libs:
-            name = native_asset_framework_name(dylib.basename) if platform == "ios" else dylib.basename
+            if dylib.basename in frameworks:
+                wrapped[name] = True
+        for dylib in native_library_files(app_info):
+            name = frameworks.get(dylib.basename, dylib.basename)
             always.setdefault(name, []).append(slice.id)
+
+    # The libraries a slice bundles, each with its install name there: a
+    # library that links another records it by its old install name, which
+    # is rewritten, as the app's bundle does.
+    install_name_changes = {}
+    for slice in slices:
+        install_name_changes[slice.id] = rewrite_install_names(
+            ctx,
+            "%s_slices/%s_install_names" % (ctx.label.name, slice.id),
+            [
+                (dylibs[slice.id], _code_asset_install_name(name, name in wrapped))
+                for name, dylibs in sorted(per_name.items())
+                if len(dylibs) == len(slices)
+            ],
+        )
+
+    # Each binary is stripped, and has its dSYM, as `copyNativeCodeAssetsIOS`
+    # and `copyNativeCodeAssetsMacOS` treat it in every non-debug build.
+    symbols = {}
+    debug_info = {}
+    for slice in slices:
+        application = ctx.split_attr.application[slice.id]
+        symbols[slice.id] = _DEBUG_SYMBOLS if slice.debug or application[FlutterApplicationInfo].is_debug else _CODE_ASSET_SYMBOLS
+        debug_info[slice.id] = bundled_library_debug_info(application) if symbols[slice.id].dsym else {}
 
     candidates = {}
     for name, dylibs in sorted(per_name.items()):
@@ -563,51 +878,49 @@ def _code_asset_xcframeworks_impl(ctx):
                 fail("The code asset %s is built for %s only; each slice must build the same code assets" % (name, ", ".join(sorted(dylibs.keys()))))
             continue
         steps = []
+        dsyms = []
         for slice in slices:
             dylib = dylibs[slice.id]
-            if platform == "ios":
-                # A framework, as the app's bundle has it and its native-assets
-                # manifest names it.
-                binary = ctx.actions.declare_file("%s_slices/%s/%s.framework/%s" % (ctx.label.name, slice.id, name, name))
-                run_xcode_tool(
-                    ctx,
-                    command = 'cp "$1" "$2" && chmod u+w "$2" && xcrun install_name_tool -id "$3" "$2"',
-                    arguments = [ctx.actions.args().add_all([dylib, binary, "@rpath/%s.framework/%s" % (name, name)])],
-                    inputs = [dylib],
-                    outputs = [binary],
-                    mnemonic = "FlutterCodeAssetFramework",
-                    execution_requirements = PATH_MAPPING,
-                    progress_message = "Wrapping %s into %s.framework" % (dylib.basename, name),
-                )
+
+            # A framework, as the app's bundle has it and its native-assets
+            # manifest names it: on iOS each library, on macOS each code
+            # asset, versioned as `flutter build macos-framework` makes it,
+            # under upstream's install name `@rpath/<name>.framework/<name>`.
+            # Any other a library, as the app's bundle has it
+            # (`Contents/Frameworks/<name>`), its install name its own name
+            # there. A host that links either (a Swift package's binary target
+            # is linked) finds it through `@rpath`. Its dSYM is
+            # `<name>.framework.dSYM` or `<name>.dSYM`, as the app's.
+            framework = name in wrapped
+            path = "%s/%s" % (framework_root(slice, name), name) if framework else "%s/%s" % (slice.id, name)
+            bundle = name + ".framework" if framework else name
+            binary = ctx.actions.declare_file("%s_slices/%s/%s" % (ctx.label.name, slice.id, path[len(slice.id) + 1:]))
+            dsym = declare_library_dsym(ctx, "%s_slices/%s/dSYMs" % (ctx.label.name, slice.id), bundle, name) if symbols[slice.id].dsym else None
+            process_native_library(
+                ctx,
+                library = dylib,
+                output = binary,
+                symbols = symbols[slice.id],
+                mnemonic = "FlutterCodeAsset" + ("Framework" if framework else "Library"),
+                dsym = dsym,
+                debug_info = debug_info[slice.id].get(dylib),
+                install_name = _code_asset_install_name(name, framework),
+                install_name_changes = install_name_changes[slice.id],
+            )
+            steps.append(("file", path, binary))
+            if framework:
                 plist = ctx.actions.declare_file("%s_slices/%s/%s.framework/Info.plist" % (ctx.label.name, slice.id, name))
                 _framework_info_plist(ctx, plist, name, "io.flutter.flutter.native-assets.", platform)
-                steps.extend([
-                    ("file", "%s/%s.framework/%s" % (slice.id, name, name), binary),
-                    ("file", "%s/%s.framework/Info.plist" % (slice.id, name), plist),
-                ])
-            else:
-                # A library, as the macOS app's bundle has it (`Contents/Frameworks/<name>`)
-                # and its native-assets manifest names it, its install name its
-                # own name there: a host that links it (a Swift package's binary
-                # target is linked) finds it through `@rpath`.
-                library = ctx.actions.declare_file("%s_slices/%s/%s" % (ctx.label.name, slice.id, name))
-                run_xcode_tool(
-                    ctx,
-                    command = 'cp "$1" "$2" && chmod u+w "$2" && xcrun install_name_tool -id "$3" "$2"',
-                    arguments = [ctx.actions.args().add_all([dylib, library, "@rpath/" + name])],
-                    inputs = [dylib],
-                    outputs = [library],
-                    mnemonic = "FlutterCodeAssetLibrary",
-                    execution_requirements = PATH_MAPPING,
-                    progress_message = "Naming %s for add-to-app" % name,
-                )
-                steps.append(("file", "%s/%s" % (slice.id, name), library))
+                steps.append(("file", framework_resources(slice, name) + "/Info.plist", plist))
+            if dsym:
+                steps.extend(_dsym_steps(dsym, "%s/dSYMs/%s.dSYM" % (slice.id, bundle)))
+                dsyms.append(slice.id)
         plist = ctx.actions.declare_file("%s_slices/%s.xcframework.plist" % (ctx.label.name, name))
         base = name[:-len(".dylib")] if name.endswith(".dylib") else name
-        if platform == "ios":
-            xcframework_info_plist(ctx, plist, name, slices)
+        if name in wrapped:
+            xcframework_info_plist(ctx, plist, name, slices, dsyms = dsyms)
         else:
-            _library_xcframework_plist(ctx, plist, name, slices)
+            _library_xcframework_plist(ctx, plist, name, slices, dsyms = dsyms)
         xcframework = ctx.actions.declare_directory("%s_candidates/%s.xcframework" % (ctx.label.name, base))
         assemble_bundle(
             ctx,
@@ -662,10 +975,23 @@ _LIBRARY_XCFRAMEWORK_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 """
 
-def _library_xcframework_plist(ctx, output, name, slices):
-    """The `Info.plist` of an xcframework of a dynamic library, not a framework."""
+def _code_asset_install_name(name, framework):
+    """The install name of the library `name` in an add-to-app slice, in a `framework` of its own or not."""
+    return "@rpath/%s.framework/%s" % (name, name) if framework else "@rpath/" + name
+
+def _library_xcframework_plist(ctx, output, name, slices, dsyms = []):
+    """The `Info.plist` of an xcframework of a dynamic library, not a framework.
+
+    Args:
+        ctx: A rule context.
+        output: The File to write.
+        name: The library's file name.
+        slices: The `SLICES` entries it has.
+        dsyms: The library identifiers of the slices that have `dSYMs/`.
+    """
     ctx.actions.write(output, _LIBRARY_XCFRAMEWORK_PLIST.format(libraries = "".join([
         ("\t\t<dict>\n\t\t\t<key>BinaryPath</key>\n\t\t\t<string>{name}</string>\n" +
+         ("\t\t\t<key>DebugSymbolsPath</key>\n\t\t\t<string>dSYMs</string>\n" if slice.id in dsyms else "") +
          "\t\t\t<key>LibraryIdentifier</key>\n\t\t\t<string>{id}</string>\n" +
          "\t\t\t<key>LibraryPath</key>\n\t\t\t<string>{name}</string>\n" +
          "\t\t\t<key>SupportedArchitectures</key>\n\t\t\t<array>\n\t\t\t\t<string>{arch}</string>\n\t\t\t</array>\n" +
@@ -684,6 +1010,7 @@ def _code_asset_xcframeworks_rule(platform):
         attrs = dicts.add(
             XCODE_TOOL_ATTRS,
             BUNDLE_ATTRS,
+            MODULE_APP_SETTINGS_ATTRS,
             {
                 "application": attr.label(
                     doc = "The `flutter_application` whose code assets are packaged.",
@@ -700,7 +1027,7 @@ def _code_asset_xcframeworks_rule(platform):
             CODE_ASSETS_TOOL_ATTRS,
         ),
         exec_groups = PORTABLE_EXEC_GROUPS,
-        fragments = XCODE_TOOL_FRAGMENTS,
+        fragments = XCODE_TOOL_FRAGMENTS + ["cpp"],
         toolchains = XCODE_TOOL_TOOLCHAINS,
         doc = ("A directory of one xcframework per code asset that ships (a dynamic library a Dart build hook or " +
                "`flutter_native_asset` bundles, less those a release build's link hooks drop), as " +

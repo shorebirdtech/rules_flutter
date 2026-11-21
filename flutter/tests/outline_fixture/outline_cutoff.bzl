@@ -21,19 +21,7 @@ load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
 # version: `flutter`, the root's default, or one the root MODULE.bazel declares
 # for this fixture alone.
 OUTLINE_SDKS = {
-    "3.13.2": "outline_dart_3_13_2",
-    "3.13.4": "outline_dart_3_13_4",
-    "3.13.5": "outline_dart_3_13_5",
-    "3.13.7": "flutter",
-}
-
-# Dart releases a supported Flutter version bundles that no SDK here builds the
-# fixture under yet: rules_dart cannot build the outline stripper for them (its
-# `dart_kernel_source` has no pinned source for the release). Each is added to
-# `OUTLINE_SDKS`, with a `flutter_outline.toolchain` in MODULE.bazel, once the
-# rules_dart the root module depends on supports it.
-OUTLINE_SDKS_PENDING = {
-    "3.14.0": "Flutter 3.50.0",
+    "3.14.0": "flutter",
 }
 
 def outline_sdks():
@@ -42,11 +30,11 @@ def outline_sdks():
     Returns:
       `OUTLINE_SDKS`.
     """
-    missing = sorted({v.dart_version: None for v in FLUTTER_VERSIONS.values() if v.dart_version not in OUTLINE_SDKS and v.dart_version not in OUTLINE_SDKS_PENDING})
+    missing = sorted({v.dart_version: None for v in FLUTTER_VERSIONS.values() if v.dart_version not in OUTLINE_SDKS})
     if missing:
         fail(("No Flutter SDK builds the outline fixture with Dart %s. For each, declare a " +
-              "flutter.toolchain() of a Flutter version bundling it with the root module's " +
-              "`flutter_outline` and name it in OUTLINE_SDKS.") % ", ".join(missing))
+              "dev-dependency flutter.toolchain() of a Flutter version bundling it in the root " +
+              "MODULE.bazel and name it in OUTLINE_SDKS.") % ", ".join(missing))
     return OUTLINE_SDKS
 
 _SDK = str(Label("//flutter:sdk"))

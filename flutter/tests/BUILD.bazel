@@ -1,12 +1,14 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_dart//dart:defs.bzl", "dart_test")
 load("//flutter:defs.bzl", "dart_package_metadata")
+load("//tools/e2e_testing:sdk_choice_test.bzl", "flutter_sdk_default_test", "flutter_sdk_flag_release_test", "flutter_sdk_flag_undeclared_test", "flutter_sdk_probe")
 load(":android_arm_test.bzl", "android_arm_test_suite")
 load(":android_build_config_test.bzl", "android_build_config_test_suite")
 load(":android_build_transition_test.bzl", "android_build_transition_test_suite")
 load(":android_bundle_test.bzl", "android_bundle_test_suite")
 load(":android_class_check_test.bzl", "android_class_check_test_suite")
 load(":android_listenablefuture_test.bzl", "android_listenablefuture_test_suite")
+load(":android_plugin_jvm_target_test.bzl", "android_plugin_jvm_target_test_suite")
 load(":android_plugin_libs_test.bzl", "android_plugin_libs_test_suite")
 load(":android_plugin_maven_test.bzl", "android_plugin_maven_test_suite")
 load(":aot_options_test.bzl", "aot_file_flags_test_suite", "aot_no_strip_test_suite", "aot_obfuscate_alone_test_suite", "aot_options_test_suite", "aot_resolve_dwarf_paths_test_suite", "aot_strip_test_suite")
@@ -19,18 +21,25 @@ load(":apple_plugin_settings_test.bzl", "apple_plugin_settings_test_suite")
 load(":apple_version_check_test.bzl", "apple_version_check_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
+load(":bundle_parts_test.bzl", "bundle_parts_test_suite")
+load(":checkout_version_test.bzl", "checkout_version_test_suite")
 load(":cmake_link_libraries_test.bzl", "cmake_link_libraries_test_suite")
 load(":code_asset_native_library_test.bzl", "code_asset_native_library_test_suite")
 load(":common_test.bzl", "common_test_suite")
+load(":custom_sdks_test.bzl", "custom_sdks_test_suite")
 load(":data_asset_test.bzl", "data_asset_test_suite")
+load(":desktop_debug_info_test.bzl", "desktop_debug_info_test_suite")
 load(":desktop_plugin_link_test.bzl", "desktop_plugin_link_test_suite")
 load(":dev_config_test.bzl", "dev_config_test_suite")
+load(":dev_tool_support_test.bzl", "dev_tool_support_test_suite")
 load(":download_digests_test.bzl", "download_digests_test_suite")
 load(":engine_out_dirs_test.bzl", "engine_out_dirs_test_suite")
 load(":engine_targets_test.bzl", "engine_targets_test_suite")
+load(":federated_plugin_test.bzl", "federated_plugin_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_application_variant_test.bzl", "flutter_application_variant_test_suite")
 load(":flutter_framework_package_test.bzl", "flutter_framework_package_test_suite")
+load(":flutter_info_forwarding_test.bzl", "flutter_info_forwarding_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
 load(":flutter_integration_test_test.bzl", "flutter_integration_test_test_suite")
 load(":flutter_library_test.bzl", "flutter_library_test_suite")
@@ -45,8 +54,10 @@ load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
 load(":flutter_test_flavor_test.bzl", "flutter_test_flavor_test_suite")
 load(":flutter_test_runfiles_test.bzl", "flutter_test_runfiles_test_suite")
 load(":flutter_test_tags_test.bzl", "flutter_test_tags_test_suite")
+load(":framework_source_test.bzl", "framework_source_test_suite")
 load(":gradle_dependency_forms_test.bzl", "gradle_dependency_forms_test_suite")
 load(":gradle_dependency_gaps_test.bzl", "gradle_dependency_gaps_test_suite")
+load(":gradle_script_test.bzl", "gradle_script_test_suite")
 load(":ios_test.bzl", "ios_test_suite")
 load(":language_version_test.bzl", "language_version_test_suite")
 load(":linux_runner_defines_test.bzl", "linux_runner_defines_test_suite")
@@ -55,6 +66,8 @@ load(":macos_test.bzl", "macos_test_suite")
 load(":manifest_merge_test.bzl", "manifest_merge_test_suite")
 load(":native_assets_test.bzl", "bridge_probe", "native_assets_test_suite")
 load(":native_hot_patch_test.bzl", "native_hot_patch_test_suite")
+load(":native_libraries_test.bzl", "native_libraries_test_suite")
+load(":native_link_test.bzl", "native_link_test_suite")
 load(":native_sources_test.bzl", "native_sources_test_suite")
 load(":notices_test.bzl", "notices_test_suite")
 load(":package_identity_test.bzl", "package_identity_test_suite")
@@ -63,14 +76,15 @@ load(":pinned_test.bzl", "pinned_test_suite")
 load(":platform_bundle_test.bzl", "platform_bundle_test_suite")
 load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
+load(":plugin_resolution_test.bzl", "plugin_resolution_test_suite")
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
-load(":pub_constraint_test.bzl", "pub_constraint_test_suite")
+load(":pub_cycle_test.bzl", "pub_cycle_test_suite")
 load(":pub_cycles_test.bzl", "pub_cycles_test_suite")
-load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pub_reconcile_test.bzl", "pub_reconcile_test_suite")
 load(":pub_resolve_test.bzl", "pub_resolve_test_suite")
 load(":pub_settings_test.bzl", "pub_settings_test_suite")
 load(":purls.bzl", "package_metadata_files")
+load(":recorded_uses_test.bzl", "recorded_uses_test_suite")
 load(":sdk_inputs_test.bzl", "sdk_inputs_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shared_code_asset_test.bzl", "shared_code_asset_test_suite")
@@ -118,6 +132,8 @@ app_root_record_test_suite(name = "app_root_record_test")
 
 asset_bundle_test_suite(name = "asset_bundle_test")
 
+bundle_parts_test_suite(name = "bundle_parts_test")
+
 ios_test_suite(name = "ios_test")
 
 macos_test_suite(name = "macos_test")
@@ -150,6 +166,8 @@ android_class_check_test_suite(name = "android_class_check_test")
 
 android_listenablefuture_test_suite(name = "android_listenablefuture_test")
 
+android_plugin_jvm_target_test_suite(name = "android_plugin_jvm_target_test")
+
 android_plugin_maven_test_suite(name = "android_plugin_maven_test")
 
 swiftpm_app_settings_test_suite(name = "swiftpm_app_settings_test")
@@ -166,6 +184,8 @@ gradle_dependency_forms_test_suite(name = "gradle_dependency_forms_test")
 
 gradle_dependency_gaps_test_suite(name = "gradle_dependency_gaps_test")
 
+gradle_script_test_suite(name = "gradle_script_test")
+
 flutter_pub_library_repo_test_suite(name = "flutter_pub_library_repo_test")
 
 flutter_framework_package_test_suite(name = "flutter_framework_package_test")
@@ -174,6 +194,10 @@ flutter_pub_package_sdk_source_test_suite(name = "flutter_pub_package_sdk_source
 
 pub_reconcile_test_suite(name = "pub_reconcile_test")
 
+framework_source_test_suite(name = "framework_source_test")
+
+checkout_version_test_suite(name = "checkout_version_test")
+
 pub_cycles_test_suite(name = "pub_cycles_test")
 
 pub_resolve_test_suite(name = "pub_resolve_test")
@@ -181,6 +205,33 @@ pub_resolve_test_suite(name = "pub_resolve_test")
 pub_settings_test_suite(name = "pub_settings_test")
 
 toolchain_version_test_suite(name = "toolchain_version_test")
+
+custom_sdks_test_suite(name = "custom_sdks_test")
+
+# Which SDK a build resolves. This module declares only the release and
+# chooses none, so the release, with or without the flag naming it.
+flutter_sdk_probe(
+    name = "sdk_probe",
+    tags = ["manual"],
+)
+
+flutter_sdk_default_test(
+    name = "sdk_default_test",
+    sdk = "flutter",
+    target_under_test = ":sdk_probe",
+)
+
+flutter_sdk_flag_release_test(
+    name = "sdk_flag_release_test",
+    sdk = "flutter",
+    target_under_test = ":sdk_probe",
+)
+
+flutter_sdk_flag_undeclared_test(
+    name = "sdk_flag_undeclared_test",
+    declared = "flutter",
+    target_under_test = "@flutter_toolchains//:undeclared_sdk",
+)
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
 
@@ -210,15 +261,39 @@ dart_test(
     deps = ["@rules_dart//dart/runfiles"],
 )
 
+# pub.dev's `runfiles`, which the root lock lists, is the one package
+# `@rules_dart//dart/runfiles` is: a program reaching both builds.
+dart_test(
+    name = "published_runfiles_test",
+    size = "small",
+    data = ["published_runfiles_test.dart"],
+    env = {"SELF": "$(rlocationpath published_runfiles_test.dart)"},
+    main = "published_runfiles_test.dart",
+    deps = [
+        "@dev_tool_deps//:runfiles",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 flutter_pubspec_test_suite(name = "flutter_pubspec_test")
 
 flutter_test_bootstrap_test_suite(name = "flutter_test_bootstrap_test")
 
 plugin_registrant_test_suite(name = "plugin_registrant_test")
 
+plugin_resolution_test_suite(name = "plugin_resolution_test")
+
+federated_plugin_test_suite(name = "federated_plugin_test")
+
+flutter_info_forwarding_test_suite(name = "flutter_info_forwarding_test")
+
+pub_cycle_test_suite(name = "pub_cycle_test")
+
 platform_bundle_test_suite(name = "platform_bundle_test")
 
 linux_runner_defines_test_suite(name = "linux_runner_defines_test")
+
+desktop_debug_info_test_suite(name = "desktop_debug_info_test")
 
 windows_version_test_suite(name = "windows_version_test")
 
@@ -229,6 +304,8 @@ language_version_test_suite(name = "language_version_test")
 flutter_test_application_test_suite(name = "flutter_test_application_test")
 
 profile_mode_test_suite(name = "profile_mode_test")
+
+dev_tool_support_test_suite(name = "dev_tool_support_test")
 
 aot_options_test_suite(
     name = "aot_options_application_test",
@@ -296,11 +373,9 @@ flutter_test_flavor_test_suite(name = "flutter_test_flavor_test")
 
 widget_creation_flag_test_suite(name = "widget_creation_flag_test")
 
+recorded_uses_test_suite(name = "recorded_uses_test")
+
 engine_out_dirs_test_suite(name = "engine_out_dirs_test")
-
-pub_constraint_test_suite(name = "pub_constraint_test")
-
-pub_lock_sdks_test_suite(name = "pub_lock_sdks_test")
 
 shader_compile_test_suite(name = "shader_compile_test")
 
@@ -318,6 +393,8 @@ native_hot_patch_test_suite(name = "native_hot_patch_test")
 
 native_sources_test_suite(name = "native_sources_test")
 
+native_link_test_suite(name = "native_link_test")
+
 code_asset_native_library_test_suite(name = "code_asset_native_library_test")
 
 apple_engine_test_suite(name = "apple_engine_test")
@@ -329,6 +406,8 @@ apple_version_check_test_suite(name = "apple_version_check_test")
 engine_targets_test_suite(name = "engine_targets_test")
 
 shared_code_asset_test_suite(name = "shared_code_asset_test")
+
+native_libraries_test_suite(name = "native_libraries_test")
 
 bridge_probe(
     name = "dart_code_asset_bridge_probe",

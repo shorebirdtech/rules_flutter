@@ -121,9 +121,13 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//android:rules.bzl", _android_application = "android_application", _android_binary = "android_binary", _android_library = "android_library")
 load("@rules_dart//dart:defs.bzl", "dart_binary")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
+load("@rules_jvm_external//:defs.bzl", "artifact")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
+load("@rules_kotlin//kotlin:core.bzl", _kt_kotlinc_options = "kt_kotlinc_options")
+load("//flutter/private:android_debug_info.bzl", _flutter_android_debug_info = "flutter_android_debug_info")
 load("//flutter/private:app_version.bzl", "manifest_values_conflict", "version_arg")
-load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
+load("//flutter/private:common.bzl", _ANDROID_EMBEDDING_MAVEN_DEPS = "ANDROID_EMBEDDING_MAVEN_DEPS")
+load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_REGISTRANT_JVM_TARGET = "ANDROID_REGISTRANT_JVM_TARGET", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
 load("//flutter/private:flutter_android_aar.bzl", _DEFAULT_AAR_ABIS = "DEFAULT_AAR_ABIS", _flutter_android_maven_repo = "flutter_android_maven_repo", _flutter_android_module_aar = "flutter_android_module_aar", _flutter_android_plugin_aars = "flutter_android_plugin_aars")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_build.bzl", _flutter_android_build = "flutter_android_build")
@@ -157,16 +161,8 @@ ANDROID_TARGET_SDK_VERSION = _ANDROID_TARGET_SDK_VERSION
 # that contract. It adds nothing to the APK that the engine target wasn't
 # already carrying at runtime.
 _ANDROIDX_EMBEDDING_DEPS = [
-    Label("@rules_flutter_maven//:androidx_annotation_annotation"),
-    Label("@rules_flutter_maven//:androidx_core_core"),
-    Label("@rules_flutter_maven//:androidx_exifinterface_exifinterface"),
-    Label("@rules_flutter_maven//:androidx_fragment_fragment"),
-    Label("@rules_flutter_maven//:androidx_lifecycle_lifecycle_common"),
-    Label("@rules_flutter_maven//:androidx_lifecycle_lifecycle_runtime"),
-    Label("@rules_flutter_maven//:androidx_tracing_tracing"),
-    Label("@rules_flutter_maven//:androidx_window_window"),
-    Label("@rules_flutter_maven//:androidx_window_window_java"),
-    Label("@rules_flutter_maven//:com_getkeepsafe_relinker_relinker"),
+    Label(artifact(coordinate, repository_name = "rules_flutter_maven"))
+    for coordinate in _ANDROID_EMBEDDING_MAVEN_DEPS
 ]
 
 # -- Composable rules (Tier 2) ------------------------------------------------
@@ -211,6 +207,11 @@ flutter_android_build = _flutter_android_build
 # every ABI. The key is read at run time from Flutter's `key.properties` and
 # never reaches the build graph. See flutter/private/flutter_android_release.bzl.
 flutter_android_release = _flutter_android_release
+
+# Applied from the command line, gives an APK (`android_binary`) the
+# `.symbols` of the snapshots it ships in its `debug_info` output group. See
+# flutter/private/android_debug_info.bzl.
+flutter_android_debug_info = _flutter_android_debug_info
 
 # The AAR of a Flutter module (`flutter_<mode>`), the AARs of its plugins, and
 # the Maven repository of both, for a Gradle-built host app: the pieces of
@@ -637,6 +638,35 @@ def _variant_overlay(name, variant, manifest, base_manifest):
         )
     return overlay
 
+def _registrant_library(name, deps, tags, testonly):
+    """Compiles the `flutter_android_registrant` `<name>_src` as `name`.
+
+    At the Java level `flutter create`'s templates compile it at, not the Kotlin
+    toolchain's default, whose Java 8 javac reports as obsolete under
+    `-Xlint:all`.
+
+    Args:
+        name: The library's name.
+        deps: The engine and the plugins' libraries the registrant names.
+        tags: The tags of both targets.
+        testonly: The `testonly` of both targets.
+    """
+    _kt_kotlinc_options(
+        name = name + "_kotlinc_opts",
+        jvm_target = _ANDROID_REGISTRANT_JVM_TARGET,
+        tags = tags,
+        testonly = testonly,
+    )
+    _kt_android_library(
+        name = name,
+        srcs = [name + "_src"],
+        custom_package = "io.flutter.plugins",
+        kotlinc_opts = name + "_kotlinc_opts",
+        tags = tags,
+        testonly = testonly,
+        deps = deps,
+    )
+
 # -- Convenience macro (Tier 1) -----------------------------------------------
 
 def flutter_android_app(
@@ -834,6 +864,9 @@ def flutter_android_app(
             the build like the APK's. `bazel run` of it installs it on the
             device `ANDROID_SERIAL` names with bundletool, signed with the
             debug key. Hand it to `flutter_android_release` to sign a release.
+            With `--@rules_dart//dart:split_debug_info`, its `debug_info`
+            output group holds the `.symbols` of each ABI's `libapp.so`
+            (`app.android-arm64.symbols`), which are the APK's too.
         bundle_config: The bundletool `BundleConfig` (`.pb.json`) of
             `app_bundle`. The default,
             `@rules_flutter//flutter:android_bundle_config.pb.json`, is the
@@ -934,7 +967,7 @@ def flutter_android_app(
     maven = Label("@flutter_pub_android_maven//:requirements")
     _flutter_android_plugin_libs(
         name = "__%s_plugin_libs" % name,
-        deps = application,
+        deps = [application],
         maven = maven,
         report = "//%s:%s_maven_artifacts" % (native.package_name(), name),
         tags = tags,
@@ -958,10 +991,8 @@ def flutter_android_app(
     # through them, and the registrant names its class.
     registrant_deps = ["__%s_engine" % name, "__%s_plugin_libs" % name] + deps
 
-    _kt_android_library(
+    _registrant_library(
         name = "__%s_registrant" % name,
-        srcs = ["__%s_registrant_src" % name],
-        custom_package = "io.flutter.plugins",
         tags = tags,
         testonly = testonly,
         deps = registrant_deps,
@@ -1238,7 +1269,9 @@ def flutter_android_aar(
     and one AAR per plugin with Android code, `<group>:<plugin>_<mode>:<build_number>`;
     the module's POM depends on Flutter's engine artifacts
     (`io.flutter:flutter_embedding_<mode>` and `io.flutter:<abi>_<mode>`) and
-    on the plugins'. See `flutter_android_maven_repo` for the layout.
+    on the plugins'. With an engine that is not the release's, the repository
+    holds that engine's artifacts too. See `flutter_android_maven_repo` for
+    the layout.
 
     The mode is the command line's: `-c dbg` is debug, `-c opt
     --@rules_flutter//flutter:profile` profile, and otherwise release.
@@ -1255,6 +1288,11 @@ def flutter_android_aar(
 
         bazel run -c dbg //:module_aar
         bazel run -c opt //:module_aar
+
+    With `--@rules_dart//dart:split_debug_info`, the target's `debug_info`
+    output group holds the `.symbols` of each ABI's `libapp.so`
+    (`app.android-arm64.symbols`), as `flutter build aar --split-debug-info`
+    writes them.
 
     Args:
         name: Target name: the `flutter_android_maven_repo`.
@@ -1287,7 +1325,7 @@ def flutter_android_aar(
     maven = Label("@flutter_pub_android_maven//:requirements")
     _flutter_android_plugin_libs(
         name = "__%s_plugin_libs" % name,
-        deps = application,
+        deps = [application],
         maven = maven,
         report = "//%s:%s_maven_artifacts" % (native.package_name(), name),
         tags = tags,
@@ -1313,10 +1351,8 @@ def flutter_android_aar(
         tags = tags,
         testonly = testonly,
     )
-    _kt_android_library(
+    _registrant_library(
         name = "__%s_registrant" % name,
-        srcs = ["__%s_registrant_src" % name],
-        custom_package = "io.flutter.plugins",
         tags = tags,
         testonly = testonly,
         deps = ["__%s_engine" % name, "__%s_plugin_libs" % name],

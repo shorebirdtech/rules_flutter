@@ -13,7 +13,7 @@ load("@flutter_version_pin//:version.bzl", "FLUTTER_VERSION")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter/private:flutter_kernel.bzl", "flutter_kernel")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
-load("//flutter/private:sdk_defines.bzl", "VERSION_DEFINE_KEYS", "sdk_dart_defines", "version_dart_defines")
+load("//flutter/private:sdk_defines.bzl", "VERSION_DEFINE_KEYS", "custom_sdk_dart_defines", "sdk_dart_defines", "sdk_engine_revision", "version_dart_defines")
 load("//flutter/private:validation.bzl", "is_valid_dart_define")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
 load(":action_content.bzl", "written_json")
@@ -50,24 +50,49 @@ def _is_version_define(arg):
 def _sdk_defines_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(env, [
-        "FLUTTER_VERSION=3.47.9",
+        "FLUTTER_VERSION=3.50.0",
         "FLUTTER_CHANNEL=stable",
         "FLUTTER_GIT_URL=https://github.com/flutter/flutter.git",
-        "FLUTTER_FRAMEWORK_REVISION=c197ca5199",
-        "FLUTTER_ENGINE_REVISION=89c39edfdf",
-        "FLUTTER_DART_VERSION=3.13.7",
-    ], sdk_dart_defines("3.47.9"))
+        "FLUTTER_FRAMEWORK_REVISION=ab2912035e",
+        "FLUTTER_ENGINE_REVISION=371f77202a",
+        "FLUTTER_DART_VERSION=3.14.0",
+    ], sdk_dart_defines("3.50.0"))
+
+    # A checkout's channel is its branch's, and its repository its remote's,
+    # or `null` when it has none, as flutter_tools writes them.
+    asserts.equals(env, [
+        "FLUTTER_VERSION=3.50.1-0.0.pre-2",
+        "FLUTTER_CHANNEL=[user-branch]",
+        "FLUTTER_GIT_URL=git@github.com:me/flutter.git",
+        "FLUTTER_FRAMEWORK_REVISION=0123456789",
+        "FLUTTER_ENGINE_REVISION=",
+        "FLUTTER_DART_VERSION=",
+    ], custom_sdk_dart_defines("3.50.1-0.0.pre-2", "0123456789abcdef", "", "", "[user-branch]", "git@github.com:me/flutter.git"))
+    asserts.true(env, "FLUTTER_GIT_URL=null" in custom_sdk_dart_defines("1.2.3", "", "", "", "main", None))
     asserts.equals(env, [
         "FLUTTER_BUILD_NAME=1.0.0",
         "FLUTTER_BUILD_NUMBER=1",
-    ], version_dart_defines("3.47.9", "", "")[:2], "unset is flutter create's 1.0.0+1")
+    ], version_dart_defines("3.50.0", "", "")[:2], "unset is flutter create's 1.0.0+1")
     asserts.equals(env, [
         "FLUTTER_BUILD_NAME=2.1",
         "FLUTTER_BUILD_NUMBER=42",
-    ], version_dart_defines("3.47.9", "2.1", "42")[:2], "as given, not padded to three numbers")
+    ], version_dart_defines("3.50.0", "2.1", "42")[:2], "as given, not padded to three numbers")
     return unittest.end(env)
 
 _sdk_defines_test = unittest.make(_sdk_defines_test_impl)
+
+def _engine_revision_test_impl(ctx):
+    # The commit the toolchain and the dev root's manifest both report: the
+    # engine's own record's, not the release's it is paired with.
+    env = unittest.begin(ctx)
+    release = FLUTTER_VERSIONS[FLUTTER_VERSION].engine_revision
+    asserts.equals(env, "0123abc", sdk_engine_revision({"engine_revision": "0123abc"}, FLUTTER_VERSION))
+    asserts.equals(env, release, sdk_engine_revision({}, FLUTTER_VERSION))
+    asserts.equals(env, release, sdk_engine_revision({"dart_version": "3.12.0"}, FLUTTER_VERSION))
+    asserts.equals(env, "", sdk_engine_revision({}, ""))
+    return unittest.end(env)
+
+_engine_revision_test = unittest.make(_engine_revision_test_impl)
 
 def _every_release_describes_itself_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -231,6 +256,7 @@ def version_defines_test_suite(name):
     _modular_test(name = name + "_test_modular", target_under_test = ":_version_test.program", mnemonic = "DartEntryKernel")
     _whole_program_test(name = name + "_test_whole_program", target_under_test = ":_version_test.program", mnemonic = "DartKernel")
     _sdk_defines_test(name = name + "_sdk_defines")
+    _engine_revision_test(name = name + "_engine_revision")
     _every_release_describes_itself_test(name = name + "_every_release")
     _reserved_test(name = name + "_reserved")
     native.test_suite(
@@ -246,6 +272,7 @@ def version_defines_test_suite(name):
             ":" + name + "_test_modular",
             ":" + name + "_test_whole_program",
             ":" + name + "_sdk_defines",
+            ":" + name + "_engine_revision",
             ":" + name + "_every_release",
             ":" + name + "_reserved",
         ],

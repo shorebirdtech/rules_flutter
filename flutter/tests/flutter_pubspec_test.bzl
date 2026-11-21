@@ -56,6 +56,7 @@ _PATH_PROVIDER_FOUNDATION = {
 # package / fileName, no implements/default_package (package_info_plus).
 _PACKAGE_INFO_PLUS = {
     "name": "package_info_plus",
+    "environment": {"sdk": ">=3.4.0 <4.0.0", "flutter": ">=3.22.0"},
     "flutter": {
         "plugin": {
             "platforms": {
@@ -197,7 +198,9 @@ def _federated_impl_test_impl(ctx):
 
 def _monolithic_plugin_test_impl(ctx):
     env = unittest.begin(ctx)
-    result = flutter_plugin_block(_PACKAGE_INFO_PLUS)
+
+    # `read_pubspec`'s lower bound of its `flutter: ">=3.22.0"`.
+    result = flutter_plugin_block(_PACKAGE_INFO_PLUS, "3.22.0")
     asserts.true(env, result.present)
     asserts.equals(env, "", result.implements)
     asserts.equals(env, 6, len(result.platforms))
@@ -554,6 +557,53 @@ def _assets_accepted_test_impl(ctx):
 
 _assets_accepted_test = unittest.make(_assets_accepted_test_impl)
 
+# ---------------------------------------------------------------------------
+# A desktop Dart class flutter_tools does not register
+# ---------------------------------------------------------------------------
+
+def _self_implementing(implements = None, default_package = None):
+    macos = {"dartPluginClass": "SelfMacOS", "dartFileName": "src/self_macos.dart", "pluginClass": "SelfPlugin"}
+    if default_package:
+        macos["default_package"] = default_package
+    plugin = {"platforms": {
+        "android": {"dartPluginClass": "SelfAndroid"},
+        "macos": macos,
+        "linux": {"dartPluginClass": "SelfLinux"},
+    }}
+    if implements:
+        plugin["implements"] = implements
+    return {"name": "self", "flutter": {"plugin": plugin}}
+
+def _desktop_dart_self_implementation_test_impl(ctx):
+    """flutter_tools takes a package's own desktop Dart class only when it requires Flutter 2.11 or later (`_isEligibleDartSelfImpl`).
+
+    What it requires is the lower bound of its `environment: flutter:`, which
+    `read_pubspec` reads as pub_semver does: "" for none.
+    """
+    env = unittest.begin(ctx)
+    for minimum in ["", "2.10.0", "2.11.0-0", "1.20.0"]:
+        platforms = flutter_plugin_block(_self_implementing(), minimum).platforms
+        asserts.equals(env, {"pluginClass": "SelfPlugin"}, platforms["macos"], "macOS's Dart class is not taken from %r" % minimum)
+        asserts.equals(env, {}, platforms["linux"], "nor Linux's, from %r" % minimum)
+        asserts.equals(env, "SelfAndroid", platforms["android"]["dartPluginClass"], "a mobile platform's is, from %r" % minimum)
+    for minimum in ["2.11.0", "3.0.0", "3.22.0", "2.11.0+1"]:
+        platforms = flutter_plugin_block(_self_implementing(), minimum).platforms
+        asserts.equals(env, "SelfMacOS", platforms["macos"]["dartPluginClass"], "macOS's Dart class is taken from %r" % minimum)
+        asserts.equals(env, "src/self_macos.dart", platforms["macos"]["dartFileName"])
+        asserts.equals(env, "SelfLinux", platforms["linux"]["dartPluginClass"], "and Linux's, from %r" % minimum)
+
+    # A package that implements another is that one's implementation, however
+    # old the Flutter it requires.
+    platforms = flutter_plugin_block(_self_implementing(implements = "other")).platforms
+    asserts.equals(env, "SelfMacOS", platforms["macos"]["dartPluginClass"])
+
+    # Beside a `default_package` the class stays, for flutter_tools to refuse.
+    platforms = flutter_plugin_block(_self_implementing(default_package = "self_macos")).platforms
+    asserts.equals(env, "SelfMacOS", platforms["macos"]["dartPluginClass"])
+    return unittest.end(env)
+
+_desktop_dart_self_implementation_test = unittest.make(_desktop_dart_self_implementation_test_impl)
+
 def flutter_pubspec_test_suite(name):
     unittest.suite(
         name,
@@ -576,4 +626,5 @@ def flutter_pubspec_test_suite(name):
         _assets_refused_test,
         _assets_error_places_the_entry_test,
         _assets_accepted_test,
+        _desktop_dart_self_implementation_test,
     )

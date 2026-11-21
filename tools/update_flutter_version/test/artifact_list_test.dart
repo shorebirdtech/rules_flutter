@@ -15,6 +15,7 @@ FLUTTER_VERSIONS = {
     ),
     "3.2.0": struct(
         engine_revision = "def",
+        dart_source_sha256 = "$_sha",
         source_sha256 = "$_sha2",
     ),
 }
@@ -91,6 +92,53 @@ void main() {
 
     test('is null for an unpinned version', () {
       expect(pinnedSourceSha256(_versionsBzl, '9.9.9'), isNull);
+    });
+  });
+
+  group('pinnedDartSourceSha256', () {
+    test('reads the Dart source checksum, not the Flutter one', () {
+      expect(pinnedDartSourceSha256(_versionsBzl, '3.2.0'), _sha);
+    });
+
+    test('is null where none is recorded', () {
+      expect(pinnedDartSourceSha256(_versionsBzl, '3.1.0'), isNull);
+    });
+  });
+
+  group('iOS USB dependencies', () {
+    test('reads the pins of IOS_USB_DEPENDENCIES', () {
+      final pins = pinnedIosUsbDependencies('''
+IOS_USB_DEPENDENCIES = {
+    "libplist": struct(
+        version = "cf58",
+        sha256 = "$_sha",
+    ),
+    "libusbmuxd": struct(
+        version = "19d6",
+        sha256 = "$_sha2",
+    ),
+}
+''');
+      expect(pins, {
+        'libplist': (version: 'cf58', sha256: _sha),
+        'libusbmuxd': (version: '19d6', sha256: _sha2),
+      });
+    });
+
+    test('formats the URL from the Starlark template', () {
+      const bzl =
+          '_IOS_USB_DEPENDENCY_TEMPLATE = "https://x/{name}/{version}/{name}.zip"\n';
+      expect(
+        iosUsbDependencyUrl(bzl, 'libplist', 'cf58'),
+        'https://x/libplist/cf58/libplist.zip',
+      );
+    });
+
+    test('refuses a file without the template', () {
+      expect(
+        () => iosUsbDependencyUrl('', 'libplist', 'cf58'),
+        throwsStateError,
+      );
     });
   });
 }

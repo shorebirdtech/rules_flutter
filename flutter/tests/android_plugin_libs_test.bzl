@@ -6,6 +6,7 @@ have an Android library and `app_uses_<n>` depends on plugin `<n>` alone.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
+load("//flutter/private:flutter_android_plugin_libs.bzl", "FlutterAndroidPluginNativeLibsInfo")
 
 _FIXTURE = "//flutter/tests/android_plugin_libs_fixture:"
 
@@ -29,6 +30,14 @@ def _checks_what_it_links_impl(ctx):
 
 _checks_what_it_links_test = analysistest.make(_checks_what_it_links_impl, expect_failure = True)
 
+def _takes_one_application_impl(ctx):
+    """`deps` that lists two applications fails, saying it takes one."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "lists 2 targets; it takes one `flutter_application`")
+    return analysistest.end(env)
+
+_takes_one_application_test = analysistest.make(_takes_one_application_impl, expect_failure = True)
+
 def _ignores_what_it_does_not_link_impl(ctx):
     """An app builds whatever plugins the lock lists, when the ones it links are satisfied.
 
@@ -51,7 +60,7 @@ def _report_names_only_its_plugins_impl(ctx):
     env = analysistest.begin(ctx)
     content = _report_content(env)
     asserts.equals(env, {
-        "g:needed_by_a": {"version": "2.0", "declared_by": ["package:plugin_a 1.0"]},
+        "g:needed_by_a": {"version": "2.0", "declared_by": ["package:plugin_a 1.0"], "exclusions": [], "managed": False},
     }, content["requirements"])
     asserts.equals(env, "//app:a", content["app"])
     return analysistest.end(env)
@@ -150,6 +159,45 @@ _java_in_app_configuration_test = analysistest.make(
     config_settings = _platform("@rules_android//:arm64-v8a"),
 )
 
+def _plugin_native_libs(env):
+    """What `FlutterAndroidPluginNativeLibsInfo.libraries` gives, as {library name: [basenames]}."""
+    info = analysistest.target_under_test(env)[FlutterAndroidPluginNativeLibsInfo]
+    return {label.name: sorted([f.basename for f in files]) for label, files in info.libraries.items()}
+
+def _keeps_libraries_of_other_packages_impl(ctx):
+    """A plugin's AAR carries what its library links from another Bazel package, but not what it links through another plugin's.
+
+    `plugin_linked`'s library links `libshared.so` of another package, and
+    `plugin_dep`'s depends on `plugin_linked`'s: the library goes in
+    `plugin_linked`'s AAR alone, as Gradle builds it into that module.
+    """
+    env = analysistest.begin(ctx)
+    asserts.equals(
+        env,
+        {"lib_dep": [], "lib_linked": ["libshared.so"]},
+        _plugin_native_libs(env),
+    )
+    return analysistest.end(env)
+
+_keeps_libraries_of_other_packages_test = analysistest.make(
+    _keeps_libraries_of_other_packages_impl,
+    config_settings = _platform("@rules_android//:arm64-v8a"),
+)
+
+def _one_library_a_plugin_impl(ctx):
+    """A plugin that exports two Android libraries fails for its AAR, naming both."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "plugin `plugin_two` exports 2 Android libraries")
+    asserts.expect_failure(env, "//flutter/tests/android_plugin_libs_fixture/two:lib_one")
+    asserts.expect_failure(env, "A plugin's AAR is one Gradle module")
+    return analysistest.end(env)
+
+_one_library_a_plugin_test = analysistest.make(
+    _one_library_a_plugin_impl,
+    expect_failure = True,
+    config_settings = _platform("@rules_android//:arm64-v8a"),
+)
+
 def android_plugin_libs_test_suite(name):
     """Declares the tests.
 
@@ -163,6 +211,10 @@ def android_plugin_libs_test_suite(name):
     _checks_what_it_links_test(
         name = name + "_checks_what_it_links",
         target_under_test = _FIXTURE + "checked_libs_of_a",
+    )
+    _takes_one_application_test(
+        name = name + "_takes_one_application",
+        target_under_test = _FIXTURE + "libs_of_two_apps",
     )
     _ignores_what_it_does_not_link_test(
         name = name + "_ignores_what_it_does_not_link",
@@ -192,9 +244,19 @@ def android_plugin_libs_test_suite(name):
         name = name + "_java_in_app_configuration",
         target_under_test = _FIXTURE + "libs_of_native",
     )
+    _keeps_libraries_of_other_packages_test(
+        name = name + "_keeps_libraries_of_other_packages",
+        target_under_test = _FIXTURE + "native_libs_of_linked_and_dep",
+    )
+    _one_library_a_plugin_test(
+        name = name + "_one_library_a_plugin",
+        target_under_test = _FIXTURE + "native_libs_of_two",
+    )
     native.test_suite(
         name = name,
         tests = [
+            name + "_keeps_libraries_of_other_packages",
+            name + "_one_library_a_plugin",
             name + "_java_in_app_configuration",
             name + "_checks_native_libs_arm64",
             name + "_checks_native_libs_armv7",
@@ -202,6 +264,7 @@ def android_plugin_libs_test_suite(name):
             name + "_report_does_not_fail",
             name + "_links_only_its_plugins",
             name + "_checks_what_it_links",
+            name + "_takes_one_application",
             name + "_ignores_what_it_does_not_link",
         ],
     )

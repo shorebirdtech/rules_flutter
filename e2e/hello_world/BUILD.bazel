@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_binary", "dart_test")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app")
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_aot_snapshot", "flutter_application", "flutter_asset_bundle", "flutter_kernel", "flutter_library", "flutter_profile_build", "flutter_program_test", "flutter_test", "flutter_test_program", "flutter_tester_binary")
 load(
@@ -23,8 +23,10 @@ load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load("@rules_flutter//tools/e2e_testing:compile_fail_test.bzl", "compile_fail_test")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
+load("@rules_flutter//tools/e2e_testing:extra_dart_defines_test.bzl", "extra_dart_defines_test")
 load(":build_in_mode.bzl", "build_in_mode")
 load(":build_variant_test.bzl", "build_variant_tests")
+load(":stray_output_test.bzl", "stray_output_test")
 
 exports_files(["pubspec.lock"])
 
@@ -42,8 +44,10 @@ flutter_kernel(
     package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
+        "@deps//:cupertino_ui",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
+        "@deps//:material_ui",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -55,8 +59,10 @@ flutter_aot_snapshot(
     package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
+        "@deps//:cupertino_ui",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
+        "@deps//:material_ui",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -74,8 +80,10 @@ flutter_application(
     package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
+        "@deps//:cupertino_ui",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
+        "@deps//:material_ui",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -87,7 +95,7 @@ flutter_application(
     package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
-        "@deps//:flutter",
+        "@deps//:material_ui",
     ],
 )
 
@@ -249,9 +257,11 @@ flutter_test(
     package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
+        "@deps//:cupertino_ui",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
         "@deps//:flutter_test",
+        "@deps//:material_ui",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -267,6 +277,52 @@ flutter_test(
         "@deps//:flutter",
         "@deps//:flutter_test",
     ],
+)
+
+# The target ends once its suite is reported, though a process the test started
+# still holds flutter_tester's stdout and outlives the target's timeout. No
+# `sh` on Windows.
+flutter_test(
+    name = "leftover_child_test",
+    timeout = "short",
+    main = "test/leftover_child_test.dart",
+    package = ":pubspec-metadata",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["@deps//:flutter_test"],
+)
+
+# flutter_tester dies while a process the test started holds its output.
+# `manual`, since it is meant to fail: the twin below runs it, and passes only
+# while it fails, ends with that process still running, and its output holds
+# what the tester wrote last. No `sh` on Windows.
+flutter_test(
+    name = "leftover_child_crash",
+    main = "test/leftover_child_crash_test.dart",
+    package = ":pubspec-metadata",
+    tags = ["manual"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = ["@deps//:flutter_test"],
+)
+
+stray_output_test(
+    name = "leftover_child_crash_test",
+    timeout = "short",
+    output_contains = ["leftover_child_crash: last words before exit(3)"],
+    test = ":leftover_child_crash",
+)
+
+# Runs a test that leaves a process holding its output (`stray_output_test`).
+dart_binary(
+    name = "stray_output_checker",
+    testonly = True,
+    main = "stray_output_checker.dart",
+    deps = ["@rules_dart//dart/runfiles"],
 )
 
 # The NOTICES.Z a test bundles names the packages the test depends on, the
@@ -296,10 +352,12 @@ flutter_test(
     package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
+        "@deps//:cupertino_ui",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
         "@deps//:flutter_test",
         "@deps//:integration_test",
+        "@deps//:material_ui",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -393,9 +451,9 @@ flutter_test(
     build_name = "2.3.4",
     build_number = "7",
     env = {
-        "EXPECTED_FLUTTER_VERSION": "3.47.9",
-        "EXPECTED_FLUTTER_FRAMEWORK_REVISION": "c197ca5199",
-        "EXPECTED_FLUTTER_ENGINE_REVISION": "89c39edfdf",
+        "EXPECTED_FLUTTER_VERSION": "3.50.0",
+        "EXPECTED_FLUTTER_FRAMEWORK_REVISION": "ab2912035e",
+        "EXPECTED_FLUTTER_ENGINE_REVISION": "371f77202a",
     },
     main = "test/flutter_version_test.dart",
     package = ":pubspec-metadata",
@@ -408,6 +466,24 @@ flutter_test(
 build_variant_tests(
     name = "flutter_version_builds",
     test = ":flutter_version_test",
+)
+
+# A Dart-only plugin's `registerWith()` for the host platform has run before
+# the test's `main`, as under `flutter test`, in all four builds. See
+# test/dart_plugin_registration_test.dart.
+flutter_test(
+    name = "dart_plugin_registration_test",
+    main = "test/dart_plugin_registration_test.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//dart_plugin",
+        "@deps//:flutter_test",
+    ],
+)
+
+build_variant_tests(
+    name = "dart_plugin_registration_builds",
+    test = ":dart_plugin_registration_test",
 )
 
 build_variant_tests(
@@ -535,24 +611,6 @@ flutter_test(
     ],
 )
 
-# Exercises: the target ends once its suite is reported, though a process the
-# test started still holds flutter_tester's stdout. Its child outlives the
-# target's timeout, so a runner that waited for it would TIMEOUT. No `sh` on
-# Windows.
-flutter_test(
-    name = "leftover_child_test",
-    timeout = "short",
-    main = "test/leftover_child_test.dart",
-    package = ":pubspec-metadata",
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
-    deps = [
-        "@deps//:flutter_test",
-    ],
-)
-
 flutter_test(
     name = "bazel_protocol_test",
     main = "test/bazel_protocol_test.dart",
@@ -575,19 +633,33 @@ flutter_test(
 )
 
 # Verifies Dart environment defines: the `defines` attr, the
-# --@rules_dart//dart:extra_dart_defines flag (set in .bazelrc), and
-# flag-beats-attr precedence.
+# --@rules_dart//dart:extra_dart_defines flag (set for this test alone by the
+# rule below), and flag-beats-attr precedence. One define per occurrence of
+# the flag, and no commas: a flutter_test's dependencies are compiled by
+# kernel_worker, which splits -D values on them (an app's compile keeps them,
+# see //flutter/tests:app_defines_test).
 flutter_test(
-    name = "dart_defines_test",
+    name = "dart_defines_test_untransitioned",
     defines = [
         "E2E_ATTR=from_attr",
         "E2E_WINNER=attr",
     ],
     main = "test/dart_defines_test.dart",
     package = ":pubspec-metadata",
+    # Fails without the flag, by design; only the rule below runs it.
+    tags = ["manual"],
     deps = [
         "@deps//:flutter_test",
     ],
+)
+
+extra_dart_defines_test(
+    name = "dart_defines_test",
+    defines = [
+        "E2E_FLAG=from_flag",
+        "E2E_WINNER=flag",
+    ],
+    test = ":dart_defines_test_untransitioned",
 )
 
 # The Tier-2 pair: `flutter_test_program` compiles and `flutter_program_test`
@@ -837,8 +909,10 @@ flutter_library(
     package = ":pubspec-metadata",
     deps = [
         "@deps//:cupertino_icons",
+        "@deps//:cupertino_ui",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
+        "@deps//:material_ui",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -854,7 +928,10 @@ flutter_library(
 # The parts of an app are built separately, so a failure names the one that
 # leaks: the kernel (`:hello_world`, which a debug app ships as its code), the
 # AOT snapshot (`:hello_world_aot`, and the app, which ships one in every mode
-# but debug), the asset bundle, and the web bundle with both compilers.
+# but debug), the asset bundle, and the web bundle with both compilers. The web
+# build also scans dart2js's whole output directory, which the bundle copies
+# only part of: it is one cached output, and what the bundle leaves out of it
+# (the `.deps` list of inputs) decides its bytes too.
 
 _REPRO_PARTS = {
     "kernel": [":hello_world"],
@@ -868,18 +945,22 @@ _REPRO_PARTS = {
 
 # A debug app is a kernel, not an AOT snapshot, so it has no `aot` build.
 _REPRO_BUILDS = [
+    ("kernel", "debug"),
     ("aot", "fastbuild"),
     ("aot", "release"),
     ("assets", "debug"),
     ("assets", "fastbuild"),
     ("assets", "release"),
     ("assets", "profile"),
+    ("web", "debug"),
     ("web", "fastbuild"),
     ("web", "release"),
+    ("web", "profile"),
 ]
 
 [build_in_mode(
     name = "repro_%s_%s" % (part, mode),
+    action_outputs = ["FlutterDart2JS"] if part == "web" else [],
     mode = mode,
     targets = _REPRO_PARTS[part] + (
         # What a debug app ships as its code: the app's own kernel.

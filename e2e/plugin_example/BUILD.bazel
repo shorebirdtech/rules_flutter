@@ -17,6 +17,7 @@ load(
     "flutter_ios_privacy_manifests_gen",
     "flutter_ios_registrant_gen",
     "flutter_ios_runner_lib_gen",
+    "flutter_ios_simulator_build",
     "flutter_ios_simulator_build_test",
     "flutter_ios_xcframeworks",
 )
@@ -38,11 +39,13 @@ load(
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load("@rules_flutter//flutter/tests:purls.bzl", "package_metadata_files")
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "one_application_configuration_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_profile")
+load("@rules_flutter//tools/e2e_testing:gradle_host.bzl", "gradle_host_config")
+load(":add_to_app_app_settings_test.bzl", "add_to_app_module_environment_test", "add_to_app_module_settings_test")
 load(":android_apk.bzl", "android_apk")
 load(":desktop_link_libraries_test.bzl", "linux_link_libraries_test", "windows_link_libraries_test")
-load(":gradle_host.bzl", "gradle_host_config")
 load(":ignored_package_test.bzl", "ignored_package_test")
 load(":maven_repo_in_mode.bzl", "maven_repo_in_mode")
 
@@ -62,6 +65,7 @@ flutter_application(
         "@deps//:audio_session",
         "@deps//:flutter",
         "@deps//:kotlin_only_plugin",
+        "@deps//:material_ui",
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:record_android",
@@ -83,6 +87,7 @@ flutter_application(
         "@deps//:audio_session",
         "@deps//:flutter",
         "@deps//:integration_test",
+        "@deps//:material_ui",
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:record_android",
@@ -105,6 +110,19 @@ flutter_application(
     ],
 )
 
+# An app over a federated plugin that depends on its second Android
+# implementation (//federated/fed). `:verify_android_federated_test`.
+flutter_application(
+    name = "federated_app",
+    main = "lib/federated_main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//federated/fed",
+        "//federated/fed_alt",
+        "@deps//:flutter",
+    ],
+)
+
 # An app over `pick`, whose link hook keeps the code asset of the one `Op`
 # the app constructs and drops the other.
 flutter_application(
@@ -118,7 +136,7 @@ flutter_application(
 )
 
 # An app whose only Android plugin is `annotated_plugin`, whose Gradle build
-# declares a `platform(...)` entry that rules_flutter does not read. The
+# declares a version catalog entry that rules_flutter does not read. The
 # annotation in MODULE.bazel gives its Android library `androidx.browser`, which
 # its Kotlin compiles against, and its `annotated_android_maven_artifacts`
 # lists: `:verify_android_maven_artifacts_test`.
@@ -129,6 +147,70 @@ flutter_application(
     deps = [
         "@deps//:annotated_plugin",
         "@deps//:flutter",
+    ],
+)
+
+# An app whose only Android plugins are FlutterFire's firebase_core and
+# cloud_firestore: a BoM, versionless artifacts, a project dependency of one
+# plugin on the other, and BuildConfig fields set from each plugin's pubspec.
+# `:firebase_android_build_test` and `:verify_firebase_build_config_test`.
+flutter_application(
+    name = "firebase_app",
+    main = "lib/firebase_only.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:cloud_firestore",
+        "@deps//:firebase_core",
+        "@deps//:flutter",
+    ],
+)
+
+# An app whose only Android plugin is image_picker_android, which imports
+# classes of flutter_plugin_android_lifecycle, a plugin its pubspec.yaml
+# depends on and its Gradle build does not name:
+# `:image_picker_android_build_test`.
+flutter_application(
+    name = "image_picker_app",
+    main = "lib/image_picker_only.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:image_picker_android",
+    ],
+)
+
+flutter_android_app(
+    name = "image_picker_android",
+    application = ":image_picker_app",
+    application_id = "com.example.image_picker",
+    namespace = "com.example.plugin_example",
+    proguard_specs = [],
+)
+
+flutter_android_build(
+    name = "image_picker_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
+    targets = [":image_picker_android"],
+)
+
+# image_picker_android compiles against flutter_plugin_android_lifecycle's
+# library.
+build_test(
+    name = "image_picker_android_build_test",
+    tags = ["android"],
+    targets = [":image_picker_arm64_build"],
+)
+
+# An app whose only Android plugin is `java17_plugin`, a Java plugin whose
+# Gradle build declares Java 17, which its sources need:
+# `:java17_android_build_test`.
+flutter_application(
+    name = "java17_app",
+    main = "lib/java17_only.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:java17_plugin",
     ],
 )
 
@@ -356,6 +438,20 @@ flutter_android_app(
 )
 
 flutter_android_app(
+    name = "federated_android",
+    application = ":federated_app",
+    application_id = "com.example.federated",
+    namespace = "com.example.plugin_example",
+    proguard_specs = [],
+)
+
+flutter_android_build(
+    name = "federated_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
+    targets = [":federated_android"],
+)
+
+flutter_android_app(
     name = "annotated_android",
     application = ":annotated_app",
     application_id = "com.example.annotated",
@@ -367,6 +463,34 @@ flutter_android_build(
     name = "annotated_arm64_build",
     android_platforms = ["@rules_android//:arm64-v8a"],
     targets = [":annotated_android"],
+)
+
+flutter_android_app(
+    name = "java17_android",
+    application = ":java17_app",
+    application_id = "com.example.java17",
+    namespace = "com.example.plugin_example",
+    proguard_specs = [],
+)
+
+flutter_android_build(
+    name = "java17_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
+    targets = [":java17_android"],
+)
+
+flutter_android_app(
+    name = "firebase_android",
+    application = ":firebase_app",
+    application_id = "com.example.firebase",
+    namespace = "com.example.plugin_example",
+    proguard_specs = [],
+)
+
+flutter_android_build(
+    name = "firebase_arm64_build",
+    android_platforms = ["@rules_android//:arm64-v8a"],
+    targets = [":firebase_android"],
 )
 
 flutter_android_app(
@@ -484,12 +608,6 @@ build_test(
     targets = [":plugin_macos"],
 )
 
-flutter_ios_simulator_build_test(
-    name = "ios_bundle_build_test",
-    target_compatible_with = ["@platforms//os:macos"],
-    targets = [":plugin_ios"],
-)
-
 # The iOS app that depends on `package:integration_test` builds: the plugin's
 # ObjC compiles and links.
 flutter_ios_simulator_build_test(
@@ -513,8 +631,11 @@ build_test(
     targets = [":plugin_linux"],
 )
 
+# Tagged `windows_host`, with the two build_tests below: what a Windows host
+# adds here, the tests CI's Windows job runs (tools/ci_matrix/e2e_matrix.dart).
 windows_link_libraries_test(
     name = "windows_link_libraries_test",
+    tags = ["windows_host"],
     target_under_test = "@deps//:url_launcher_windows",
 )
 
@@ -525,13 +646,18 @@ linux_link_libraries_test(
 
 build_test(
     name = "windows_bundle_build_test",
+    tags = ["windows_host"],
     target_compatible_with = ["@platforms//os:windows"],
     targets = [":plugin_windows"],
 )
 
+# Tagged `windows_host` too: on a Windows host, the longest paths aapt2 opens.
 build_test(
     name = "android_bundle_build_test",
-    tags = ["android"],
+    tags = [
+        "android",
+        "windows_host",
+    ],
     targets = [":plugin_android_arm64_build"],
 )
 
@@ -616,6 +742,28 @@ dart_test(
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
+# The release APK of `federated_android`, without R8, which dexes each library
+# the APK reaches: the code of the implementation of `fed` the app registers,
+# and not of the one it passes over.
+android_apk(
+    name = "federated_opt",
+    apk = ":federated_arm64_build",
+    compilation_mode = "opt",
+    tags = ["android"],
+)
+
+dart_test(
+    name = "verify_android_federated_test",
+    data = [
+        ":federated_opt",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/verify_android_federated_test.dart",
+    tags = ["android"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
 # `kotlin_only_plugin` is a `path` package with no Bazel build: only Kotlin and a
 # Gradle build. MODULE.bazel names it in `build_from_pubspec`, so it is built
 # from its pubspec as a plugin from pub.dev is. The app's Android registrant
@@ -628,6 +776,32 @@ flutter_android_registrant(
 dart_test(
     name = "verify_android_registrant_test",
     data = [":plugin_android_registrant"],
+    main = "test/verify_android_registrant_test.dart",
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# `kotlin_plugin_user` has nothing of Flutter's and depends on
+# `kotlin_only_plugin`. An app that depends on it alone reaches the plugin only
+# through it, and its registrant still registers the plugin.
+flutter_application(
+    name = "kotlin_plugin_user_app",
+    main = "lib/kotlin_plugin_user_main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:flutter",
+        "@deps//:kotlin_plugin_user",
+    ],
+)
+
+flutter_android_registrant(
+    name = "kotlin_plugin_user_android_registrant",
+    application = ":kotlin_plugin_user_app",
+)
+
+dart_test(
+    name = "verify_android_registrant_through_dart_package_test",
+    data = [":kotlin_plugin_user_android_registrant"],
+    env = {"REGISTRANT": "kotlin_plugin_user_android_registrant"},
     main = "test/verify_android_registrant_test.dart",
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
@@ -668,6 +842,46 @@ build_test(
     name = "annotated_android_build_test",
     tags = ["android"],
     targets = [":annotated_arm64_build"],
+)
+
+# firebase_core and cloud_firestore compile: cloud_firestore against
+# firebase_core's library, both against the artifacts of the Firebase BoM,
+# and their registrars against their BuildConfig fields.
+build_test(
+    name = "firebase_android_build_test",
+    tags = ["android"],
+    targets = [":firebase_arm64_build"],
+)
+
+android_apk(
+    name = "firebase_android_arm64",
+    apk = ":firebase_arm64_build",
+    tags = ["android"],
+)
+
+# The BuildConfig fields FlutterFire's registrars read: LIBRARY_VERSION is the
+# version pubspec.lock locks each plugin at, as Gradle reads it from the
+# plugin's pubspec.yaml.
+dart_test(
+    name = "verify_firebase_build_config_test",
+    data = [
+        ":firebase_android_arm64",
+        ":pubspec.lock",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    env = {"ZIPPER_RUNFILE": "$(rlocationpath @bazel_tools//tools/zip:zipper)"},
+    main = "test/verify_firebase_build_config_test.dart",
+    tags = ["android"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# The Java of `java17_plugin` uses pattern matching for `instanceof` and a
+# switch expression, which compile at the Java 17 its Gradle build declares
+# and not at Java 8, so an APK of `java17_app` builds only at the former.
+build_test(
+    name = "java17_android_build_test",
+    tags = ["android"],
+    targets = [":java17_arm64_build"],
 )
 
 dart_test(
@@ -844,12 +1058,20 @@ flutter_library(
     srcs = glob(["lib/**/*.dart"]),
     package = ":pubspec-metadata",
     deps = [
+        "//federated/fed",
+        "//federated/fed_alt",
         "//greeting_plugin",
         "//mixed_plugin",
         "//pick",
+        "//vendored_plugin",
         "@deps//:audio_session",
+        "@deps//:cloud_firestore",
+        "@deps//:firebase_core",
         "@deps//:flutter",
         "@deps//:geolocator_apple",
+        "@deps//:image_picker_android",
+        "@deps//:kotlin_plugin_user",
+        "@deps//:material_ui",
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:record_android",
@@ -868,7 +1090,7 @@ flutter_library(
 # real artifacts instead: the APK and runtime verifiers above.
 
 # =============================================================================
-# A plugin whose Package.swift decides its defines from the app, on macOS
+# Plugins whose Package.swift decides their defines from the app
 # =============================================================================
 
 # geolocator_apple leaves out its check for an "always" location description
@@ -893,10 +1115,58 @@ flutter_macos_app(
     target_compatible_with = ["@platforms//os:macos"],
 )
 
+# Property: the app reaches its application in the bundle's configuration
+# alone, though its plugin's Package.swift reads the app.
+one_application_configuration_test(
+    name = "location_macos_one_application_configuration_test",
+    target = ":location_macos",
+)
+
 dart_test(
     name = "verify_macos_app_settings_test",
     data = [":location_macos"],
     main = "test/verify_macos_app_settings_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
+)
+
+# audio_session 0.1.x compiles in its record permission code unless its
+# manifest's environment has AUDIO_SESSION_MICROPHONE=0, which this app sets
+# and :plugin_ios does not: :verify_ios_app_test.
+flutter_application(
+    name = "audio_session_app",
+    main = "lib/audio_session_main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "@deps//:audio_session",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_ios_app(
+    name = "no_microphone_ios",
+    application = ":audio_session_app",
+    bundle_id = "com.example.plugin.nomicrophone",
+    swift_package_environment = {"AUDIO_SESSION_MICROPHONE": "0"},
+    tags = ["manual"],
+)
+
+flutter_ios_simulator_build(
+    name = "ios_simulator_apps",
+    testonly = True,
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [
+        ":no_microphone_ios",
+        ":plugin_ios",
+    ],
+)
+
+# The iOS apps build, and audio_session carries the code its manifest selects
+# for each.
+dart_test(
+    name = "verify_ios_app_test",
+    data = [":ios_simulator_apps"],
+    main = "test/verify_ios_app_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
@@ -918,7 +1188,7 @@ flutter_application(
     deps = [
         "//mixed_plugin",
         "@deps//:audio_session",
-        "@deps//:flutter",
+        "@deps//:material_ui",
         "@deps//:package_info_plus",
         "@deps//:path_provider",
         "@deps//:shared_preferences",
@@ -953,6 +1223,64 @@ flutter_macos_xcframeworks(
     application = ":add_to_app_module",
     codesign_identity = "-",
     tags = ["manual"],
+)
+
+# audio_session 0.1.x compiles in its record permission code unless its
+# manifest's environment has AUDIO_SESSION_MICROPHONE=0. :module_<platform>
+# sets no environment; these modules set the variable to 0, as
+# :no_microphone_ios does for an app.
+flutter_ios_xcframeworks(
+    name = "no_microphone_module_ios",
+    application = ":add_to_app_module",
+    swift_package_environment = {"AUDIO_SESSION_MICROPHONE": "0"},
+    tags = ["manual"],
+)
+
+flutter_macos_xcframeworks(
+    name = "no_microphone_module_macos",
+    application = ":add_to_app_module",
+    swift_package_environment = {"AUDIO_SESSION_MICROPHONE": "0"},
+    tags = ["manual"],
+)
+
+# Each module's evaluation of audio_session's manifest sees its environment.
+[
+    test(
+        name = "%s_%s_audio_session_test" % (module, platform),
+        target_compatible_with = ["@platforms//os:macos"],
+        target_under_test = ":%s_%s" % (module, platform),
+    )
+    for platform in ("ios", "macos")
+    for module, test in [
+        ("module", add_to_app_module_settings_test),
+        ("no_microphone_module", add_to_app_module_environment_test),
+    ]
+]
+
+apple_release_build(
+    name = "add_to_app_microphone_debug",
+    compilation_mode = "dbg",
+    sign = False,
+    tags = ["manual"],
+    targets = [
+        ":module_ios",
+        ":no_microphone_module_ios",
+    ],
+)
+
+# And each iOS module's audio_session framework carries the code its manifest
+# selects for it. (On macOS, audio_session 0.1.x has no code the variable
+# selects.)
+dart_test(
+    name = "add_to_app_microphone_test",
+    args = [
+        "module_ios=true",
+        "no_microphone_module_ios=false",
+    ],
+    data = [":add_to_app_microphone_debug"],
+    main = "test/add_to_app_microphone_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 _ADD_TO_APP_PLATFORMS = [
@@ -1004,6 +1332,100 @@ _ADD_TO_APP_MODES = {
     for platform in _ADD_TO_APP_PLATFORMS
     for mode in _ADD_TO_APP_MODES
     for variant in _ADD_TO_APP_VARIANTS
+]
+
+# And in release compiled with debug information, as Xcode compiles a release
+# build, in `-c opt`, whose links keep their debugging maps: each plugin's and
+# code asset's dSYM has its line tables, and each plugin's binary keeps its
+# map, as `flutter build ios-framework` leaves it.
+[
+    apple_release_build(
+        name = "add_to_app_%s_release_symbols" % platform,
+        compilation_mode = "opt",
+        generate_dsym = True,
+        sign = False,
+        tags = ["manual"],
+        targets = [":module_" + platform],
+    )
+    for platform in _ADD_TO_APP_PLATFORMS
+]
+
+[
+    dart_test(
+        name = "add_to_app_%s_release_symbols_test" % platform,
+        args = [
+            "--platform=" + platform,
+            "--mode=release",
+            "--signed=false",
+            "--line-tables=true",
+            "--plugins=audio_session,mixed_plugin,package_info_plus,shared_preferences_foundation,url_launcher_" + platform,
+            "--code-assets=objective_c",
+            "module_" + platform,
+        ],
+        data = [":add_to_app_%s_release_symbols" % platform],
+        main = "test/add_to_app_apple_test.dart",
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for platform in _ADD_TO_APP_PLATFORMS
+]
+
+# A module whose plugin links a prebuilt dynamic framework, as a pod's
+# `vendored_frameworks` or a Swift package's `binaryTarget` is one: the layout
+# carries VendoredGreeting.xcframework as it is, as `flutter build
+# ios-framework` and `macos-framework` copy a vendored one, and the plugin's
+# framework links it.
+flutter_application(
+    name = "vendored_module",
+    main = "lib/vendored_module_main.dart",
+    package = ":pubspec-metadata",
+    deps = [
+        "//vendored_plugin",
+        "@deps//:flutter",
+    ],
+)
+
+flutter_ios_xcframeworks(
+    name = "vendored_module_ios",
+    application = ":vendored_module",
+    tags = ["manual"],
+)
+
+flutter_macos_xcframeworks(
+    name = "vendored_module_macos",
+    application = ":vendored_module",
+    tags = ["manual"],
+)
+
+[
+    apple_release_build(
+        name = "add_to_app_vendored_%s_release" % platform,
+        compilation_mode = "fastbuild",
+        sign = False,
+        tags = ["manual"],
+        targets = [":vendored_module_" + platform],
+    )
+    for platform in _ADD_TO_APP_PLATFORMS
+]
+
+[
+    dart_test(
+        name = "add_to_app_vendored_%s_test" % platform,
+        args = [
+            "--platform=" + platform,
+            "--static=StaticGreeting",
+            "vendored_module_" + platform,
+            "vendored_plugin/vendored_greeting_files/VendoredGreeting.xcframework",
+        ],
+        data = [
+            ":add_to_app_vendored_%s_release" % platform,
+            "//vendored_plugin:vendored_greeting_files",
+        ],
+        main = "test/add_to_app_vendored_test.dart",
+        target_compatible_with = ["@platforms//os:macos"],
+        deps = ["@rules_flutter//tools/e2e_testing"],
+    )
+    for platform in _ADD_TO_APP_PLATFORMS
 ]
 
 # Native hosts built by Xcode (`xcodebuild`), taking the module through its
@@ -1147,13 +1569,19 @@ dart_test(
 
 # A native host app built by Gradle (add_to_app_host/android), taking the
 # module from the repositories above as Flutter's add-to-app guide shows.
-# The Gradle distribution, the JDK, the Android SDK and every Maven artifact
-# the build resolves are pinned and downloaded by Bazel (MODULE.bazel), and
-# Gradle runs offline.
+# The Gradle distribution, the JDK, the Android SDK and NDK and every Maven
+# artifact the build resolves are pinned and downloaded by Bazel (MODULE.bazel),
+# and Gradle runs offline.
 _GRADLE_HOST_PROJECT = glob(
     ["add_to_app_host/android/**"],
     exclude = ["add_to_app_host/android/gradle_repository.json"],
 )
+
+_GRADLE_HOST_VARIANTS = [
+    "debug",
+    "profile",
+    "release",
+]
 
 _GRADLE_HOST_MODULE_REPOSITORIES = [
     ":plugin_module_repo_debug",
@@ -1171,6 +1599,7 @@ gradle_host_config(
         "android",
         "deep",
     ],
+    variants = _GRADLE_HOST_VARIANTS,
 )
 
 # Builds the host's debug, profile and release APKs and checks each one's
@@ -1180,7 +1609,6 @@ gradle_host_config(
 dart_test(
     name = "gradle_host_test",
     size = "medium",
-    srcs = ["test/gradle_host.dart"],
     args = ["$(rlocationpath :gradle_host_offline)"],
     data = [
         ":gradle_host_offline",
@@ -1193,10 +1621,7 @@ dart_test(
         "block-network",
         "deep",
     ],
-    deps = [
-        "@rules_dart//dart/runfiles",
-        "@rules_flutter//tools/e2e_testing",
-    ],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 # The same build against the remote repositories, which records the lock of
@@ -1215,11 +1640,11 @@ gradle_host_config(
         "android",
         "deep",
     ],
+    variants = _GRADLE_HOST_VARIANTS,
 )
 
 dart_binary(
     name = "record_gradle_host_repository",
-    srcs = ["test/gradle_host.dart"],
     args = ["$(rlocationpath :gradle_host_online)"],
     data = [":gradle_host_online"],
     main = "test/record_gradle_host_repository.dart",
@@ -1227,10 +1652,7 @@ dart_binary(
         "android",
         "deep",
     ],
-    deps = [
-        "@deps//:crypto",
-        "@rules_dart//dart/runfiles",
-    ],
+    deps = ["@rules_flutter//tools/e2e_testing:gradle_host_record"],
 )
 
 # Each package fetched from pub.dev says what it is, for any SBOM tool, whichever
@@ -1257,6 +1679,7 @@ dart_test(
             "pkg:pub/audio_session@0.1.25?checksum=sha256:2b7fff16a552486d078bfc09a8cde19f426dc6d6329262b684182597bec5b1ac",
             "pkg:pub/characters@1.4.1?checksum=sha256:faf38497bda5ead2a8c7615f4f7939df04333478bf32e4173fcb06d428b5716b",
             "pkg:pub/collection@1.19.1?checksum=sha256:2f5709ae4d3d59dd8f7cd309b4e023046b57d8a6c82130785d2b0e5868084e76",
+            "pkg:pub/listen@1.0.1?checksum=sha256:47501a08016a43fcad79252439d723f50f14f88fa7bfd8a177e0a417e5c9e1f2",
             "pkg:pub/material_color_utilities@0.13.0?checksum=sha256:9c337007e82b1889149c82ed242ed1cb24a66044e30979c44912381e9be4c48b",
             "pkg:pub/meta@1.19.0?checksum=sha256:307249ce4ff29d58a18e97f6345f539382eb9c9c29ecda628900f31de0443dd9",
             "pkg:pub/plugin_platform_interface@2.1.8?checksum=sha256:4820fbfdb9478b1ebae27888254d445073732dae3d6ea81f0b7e06d5dedc3f02",

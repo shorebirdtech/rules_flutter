@@ -7,6 +7,7 @@
 #   //sub_asset, //prebuilt_asset, //count_a, //count_b
 #                       code assets from a wrapper rule, a prebuilt file and one
 #                       library bound under two ids
+#   //chain_asset       two code assets, one linking the other
 #   //pick              code assets and the link hook that drops one
 #
 # The app below uses all of them but `//multiply_plugin`, and this file builds
@@ -31,7 +32,7 @@ load(
     "flutter_ios_native_frameworks_gen",
     "flutter_ios_registrant_gen",
     "flutter_ios_runner_lib_gen",
-    "flutter_ios_simulator_build_test",
+    "flutter_ios_simulator_build",
 )
 load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load(
@@ -52,6 +53,7 @@ load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release
 load(":c_hot_patch.bzl", "c_hot_patch")
 load(":code_asset.bzl", "stand_in_code_asset")
 load(":ios_sim_debug.bzl", "ios_sim_debug_app")
+load(":prebuilt_library.bzl", "prebuilt_library")
 
 exports_files(["pubspec.lock"])
 
@@ -220,9 +222,10 @@ flutter_native_library(
     visibility = ["//sub_asset:__pkg__"],
 )
 
-# A prebuilt library: a plain file with no `CcSharedLibraryInfo`, as a vendored
-# `.so`/`.dylib`/`.dll` or an `http_file` is. Taken from a `cc_shared_library`
-# so it is built for whichever platform the app is, with no checked-in binary.
+# A prebuilt library: a plain file with no `CcSharedLibraryInfo`, linked from
+# nothing the build knows, as a vendored `.so`/`.dylib`/`.dll` or an
+# `http_file` is (`prebuilt_library.bzl`). Taken from a `cc_shared_library` so
+# it is built for whichever platform the app is, with no checked-in binary.
 # It reaches the app as the code asset of `//prebuilt_asset`.
 cc_library(
     name = "negate_cc",
@@ -234,10 +237,9 @@ cc_shared_library(
     deps = [":negate_cc"],
 )
 
-filegroup(
+prebuilt_library(
     name = "negate_prebuilt",
-    srcs = [":negate"],
-    output_group = "main_shared_library_output",
+    library = ":negate",
 )
 
 dart_code_asset(
@@ -349,6 +351,72 @@ c_hot_patch(
     ]
 ]
 
+# Two code assets, one linking the other, as a package whose libraries share a
+# runtime ships them: `chain_top` records `chain_base` by the install name it
+# was linked against, and calls it.
+cc_library(
+    name = "chain_base_cc",
+    srcs = ["native/chain_base.c"],
+    hdrs = ["native/chain.h"],
+)
+
+cc_shared_library(
+    name = "chain_base",
+    deps = [":chain_base_cc"],
+)
+
+cc_library(
+    name = "chain_top_cc",
+    srcs = ["native/chain_top.c"],
+    deps = [":chain_base_cc"],
+)
+
+cc_shared_library(
+    name = "chain_top",
+    dynamic_deps = [":chain_base"],
+    deps = [":chain_top_cc"],
+)
+
+[
+    dart_code_asset(
+        name = "chain_%s_asset" % which,
+        asset_id = "package:chain_asset/" + which,
+        file = ":chain_" + which,
+        visibility = ["//chain_asset:__pkg__"],
+    )
+    for which in [
+        "base",
+        "top",
+    ]
+]
+
+# Two libraries, one linking the other through `dynamic_deps`. The app names
+# only `linked_top`: the bundle carries `linked_base` beside it, as a native
+# build that links them installs both, and `linked_top` must find
+# `linked_base` there, not in the build tree's `_solib_<cpu>/`.
+cc_library(
+    name = "linked_base_cc",
+    srcs = ["native/linked_base.c"],
+    hdrs = ["native/linked_pair.h"],
+)
+
+cc_shared_library(
+    name = "linked_base",
+    deps = [":linked_base_cc"],
+)
+
+cc_library(
+    name = "linked_top_cc",
+    srcs = ["native/linked_top.c"],
+    deps = [":linked_base_cc"],
+)
+
+cc_shared_library(
+    name = "linked_top",
+    dynamic_deps = [":linked_base"],
+    deps = [":linked_top_cc"],
+)
+
 dart_package_metadata(
     name = "pubspec-metadata",
     package_name = "ffi_example",
@@ -361,9 +429,11 @@ flutter_application(
         ":count_b_native",
     ],
     main = "lib/main.dart",
+    native_deps = [":linked_top"],
     package = ":pubspec-metadata",
     deps = [
         "//add_plugin",
+        "//chain_asset",
         "//count_a",
         "//count_b",
         "//mul_plugin",
@@ -375,7 +445,7 @@ flutter_application(
         # Bazel-built library to that package, so it arrives here the way pub's
         # own hook output would.
         "@deps//:drift",
-        "@deps//:flutter",
+        "@deps//:material_ui",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -652,10 +722,12 @@ dart_analysis_test(
 )
 
 # A release iOS app for a device, unsigned: its link hook drops `pick_dropped`,
-# whose framework the post-processor removes, with the list it read.
+# whose framework the post-processor removes, with the list it read, and whose
+# dSYM the `dsyms` output group leaves out.
 apple_release_build(
     name = "ios_device_release",
     compilation_mode = "fastbuild",
+    generate_dsym = True,
     ios_device = True,
     sign = False,
     tags = ["manual"],
@@ -670,8 +742,9 @@ dart_test(
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
-# Add-to-app: the xcframeworks of the code assets that ship, in release, where
-# `pick`'s link hook drops `pick_dropped`. macOS only: an iOS one builds its
+# Add-to-app: the xcframeworks of the code assets that ship, with their dSYMs,
+# in release, where `pick`'s link hook drops `pick_dropped`; `chain_top` links
+# `chain_base` by its install name there. macOS only: an iOS one builds its
 # simulator slice in debug, as `flutter build ios-framework` does, where no
 # link hook runs, so it ships `pick_dropped` too, and the device build, which
 # does not, is the source of truth (upstream's `verifyCodeAssetConsistency`).
@@ -694,8 +767,10 @@ dart_test(
     name = "verify_macos_add_to_app_code_assets_test",
     args = [
         "ffi_macos_xcframeworks",
-        "libpick_kept",
-        "libpick_dropped",
+        "pick_kept",
+        "pick_dropped",
+        "chain_top",
+        "chain_base",
     ],
     data = [":macos_xcframeworks_release"],
     main = "test/verify_add_to_app_code_assets_test.dart",
@@ -703,10 +778,20 @@ dart_test(
     deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
-flutter_ios_simulator_build_test(
-    name = "ios_bundle_build_test",
+# `:ffi_ios` as a simulator bundle, which is always a debug build.
+flutter_ios_simulator_build(
+    name = "ffi_ios_simulator",
+    testonly = True,
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":ffi_ios"],
+)
+
+dart_test(
+    name = "verify_ios_bundle_test",
+    data = [":ffi_ios_simulator"],
+    main = "test/verify_ios_bundle_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = ["@rules_flutter//tools/e2e_testing"],
 )
 
 build_test(
@@ -765,6 +850,7 @@ flutter_library(
     package = ":pubspec-metadata",
     deps = [
         "//add_plugin",
+        "//chain_asset",
         "//count_a",
         "//count_b",
         "//mul_plugin",
@@ -772,7 +858,7 @@ flutter_library(
         "//prebuilt_asset",
         "//sub_asset",
         "@deps//:drift",
-        "@deps//:flutter",
+        "@deps//:material_ui",
         "@rules_flutter//flutter:material_icons",
     ],
 )

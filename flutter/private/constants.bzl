@@ -1,5 +1,7 @@
 """Shared constants for rules_flutter."""
 
+visibility("//flutter/...")
+
 # Minimum OS deployment targets: both the default and the floor.
 #
 # These are not a style choice. The prebuilt engine these rules vend is itself
@@ -26,6 +28,12 @@ MACOS_MINIMUM_OS_VERSION = "12.0"
 ANDROID_MIN_SDK_VERSION = "24"
 ANDROID_TARGET_SDK_VERSION = "36"
 
+# The Java level the generated plugin registrant compiles at, as
+# `kt_kotlinc_options.jvm_target`: `flutter create`'s app and module templates
+# compile their Java (where Flutter's Gradle plugin puts the registrant) at
+# `JavaVersion.VERSION_17`.
+ANDROID_REGISTRANT_JVM_TARGET = "17"
+
 # Android ABI directory name for each engine architecture this ruleset builds.
 ANDROID_ABI_FOR_ARCH = {
     "arm": "armeabi-v7a",
@@ -33,6 +41,17 @@ ANDROID_ABI_FOR_ARCH = {
     "x64": "x86_64",
 }
 
+# Where a pub package's repository links the `lib/` files of other packages that
+# its assets and shaders name as `packages/<other>/<path>`: under
+# `<this>/<other>/<path>`. A contribution from a path there is bundled at the
+# key as listed, not under the contributing package's own `packages/<name>/`.
+OTHER_PACKAGES_ASSETS = "_assets_of_other_packages"
+
 # The platforms of a pubspec's `flutter: plugin: platforms:`, each a
 # `flutter_plugin_platform`.
 PLUGIN_PLATFORMS = ["android", "ios", "linux", "macos", "web", "windows"]
+
+# The file extensions of a shared library a `native_deps` entry or a code asset
+# brings, on each platform a native app runs on: what the bundlers place and
+# the app loads.
+SHARED_LIBRARY_EXTENSIONS = ("so", "dylib", "dll")

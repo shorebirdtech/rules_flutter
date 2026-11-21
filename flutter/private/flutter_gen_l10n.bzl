@@ -20,6 +20,8 @@ load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "non_dart_transition")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS")
 load("//flutter/private:path_mapping.bzl", "dirname")
 
+visibility("//flutter/...")
+
 def _locale_of(basename, prefix, label):
     """The locale a template-prefixed arb filename encodes, e.g. `es_419`."""
     if not basename.endswith(".arb"):
@@ -82,9 +84,9 @@ def _flutter_gen_l10n_impl(ctx):
             "it must be one of the inputs.",
         )
 
-    # Outputs land beside the arb files, matching how dart_codegen places its
-    # own output next to the source: the generated files import each other by
-    # bare filename, so they have to be siblings.
+    # Outputs land together, beside the arb files unless `output_dir` says
+    # otherwise: the generated files import each other by bare filename, so
+    # they have to be siblings.
     arb_dir = srcs[0].dirname
     for s in srcs:
         if s.dirname != arb_dir:
@@ -102,6 +104,17 @@ def _flutter_gen_l10n_impl(ctx):
     rel_dir = srcs[0].short_path[:-len(srcs[0].basename)]
     if rel_dir.startswith(ctx.label.package + "/"):
         rel_dir = rel_dir[len(ctx.label.package) + 1:]
+    output_dir = ctx.attr.output_dir
+    if output_dir:
+        # One spelling per directory: an empty, `.` or `..` part would name
+        # it another way (`./x`, `a//b`, `x/`) or leave the package (`/x`,
+        # `../x`).
+        if [part for part in output_dir.split("/") if part in ("", ".", "..")]:
+            fail(
+                ("%s: output_dir must be a directory of the package, relative " +
+                 "to it, got %r.") % (ctx.label, output_dir),
+            )
+        rel_dir = output_dir + "/"
 
     outs = [
         ctx.actions.declare_file(rel_dir + name)
@@ -175,6 +188,15 @@ flutter_gen_l10n = rule(
             doc = "Base output file name; per-locale files append the " +
                   "primary language subtag to its stem.",
             default = "app_localizations.dart",
+        ),
+        "output_dir": attr.string(
+            doc = "Directory the generated files are written to, as " +
+                  "`l10n.yaml`'s `output-dir`. It is relative to the package, " +
+                  "which plays the part of the project directory " +
+                  "`flutter gen-l10n` resolves it against, and is written " +
+                  "as a plain relative path such as `lib/gen_l10n`: no " +
+                  "leading or trailing `/`, `.` or `..`. Empty writes them " +
+                  "beside the arb files.",
         ),
         "output_class": attr.string(
             doc = "Name of the generated abstract class.",

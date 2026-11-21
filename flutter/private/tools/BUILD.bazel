@@ -1,5 +1,7 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_package_metadata", "dart_test")
 load("//flutter/private:flutter_sdk_record.bzl", "flutter_sdk_record")
+load("//tools/bzl_deps_guard:inputs.bzl", "bzl_library_inputs")
 load(":sdk_record_mode.bzl", "record_in_mode")
 
 # The scripts build actions run directly, handed to those actions as raw
@@ -28,13 +30,17 @@ exports_files(
         "code_assets.dart",
         "collect_notices.dart",
         "compile_shader.dart",
+        "dart2js.dart",
         "libraries_spec.dart",
         "linux_runtime.dart",
         "maven_repo.dart",
         "merge_android_manifests.dart",
+        "native_assets_manifests.dart",
         "merge_plists.dart",
         "plist_binary.dart",
+        "print_warnings.dart",
         "sdk_check.dart",
+        "signing_entitlements.dart",
         "strip_native_libs.dart",
         "swiftpm_app_settings.dart",
         "validate_android_elf.dart",
@@ -54,6 +60,8 @@ filegroup(
     srcs = [
         "apple_frameworks.dart",
         "assemble_directory.dart",
+        "elf_runpath.dart",
+        "native_assets_manifests.dart",
         "zip_archive.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
@@ -148,6 +156,12 @@ dart_test(
         "assemble_directory.dart",
     ],
     main = "test/apple_xcframeworks_export_test.dart",
+    # Apple bundles are built only where Xcode runs, never on Windows, and
+    # their frameworks' links are POSIX symlinks.
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     deps = [
         "@dev_tool_deps//:test",
         "@rules_dart//dart/runfiles",
@@ -164,27 +178,38 @@ dart_binary(
     deps = ["@rules_dart//dart/runfiles"],
 )
 
-# The pub runner: `dart compile exe` builds it from these two files, which
-# import only the Dart libraries, so that it depends on no pub repository (a
-# lock conflict there must not stop the command that fixes the lock). They are
-# files, not a library, because the runner must not depend on a Dart target; the
-# test below owns them for analysis and formatting.
+# The pub runner and the Swift package resolver: `dart compile exe` builds each
+# from its main and `pub_runfiles.dart`, which import only the Dart libraries,
+# so that they depend on no pub repository (a lock conflict there must not stop
+# the command that fixes the lock). They are files, not a library, because the
+# runners must not depend on a Dart target; the two programs below compile them
+# as the rules do, and own them for analysis and formatting.
 exports_files(
     [
         "pub.dart",
         "pub_runfiles.dart",
-        "swift_resolve.dart",
+        "swift_packages.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
 )
 
+dart_binary(
+    name = "pub",
+    srcs = ["pub_runfiles.dart"],
+    compile_mode = "kernel",
+    main = "pub.dart",
+)
+
+dart_binary(
+    name = "swift_packages",
+    srcs = ["pub_runfiles.dart"],
+    compile_mode = "kernel",
+    main = "swift_packages.dart",
+)
+
 dart_test(
     name = "pub_runfiles_test",
-    srcs = [
-        "pub.dart",
-        "pub_runfiles.dart",
-        "swift_resolve.dart",
-    ],
+    srcs = ["pub_runfiles.dart"],
     main = "test/pub_runfiles_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )
@@ -265,6 +290,7 @@ _UNIT_TESTS = {
     "android_aar_test": (
         [
             "android_aar.dart",
+            "native_assets_manifests.dart",
             "zip_archive.dart",
         ],
         [],
@@ -299,6 +325,8 @@ _UNIT_TESTS = {
             "assemble_directory.dart",
             "bundle_app.dart",
             "code_assets.dart",
+            "elf_runpath.dart",
+            "native_assets_manifests.dart",
             "zip_archive.dart",
         ],
         [],
@@ -310,6 +338,13 @@ _UNIT_TESTS = {
     "sdk_check_test": ("sdk_check.dart", []),
     "strip_native_libs_test": ("strip_native_libs.dart", []),
     "swiftpm_app_settings_test": ("swiftpm_app_settings.dart", []),
+    "swift_packages_test": (
+        [
+            "pub_runfiles.dart",
+            "swift_packages.dart",
+        ],
+        [],
+    ),
     "web_template_test": ("web_template.dart", []),
     "flutter_test_runner_test": (
         "flutter_test_runner.dart",
@@ -363,6 +398,9 @@ dart_test(
         "apple_frameworks.dart",
         "assemble_directory.dart",
         "code_assets.dart",
+        "elf_runpath.dart",
+        "native_assets_manifests.dart",
+        "test/elf_fixture.dart",
         "zip_archive.dart",
     ],
     data = ["@rules_dart//dart/program_assets:conformance"],
@@ -372,6 +410,16 @@ dart_test(
         "@dev_tool_deps//:test",
         "@rules_dart//dart/runfiles",
     ],
+)
+
+dart_test(
+    name = "elf_runpath_test",
+    srcs = [
+        "elf_runpath.dart",
+        "test/elf_fixture.dart",
+    ],
+    main = "test/elf_runpath_test.dart",
+    deps = ["@dev_tool_deps//:test"],
 )
 
 # Stand-in for `impellerc`, which `compile_shader_test` runs through
@@ -404,6 +452,12 @@ dart_test(
         "assemble_directory.dart",
     ],
     main = "test/apple_frameworks_test.dart",
+    # Apple bundles are built only where Xcode runs, never on Windows, and
+    # their frameworks' links are POSIX symlinks.
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     deps = ["@dev_tool_deps//:test"],
 )
 
@@ -416,6 +470,19 @@ dart_test(
         "test/binary_plist_fixture.dart",
     ],
     main = "test/merge_plists_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# The signing tool imports the merger, which imports the binary plist reader.
+dart_test(
+    name = "signing_entitlements_test",
+    srcs = [
+        "merge_plists.dart",
+        "plist_binary.dart",
+        "signing_entitlements.dart",
+        "test/signed_profile_fixture.dart",
+    ],
+    main = "test/signing_entitlements_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )
 
@@ -450,6 +517,13 @@ dart_test(
     deps = ["@dev_tool_deps//:test"],
 )
 
+dart_test(
+    name = "print_warnings_test",
+    srcs = ["print_warnings.dart"],
+    main = "test/print_warnings_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
 # Stand-in for the engine's `font-subset`, which the tree-shaking tests below
 # make `generate_asset_manifest.dart` run. A compiled executable, since the tool
 # starts it as a program and a Dart script cannot be started.
@@ -462,8 +536,8 @@ dart_binary(
 )
 
 # The tool's icon tree shaking, run as the build action runs it (a `dart`
-# process over a config file) against the stand-ins for `const_finder` and
-# `font-subset`.
+# process over a config file) over recorded uses written with
+# `package:record_use` and against a stand-in for `font-subset`.
 [dart_test(
     name = "generate_asset_manifest_tree_shaking" + suffix + "_test",
     srcs = ["test/tree_shaking_harness.dart"],
@@ -473,6 +547,7 @@ dart_binary(
     ],
     main = "test/generate_asset_manifest_tree_shaking%s_test.dart" % suffix,
     deps = [
+        "@dev_tool_deps//:record_use",
         "@dev_tool_deps//:test",
         "@rules_dart//dart/runfiles",
     ],
@@ -524,4 +599,14 @@ dart_test(
         "@dev_tool_deps//:test",
         "@rules_dart//dart/runfiles",
     ],
+)
+
+# What //tools/bzl_deps_guard reads of this package and those below it.
+bzl_library_inputs()
+
+bzl_library(
+    name = "sdk_record_mode",
+    srcs = ["sdk_record_mode.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["//flutter:providers"],
 )

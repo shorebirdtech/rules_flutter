@@ -4,18 +4,20 @@ named in `build_from_pubspec`, or a Flutter SDK package built from the pinned
 Flutter source.
 
 For each such package in a Flutter app's pubspec.lock this rule:
-  1. Downloads the same `pub.dev/api/packages/<name>/versions/<version>.tar.gz`
-     archive, checked against `pubspec.lock`'s digest, that rules_dart's
-     `pub_lock_package` would (through the shared `fetch_pub_archive`). A
-     Flutter SDK package (`sdk: flutter` in the lock: `flutter_test`,
-     `integration_test`, `flutter_driver`, ...) has no archive: with
-     `flutter_source_version` set, its tree is `packages/<name>` of the
-     toolchain's pinned Flutter source tarball, checked against that
-     tarball's recorded digest. A git package (`source: git`) is fetched at the
-     lock's `resolved-ref` by rules_dart's `fetch_pub_git`, which lays out its
-     directory of the repository exactly as pub does. A `path` package
-     (`directory` set) is its directory, linked (`fetch_local_package`).
-     Everything after this step is the same.
+  1. Links in the package's files, which a repository of their own holds
+     (`files`): a hosted package's archive, checked against `pubspec.lock`'s
+     digest, as rules_dart's `pub_archive_files` fetches it for its own
+     `pub_lock_package`; a git package (`source: git`) at the lock's
+     `resolved-ref`, laid out as pub lays it out, by rules_dart's
+     `pub_git_files`; a Flutter SDK package (`sdk: flutter` in the lock:
+     `flutter_test`, `integration_test`, `flutter_driver`, ...) as
+     `packages/<name>` of the toolchain's pinned Flutter source tarball, by
+     `flutter_source_files`. Kept apart, the files are stored once in Bazel's
+     repository cache however often the Starlark generating the build
+     changes. A `path` package (`lock` set) is its directory, linked
+     (`fetch_local_package`), and a package of a framework source
+     (`framework_json`) its directory there. Everything after this step is the
+     same.
   2. Reads the package's pubspec.yaml, as pub does (rules_dart's `read_pubspec`).
   3. Projects `flutter.plugin.platforms` via `flutter_plugin_block`.
   4. Finds each Apple platform's library: the plugin's `Package.swift`
@@ -44,34 +46,40 @@ which is why a member has no dependencies of its own.
 This is the rules_flutter sibling of rules_dart's `pub_lock_package`. The two
 rules never run for the same package: `flutter_pub.from_lock()` always invokes
 this one for hosted pub packages; `pub.pub()` (in non-Flutter modules) keeps
-using `pub_lock_package`. Both fetch and lay out the archive with rules_dart's
-`fetch_pub_archive`, so one package version is the same tree whichever rule asks
-for it.
+using `pub_lock_package`. Both build over the files rules_dart's
+`pub_archive_files` fetches, so one package version is the same tree whichever
+rule asks for it.
 """
 
-load("@rules_dart//dart/pub:pub_graph.bzl", "write_pubspec_dependencies")
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "fetch_pub_archive", "fetch_pub_git", "fetch_pub_path", "find_pub_license_file", "pub_git_purl", "pub_hosted_purl", "pub_package_identity")
+load("@rules_dart//dart/pub:pub_graph.bzl", "PUBSPEC_DEPENDENCIES", "write_pubspec_dependencies")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "find_pub_license_file", "link_pub_files", "link_pub_path", "pub_files_fetched", "pub_lock_path_directory", "pub_lock_path_source", "pub_package_identity")
 load("@rules_dart//dart/pub:pubspec.bzl", "read_pubspec")
-load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "gradle_statements", "parse_gradle_maven_dependencies")
+load("//flutter/private:android_build_config.bzl", "parse_gradle_build_config_fields", "unknown_build_config_message", "unread_build_config_message")
+load("//flutter/private:android_plugin_jvm_target.bzl", "AGP_DEFAULT_JVM_LEVEL", "kotlinc_jvm_target", "parse_gradle_jvm_level", "unread_jvm_level_message", "unsupported_jvm_level_message")
+load("//flutter/private:android_plugin_maven.bzl", "MAVEN_DEPS_FILE", "parse_gradle_maven_dependencies")
 load("//flutter/private:apple_plugin_repo.bzl", "APPLE_PLUGIN_FILE", "apple_library_label")
-load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:cmake_link_libraries.bzl", "parse_cmake_link_libraries")
-load("//flutter/private:constants.bzl", "PLUGIN_PLATFORMS")
-load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "library_label", "owner_prefix", "read_index", "sibling_path", "source_repo")
+load("//flutter/private:constants.bzl", "OTHER_PACKAGES_ASSETS", "PLUGIN_PLATFORMS")
+load("//flutter/private:failing_targets.bzl", "FAILING_TARGETS_LOAD", "failing_targets", "write_failing_build")
+load("//flutter/private:flutter_pub_index.bzl", "MEMBER_DART", "MEMBER_FILE", "MEMBER_FLUTTER", "MEMBER_OVERLAY", "MEMBER_STUB", "library_label", "owner_prefix", "read_index", "sibling_path", "source_repo")
 load("//flutter/private:flutter_pubspec.bzl", "flutter_assets_block", "flutter_licenses_block", "flutter_manifest_errors", "flutter_plugin_block")
-load("//flutter/private:framework_source.bzl", "check_dependency_constraints", "link_framework_package", "unset_message", "write_unset_stub")
-load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME", "PACKAGE_METADATA_LOAD", "make_package_metadata_content")
-load("//flutter/private:pinned.bzl", "pinned")
+load("//flutter/private:framework_source.bzl", "NEVER_LINKED", "dependency_constraint_message", "link_framework_package", "locked_versions", "unusable_message")
+load("//flutter/private:gradle_script.bzl", "gradle_applied_scripts", "gradle_statements", "parse_gradle_properties")
+load("//flutter/private:package_metadata_content.bzl", "METADATA_TARGET_NAME", "make_package_metadata_content", "package_metadata_loads")
 load("//flutter/private:swiftpm_manifest.bzl", "find_manifest_computations", "find_swiftpm_build_settings", "find_unsupported_swiftpm_dependencies")
 load(
     "//flutter/private:unbuilt_native_code.bzl",
     "cmake_native_build",
     "ffi_plugin_native_build",
     "gradle_native_build",
+    "podspec_dropped_fields",
+    "podspec_dropped_fields_message",
     "podspec_native_build",
     "unbuilt_native_code_message",
 )
+
+visibility("//flutter/...")
 
 # The Apple source extensions of a plugin's CocoaPods layout.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
@@ -81,6 +89,27 @@ _DESKTOP_SRC_EXTENSIONS = ("cc", "cpp", "c", "h", "hh", "hpp")
 
 # Kotlin/Java source extensions for Android plugin libraries.
 _ANDROID_SRC_EXTENSIONS = ("kt", "java")
+
+# Where the font files of other packages a package's pubspec names are linked.
+_OTHER_PACKAGES_FONTS = "_fonts_of_other_packages"
+
+# The extensions of the files a shader may `#include`, and of shaders.
+_SHADER_SOURCE_EXTENSIONS = (".glsl", ".frag", ".vert")
+
+# What this repository writes at its root, besides Bazel's own files, and the
+# one directory it writes in, `android/`. None of them is linked from the
+# package's files: a write through a link would land in the files repository,
+# which every repository linking it shares, or in the user's checkout (a
+# `path` package, a framework source).
+_WRITTEN = [
+    MEMBER_FILE,
+    APPLE_PLUGIN_FILE,
+    MAVEN_DEPS_FILE,
+    PUBSPEC_DEPENDENCIES,
+    _OTHER_PACKAGES_FONTS,
+    OTHER_PACKAGES_ASSETS,
+    "android",
+]
 
 def _has_files_under(ctx, relative_path, extensions = None):
     """Check `<package>/<relative_path>` for source files.
@@ -200,10 +229,10 @@ def _builds_apple_library(ctx, platform, info):
     shared_darwin = info.get("sharedDarwinSource", False) == True
     return info.get("ffiPlugin", False) == True and bool(_apple_manifest_dir(ctx, platform, shared_darwin))
 
-def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
-    """Fails when a plugin's SwiftPM package depends on a directory outside the plugin.
+def _swiftpm_path_dependencies_message(package_name, platform, manifests):
+    """Why a plugin's SwiftPM package cannot be built, when it depends on a directory outside the plugin, or "".
 
-    A remote package is built from the app's `Package.resolved`
+    A remote package is the root module's to declare
     (`swift_packages.bzl`), and the Flutter framework and sibling plugins
     from the build, but nothing supplies another directory.
 
@@ -211,6 +240,9 @@ def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
         package_name: The plugin's package name, for the message.
         platform: `"macos"` or `"ios"`, for the message.
         manifests: The plugin's manifests for `platform` (`_apple_manifests`).
+
+    Returns:
+        The message the platform's library fails with, or "".
     """
     for manifest in manifests:
         unsupported = [
@@ -219,7 +251,7 @@ def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
             if d.startswith("path ")
         ]
         if unsupported:
-            fail((
+            return ((
                 "package:{pkg} ({plat}) declares Swift package dependencies in " +
                 "{manifest} on directories outside the plugin, which nothing in " +
                 "the build supplies:\n" +
@@ -230,6 +262,7 @@ def _fail_on_swiftpm_dependencies(package_name, platform, manifests):
                 manifest = manifest.path,
                 deps = "\n".join(["  - " + d for d in unsupported]),
             ))
+    return ""
 
 def _detect_apple_include_dirs(ctx, source_dirs, package_name):
     """Collect SwiftPM-canonical public-header directories for the given Apple sources.
@@ -416,17 +449,17 @@ def _java_package_problem(name):
                 return "has the character {} where a Java identifier has none".format(repr(c))
     return ""
 
-def _checked_java_package(package, source, name):
-    """Return the namespace `name`, or fail naming the package and its source."""
+def _java_package_message(package, source, name):
+    """Why the namespace `name` cannot be the plugin's Android package, naming the package and its source, or ""."""
     problem = _java_package_problem(name) if name else ""
-    if problem:
-        fail("package {}: the Android namespace {} (from {}) is not a Java package name: it {}.".format(
-            package,
-            repr(name),
-            source,
-            problem,
-        ))
-    return name
+    if not problem:
+        return ""
+    return "package {}: the Android namespace {} (from {}) is not a Java package name: it {}.".format(
+        package,
+        repr(name),
+        source,
+        problem,
+    )
 
 def _android_gradle_script(ctx):
     """The plugin's Gradle build script: `android/build.gradle`, else its `.kts`.
@@ -525,15 +558,35 @@ def _platform_native_build(ctx, platform, info):
         mechanism = ffi_plugin_native_build(build)
     return mechanism
 
-def _detect_unbuilt_native_code(ctx, plugin_block):
+def _podspec_dropped_fields(ctx, version, platform, info, pub_dependencies):
+    """The message for what the platform's podspec adds that rules_flutter drops, or "".
+
+    Only where the plugin is built from its podspec: one with a Package.swift
+    is built from that.
+    """
+    shared_darwin = info.get("sharedDarwinSource", False) == True
+    if _apple_manifest_dir(ctx, platform, shared_darwin):
+        return ""
+    directory = "darwin" if shared_darwin else platform
+    podspec = _podspec(ctx, directory)
+    if not podspec:
+        return ""
+    fields = podspec_dropped_fields(ctx.read(podspec), platform, pub_dependencies)
+    if not fields:
+        return ""
+    path = "{}/{}".format(directory, podspec.basename)
+    return podspec_dropped_fields_message(ctx.attr.package_name, version, platform, path, fields)
+
+def _detect_unbuilt_native_code(ctx, version, plugin_block, pub_dependencies):
     """The plugin's native code rules_flutter does not build, per platform.
 
     Returns:
         A dict of platform (`android`, `ios`, `macos`, `linux`, `windows`) to
         the message its build fails with, for each platform the pubspec
-        declares whose build makes a library rules_flutter cannot. Fails the
-        fetch when an iOS or macOS Package.swift depends on other Swift
-        packages.
+        declares whose build makes a library rules_flutter cannot, for each
+        iOS or macOS platform whose podspec adds to the build what
+        rules_flutter drops (`podspec_dropped_fields`), and for each whose
+        Package.swift depends on a directory outside the plugin.
     """
     out = {}
     for platform in ("android", "ios", "macos", "linux", "windows"):
@@ -541,30 +594,40 @@ def _detect_unbuilt_native_code(ctx, plugin_block):
         if info == None:
             continue
         mechanism = _platform_native_build(ctx, platform, info)
+        apple_library = platform in ("ios", "macos") and _builds_apple_library(ctx, platform, info)
+        dropped = _podspec_dropped_fields(ctx, version, platform, info, pub_dependencies) if apple_library and not mechanism else ""
         if mechanism:
             out[platform] = unbuilt_native_code_message(
                 ctx.attr.package_name,
-                ctx.attr.version,
+                version,
                 platform,
                 mechanism,
             )
-        elif platform in ("ios", "macos") and _builds_apple_library(ctx, platform, info):
+        elif dropped:
+            out[platform] = dropped
+        elif apple_library:
             # The sources are compiled, so the plugin's Package.swift says
-            # what else that compile needs: a directory outside the plugin fails the
-            # fetch. (Its settings are the Apple repository's to apply.)
+            # what else that compile needs: a directory outside the plugin
+            # fails the platform's build. (Its settings are the Apple
+            # repository's to apply.)
             manifests = _apple_manifests(ctx, platform, info.get("sharedDarwinSource", False) == True)
-            _fail_on_swiftpm_dependencies(ctx.attr.package_name, platform, manifests)
+            outside = _swiftpm_path_dependencies_message(ctx.attr.package_name, platform, manifests)
+            if outside:
+                out[platform] = outside
     return out
 
-def make_android_native_build_content(message):
-    """An `android/BUILD.bazel` that fails at load time with `message`.
+def make_android_failing_build_content(message):
+    """An `android/BUILD.bazel` whose `:lib` fails at analysis with `message`.
 
     Written for a plugin whose Android native code rules_flutter does not
-    build (see `unbuilt_native_code.bzl`) when no overlay builds the package.
-    An Android build that links the plugin loads this file through its
-    member's `exports` and fails; other platforms never load it.
+    build (see `unbuilt_native_code.bzl`), whose Java level it cannot read
+    (`android_plugin_jvm_target.bzl`), or whose namespace cannot be the
+    library's, when no overlay builds the package. An Android build that
+    links the plugin reaches `:lib` through its member's `exports` and fails;
+    other platforms never analyse it, and the package still loads, so that
+    `bazel query` over the member's dependencies works.
     """
-    return "fail({})\n".format(repr(message))
+    return FAILING_TARGETS_LOAD + failing_targets(["lib"], message)
 
 def _parse_consumer_proguard_files(content):
     """Extract `consumerProguardFiles` paths from a Gradle build script.
@@ -602,7 +665,7 @@ def _parse_consumer_proguard_files(content):
                 idx = end + 1
     return sorted(paths.keys())
 
-def _detect_consumer_proguard_specs(ctx):
+def _detect_consumer_proguard_specs(ctx, problems):
     """Find the plugin's `consumer-rules.pro` files, declared via Gradle.
 
     Reads `android/build.gradle` (or `android/build.gradle.kts`),
@@ -623,45 +686,202 @@ def _detect_consumer_proguard_specs(ctx):
                     ctx.attr.package_name,
                     "consumerProguardFiles file",
                     relpath,
+                    problems,
                 ))
     return paths
+
+def _package_relative(path):
+    """`path` with its `.` and `..` segments resolved, or None when it leaves the package."""
+    out = []
+    for segment in path.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if not out:
+                return None
+            out.pop()
+        else:
+            out.append(segment)
+    return "/".join(out)
+
+def _read_applied_scripts(ctx, content):
+    """The text of each script the Gradle build `content` applies that the package has, by the path it names."""
+    applied = {}
+    for path in gradle_applied_scripts(content):
+        relative = None if path.startswith("/") else _package_relative("android/" + path)
+        if relative == None:
+            continue
+        applied_path = ctx.path(relative)
+        if applied_path.exists and not applied_path.is_dir:
+            applied[path] = ctx.read(applied_path)
+    return applied
+
+def _read_gradle_properties(ctx):
+    """The properties of the package's `android/gradle.properties`, which Gradle gives the plugin's project."""
+    path = ctx.path("android/gradle.properties")
+    return parse_gradle_properties(ctx.read(path)) if path.exists and not path.is_dir else {}
+
+def _plugin_project_libraries(ctx, projects, pubspec_dependencies):
+    """The Android libraries of the other plugins the plugin's Android library depends on.
+
+    Flutter's Gradle build makes each plugin's project depend on the project
+    of every plugin with an Android implementation that its pubspec.yaml
+    lists under `dependencies:` (not `dev_dependencies:`), and names each
+    plugin's project after its package, so `api project(":firebase_core")`
+    in the plugin's own Gradle build is firebase_core's Android library too.
+    Each is the library its package's repository generates.
+
+    Args:
+        ctx: The repository context.
+        projects: `parse_gradle_maven_dependencies`' `projects`.
+        pubspec_dependencies: The packages the plugin's pubspec.yaml lists
+            under `dependencies:`.
+
+    Returns:
+        `struct(labels, error)`: the libraries' labels, or the message the
+        plugin's Android build fails with when a project its Gradle build
+        names is no plugin of the locks with an Android library.
+    """
+    index = read_index(ctx, ctx.attr.prefix)
+
+    def library_of(package):
+        if package not in index.built and package not in index.other:
+            return None
+        repo = source_repo(package, owner_prefix(index, package))
+        path = sibling_path(ctx, repo, MEMBER_FILE)
+
+        # Watched before the existence check, so the file appearing or
+        # going away refetches this repository.
+        ctx.watch(path)
+        if path.exists and json.decode(ctx.read(path)).get("android_lib", False):
+            return "@{}//android:lib".format(repo)
+        return None
+
+    labels = []
+
+    # As Flutter's Gradle build, a dependency that is not a plugin with an
+    # Android implementation adds nothing.
+    for package in sorted(pubspec_dependencies):
+        label = library_of(package)
+        if label and label not in labels:
+            labels.append(label)
+    missing = []
+    for p in projects:
+        label = library_of(p.package)
+        if not label:
+            missing.append(p)
+        elif label not in labels:
+            labels.append(label)
+    if missing:
+        return struct(labels = [], error = (
+            "{package}'s Gradle build depends on the Android projects of " +
+            "packages that are not plugins of the locks with an Android library:" +
+            "\n\n{lines}\n\nFlutter's Gradle build names each plugin's project " +
+            "after its package. Add the package to the app's pubspec.yaml, or, if " +
+            "it is there, it has no Android library to depend on."
+        ).format(
+            package = ctx.attr.package_name,
+            lines = "\n".join(["    %s:%d: %s (package:%s)" % (p.script, p.line_number, p.line, p.package) for p in missing]),
+        ))
+    return struct(labels = labels, error = "")
+
+def _read_plugin_build_config_fields(ctx, pubspec_version):
+    """The fields the plugin's Gradle build adds to its `BuildConfig` (`parse_gradle_build_config_fields`)."""
+    script = _android_gradle_script(ctx)
+    if not script:
+        return struct(fields = [], unread = [], unknown = sorted(ctx.attr.build_config_fields.keys()))
+    content = ctx.read(script)
+    return parse_gradle_build_config_fields(
+        content,
+        applied = _read_applied_scripts(ctx, content),
+        properties = _read_gradle_properties(ctx),
+        script = "android/" + script.basename,
+        pubspec_version = pubspec_version,
+        annotated = ctx.attr.build_config_fields,
+    )
+
+def _read_plugin_jvm_level(ctx):
+    """The Java/Kotlin level the plugin's Gradle build compiles its Android sources at.
+
+    Reads `android/build.gradle` (else the `.kts`), the scripts of the
+    package it applies and its `gradle.properties` (see
+    `parse_gradle_jvm_level`).
+
+    Returns:
+        `struct(level, error)`: the Java major version, or the message an
+        Android build of the plugin fails with when the level is not known or
+        rules_kotlin cannot compile at it.
+    """
+    script = _android_gradle_script(ctx)
+    if not script:
+        return struct(level = AGP_DEFAULT_JVM_LEVEL, error = "")
+    content = ctx.read(script)
+    applied = _read_applied_scripts(ctx, content)
+    script_path = "android/" + script.basename
+    parsed = parse_gradle_jvm_level(content, applied, _read_gradle_properties(ctx), script = script_path)
+    if parsed.unread:
+        return struct(level = None, error = unread_jvm_level_message(ctx.attr.package_name, parsed.unread))
+    if kotlinc_jvm_target(parsed.level) == None:
+        return struct(level = None, error = unsupported_jvm_level_message(ctx.attr.package_name, script_path, parsed.level))
+    return struct(level = parsed.level, error = "")
 
 def _read_plugin_maven_deps(ctx):
     """Parse the spoke's `android/build.gradle*` Maven dependencies.
 
-    Reads the package's Gradle build file (`build.gradle`, else the `.kts`).
+    Reads the package's Gradle build file (`build.gradle`, else the `.kts`),
+    the scripts of the package it applies and its `gradle.properties`.
     Returns the parse result of `parse_gradle_maven_dependencies` (the
-    plugin's Maven group, the declared dependencies and the lines it did not
-    check), with `script`, the file's path in the package. All empty when the
-    package has no Gradle script.
+    plugin's Maven group, the declared dependencies and BoMs and the lines it
+    did not check), with `script`, the file's path in the package, and
+    `properties`. All empty when the package has no Gradle script.
     """
     script = _android_gradle_script(ctx)
-    parsed = parse_gradle_maven_dependencies(ctx.read(script) if script else "")
+    properties = _read_gradle_properties(ctx)
+    content = ctx.read(script) if script else ""
+    script_path = "android/" + script.basename if script else ""
+    parsed = parse_gradle_maven_dependencies(
+        content,
+        applied = _read_applied_scripts(ctx, content),
+        properties = properties,
+        script = script_path,
+    )
     return struct(
         group = parsed.group,
         deps = parsed.deps,
+        boms = parsed.boms,
+        projects = parsed.projects,
         unread = parsed.unread,
-        script = "android/" + script.basename if script else "",
+        script = script_path,
+        properties = properties,
     )
+
+def _declaration_dict(d):
+    out = {
+        "configuration": d.configuration,
+        "coordinate": d.group + ":" + d.artifact,
+        "version": d.version,
+        "line": d.line,
+        "checked": d.checked,
+    }
+    if d.version_parts:
+        out["version_parts"] = d.version_parts
+    return out
 
 def _maven_dep_dicts(parsed):
     """The parsed dependencies as the dicts `maven_deps.json` records."""
     return [
-        {
-            "kind": d.kind,
-            "configuration": d.configuration,
-            "coordinate": d.group + ":" + d.artifact,
-            "version": d.version,
-            "line": d.line,
-            "checked": d.checked,
-        }
+        dict(_declaration_dict(d), kind = d.kind, exclusions = d.exclusions)
         for d in parsed.deps
     ]
+
+def _bom_dicts(parsed):
+    """The parsed BoMs as the dicts `maven_deps.json` records."""
+    return [_declaration_dict(d) for d in parsed.boms]
 
 def _unread_dicts(parsed):
     """The lines the parser did not check, as `maven_deps.json` records them."""
     return [
-        {"line": u.line, "line_number": u.line_number, "why": u.why}
+        {"line": u.line, "line_number": u.line_number, "script": u.script, "why": u.why}
         for u in parsed.unread
     ]
 
@@ -673,7 +893,7 @@ def _annotated_dicts(labels):
     """
     return [{"label": label, "name": label.rsplit("//:", 1)[1]} for label in labels]
 
-def _write_maven_deps(ctx, deps, unread, script, annotated = []):
+def _write_maven_deps(ctx, version, deps, unread, script, annotated = [], boms = []):
     """Record the Maven dependencies the Android check of the hub reads.
 
     Written for every spoke, so `@flutter_pub_android_maven` can read
@@ -683,13 +903,17 @@ def _write_maven_deps(ctx, deps, unread, script, annotated = []):
     root of the spoke, as a package with no Android library has no `android/`
     package. `script` is the Gradle script's path in the package, which the
     warning about `unread` lines names. `annotated` are the labels the root's
-    `flutter_pub.annotation` added to the library.
+    `flutter_pub.annotation` added to the library. `boms` are the BoMs its
+    Gradle build declares. The package's `gradle.properties` is recorded too,
+    since another plugin's build may read it.
     """
     ctx.file(MAVEN_DEPS_FILE, json.encode({
         "package": ctx.attr.package_name,
-        "version": ctx.attr.version,
+        "version": version,
         "script": script,
         "deps": deps,
+        "boms": boms,
+        "properties": _read_gradle_properties(ctx),
         "unread": unread,
         "annotated": _annotated_dicts(annotated),
     }) + "\n")
@@ -770,11 +994,11 @@ def _file_name_problem(path):
             return "is not a normalised path inside the package (it has an empty, `.` or `..` segment)"
     return ""
 
-def _checked_file_name(package, what, path):
-    """Return `path`, or fail naming the package and the file it cannot hold."""
+def _checked_file_name(package, what, path, problems):
+    """Return `path`, adding to `problems` what names the package and the file it cannot hold."""
     problem = _file_name_problem(path)
     if problem:
-        fail("package {}: the {} {} {}, so rules_flutter cannot put it in the package's BUILD file.".format(
+        problems.append("package {}: the {} {} {}, so rules_flutter cannot put it in the package's BUILD file.".format(
             package,
             what,
             repr(path),
@@ -782,40 +1006,60 @@ def _checked_file_name(package, what, path):
         ))
     return path
 
-def _font_source(ctx, path):
+def _lib_file_of(ctx, what, path, other, rest, problems):
+    """The path of `lib/<rest>` in the package `other`, which the lock builds; the file may not exist.
+
+    `what` and `path` name the entry in what is added to `problems` for a
+    package the lock does not build, which has no such path: None then.
+    """
+    index = read_index(ctx, ctx.attr.prefix)
+    if other not in index.built:
+        problems.append("package {}: the {} {} names the package {}, which the lock does not build.".format(ctx.attr.package_name, what, repr(path), other))
+        return None
+    return sibling_path(ctx, source_repo(other, owner_prefix(index, other)), "pubspec.yaml").dirname.get_child("lib/" + rest)
+
+def _font_source(ctx, path, problems):
     """The file of the font a package lists at `path`, and its `asset` if it is another package's.
 
     As in flutter_tools, `packages/<other>/<rest>` that is no file of this
-    package is the file `<rest>` of the package `<other>`, which need not list
-    it. A file of another package is linked into this repository rather than
-    named across repositories: a package's files are private to it, and any of
-    them can be named this way. Its `flutter_font` keeps `path` as its `asset`.
+    package is the file `<rest>` of the `lib/` of the package `<other>`, this
+    one or another, which need not list it (see `_packages_entry`). A file of
+    another package is linked into this repository rather than named across
+    repositories (see `_link_lib_file`). Its `flutter_font` keeps `path` as its
+    `asset`.
 
     Returns:
         `struct(src, asset)`: the label of the file, and `path` or None.
     """
-    parts = path.split("/", 2)
-    if parts[0] != "packages" or len(parts) < 3 or ctx.path(path).exists:
+    named = _packages_entry(ctx, path)
+    if named == None:
         return struct(src = ":" + path, asset = None)
-    other, rest = parts[1], parts[2]
-    if other == ctx.attr.package_name:
-        return struct(src = ":" + rest, asset = path)
-    index = read_index(ctx, ctx.attr.prefix)
-    if other not in index.built:
-        fail("package {}: the font file {} names the package {}, which the lock does not build.".format(ctx.attr.package_name, repr(path), other))
-    file = sibling_path(ctx, source_repo(other, owner_prefix(index, other)), "pubspec.yaml").dirname.get_child(rest)
-    if not file.exists:
-        fail("package {}: the font file {} names {} of the package {}, which has no such file.".format(ctx.attr.package_name, repr(path), repr(rest), other))
-    link = "_fonts_of_other_packages/{}/{}".format(other, rest)
-    ctx.symlink(file, link)
-    return struct(src = ":" + link, asset = path)
+    package = ctx.attr.package_name
+    if named.package == package:
+        source = ctx.path("lib/" + named.rest)
+        if not source.exists or source.is_dir:
+            problems.append("package {}: it lists the font file {}, but neither that file nor lib/{} exists.".format(package, repr(path), named.rest))
+        return struct(src = ":lib/" + named.rest, asset = path)
+    link = _link_lib_file(
+        ctx,
+        package,
+        "font file",
+        path,
+        named,
+        problems,
+        variants = False,
+        root = _OTHER_PACKAGES_FONTS,
+        missing = "package {package}: the font file {listed} names lib/{rest} of the package {other}, which has no such file.",
+    )
+    return struct(src = ":" + link.path, asset = path)
 
-def _font_families(ctx, parsed_fonts):
+def _font_families(ctx, parsed_fonts, problems):
     """The font families a package declares, for `make_flutter_member_build_content`.
 
     Args:
         ctx: The repository context.
         parsed_fonts: `flutter_assets_block().fonts`.
+        problems: What keeps the package from being built, added to.
 
     Returns:
         A list of `struct(family, fonts)`, each font a `struct(src, asset,
@@ -826,7 +1070,7 @@ def _font_families(ctx, parsed_fonts):
     for entry in parsed_fonts:
         fonts = []
         for font in entry.fonts:
-            source = _font_source(ctx, _checked_file_name(ctx.attr.package_name, "font file", font.asset))
+            source = _font_source(ctx, _checked_file_name(ctx.attr.package_name, "font file", font.asset, problems), problems)
             fonts.append(struct(src = source.src, asset = source.asset, weight = font.weight, style = font.style))
         families.append(struct(family = entry.family, fonts = fonts))
     return families
@@ -867,14 +1111,16 @@ flutter_font_family(
         labels.append(":" + name)
     return struct(targets = targets, labels = labels)
 
-def _with_variants(ctx, package, path):
+def _with_variants(ctx, package, path, problems, listed = None):
     """`path` if it is a file, and the files of that name in its `<number>x/` siblings.
 
     The resolution variants of an image are found beside it, in the
     directories next to it named for a scale (see `variant_scale`), as
     flutter_tools finds them. The listed file itself need not exist when a
     variant does; when neither does, the package lists something it does not
-    ship, which `flutter build` fails on and so does this.
+    ship, which `flutter build` fails on and so does this: that is added to
+    `problems`, and there are no files. `listed` is the entry as the pubspec
+    writes it, when that is not `path`.
     """
     slash = path.rfind("/")
     prefix = path[:slash + 1]
@@ -890,39 +1136,13 @@ def _with_variants(ctx, package, path):
                 if variant.exists and not variant.is_dir:
                     found.append("{}{}/{}".format(prefix, sibling.basename, name))
     if not found:
-        fail("package {}: it lists the asset {}, but neither that file nor a resolution variant of it exists.".format(package, repr(path)))
+        if listed:
+            problems.append("package {}: it lists the asset {}, but neither that file nor {} nor a resolution variant of it exists.".format(package, repr(listed), path))
+        else:
+            problems.append("package {}: it lists the asset {}, but neither that file nor a resolution variant of it exists.".format(package, repr(path)))
     return sorted(found)
 
-def own_lib_path(package, path, literal_is_file):
-    """`x` when `path`, a file entry of `package`'s pubspec, names its `lib/x`; else None.
-
-    As in flutter_tools (asset.dart's `_resolveAsset`), a file entry
-    `packages/<the package>/x` that is no file at that path is the package's
-    `lib/x` (material_ui's `packages/material_ui/shaders/ink_sparkle.frag`),
-    bundled at `packages/<the package>/x`, where a plain `x` would be: its
-    target's `bundle_paths` maps `lib/x` to `x`. A directory entry is never
-    read this way.
-
-    Args:
-        package: The package whose pubspec lists the entry.
-        path: The entry as written.
-        literal_is_file: Whether the package has a file at `path` itself,
-            which wins.
-
-    Returns:
-        The path in `lib/`, or None.
-    """
-    own = "packages/{}/".format(package)
-    if not path.startswith(own) or literal_is_file:
-        return None
-    return path[len(own):]
-
-def _own_lib_path(ctx, package, path):
-    """`own_lib_path` of `path`, looking in the package for a file at `path`."""
-    literal = ctx.path(path)
-    return own_lib_path(package, path, literal.exists and not literal.is_dir)
-
-def _build_assets(ctx, package, parsed_assets, flavors):
+def _build_assets(ctx, package, parsed_assets, flavors, bundle_paths, problems):
     """Expand the package's `flutter: assets:` entries into files.
 
     Bazel needs an explicit label per file, so each entry is expanded at
@@ -936,50 +1156,57 @@ def _build_assets(ctx, package, parsed_assets, flavors):
     with `platforms:` ships in builds for those platforms only; a file that
     several entries list ships wherever any of them does.
 
-    A file entry `packages/<the package>/x` is the package's `lib/x` and its
-    variants, bundled by `x` (see `own_lib_path`).
+    A file entry `packages/<package>/<path>` may be the file `<path>` of the
+    `lib/` of this package or another (see `_packages_entry`), bundled as
+    `packages/<package>/<path>`; its variants are the ones beside that file,
+    bundled beside it. A directory entry is
+    never read that way, as flutter_tools reads it.
 
     Args:
         ctx: The repository context.
         package: The package name.
         parsed_assets: The package's parsed `flutter: assets:` entries.
         flavors: The package's `flavor_restrictions`, shared with its shaders.
+        bundle_paths: The package's `_bundle_paths`, shared with its shaders.
+        problems: What keeps the package from being built, added to.
 
     Returns:
-        struct(labels, platforms, bundle_paths): `labels` is the `assets` of
-        the package's target, sorted; `platforms` maps the path of each file
-        that ships on some platforms only to those platforms; `bundle_paths`
-        maps the path of each file in `lib/` that an entry names by
-        `packages/<the package>/` to the path it is bundled by.
+        struct(labels, platforms): `labels` is the `assets` of the package's
+        target, sorted; `platforms` maps the path of each file that ships on
+        some platforms only to those platforms.
     """
     files = {}
-    bundle_paths = {}
     restrictions = _platform_restrictions()
     for entry in parsed_assets:
         path = entry.path
-        in_lib = None
         if path.endswith("/"):
-            listed = _files_in(ctx, path.rstrip("/"))
+            mains = [(_checked_file_name(package, "asset file", f, problems), None, "", "", False) for f in _files_in(ctx, path.rstrip("/"))]
         else:
-            in_lib = _own_lib_path(ctx, package, path)
-            listed = ["lib/" + in_lib if in_lib != None else path]
-        for f in listed:
-            main = _checked_file_name(package, "asset file", f)
-            for variant in _with_variants(ctx, package, main):
+            listed = _checked_file_name(package, "asset file", path, problems)
+            named = _packages_entry(ctx, listed)
+            if named == None:
+                mains = [(listed, None, "", "", False)]
+            elif named.package == package:
+                mains = [("lib/" + named.rest, listed, "lib/", "", False)]
+            else:
+                link = _link_lib_file(ctx, package, "asset", listed, named, problems, variants = True)
+                mains = [(link.path, listed, link.dir, "packages/{}/".format(named.package), True)]
+        for main, remapped_from, strip, add, borrowed in mains:
+            for variant in _with_variants(ctx, package, main, problems, listed = remapped_from):
+                bundle_paths.add(variant, add + variant.removeprefix(strip), borrowed = borrowed)
                 files[":" + variant] = True
-                if in_lib != None:
-                    bundle_paths[variant] = variant[len("lib/"):]
                 restrictions.add(variant, entry.platforms)
                 conflict = flavors.add(variant, path, entry.flavors, main = variant == main)
                 if conflict:
-                    fail(conflict)
-    return struct(labels = sorted(files.keys()), platforms = restrictions.platforms(), bundle_paths = bundle_paths)
+                    problems.append(conflict)
+    return struct(labels = sorted(files.keys()), platforms = restrictions.platforms())
 
-def _build_additional_licenses(ctx, package, paths):
+def _build_additional_licenses(ctx, package, paths, problems):
     """The labels of the files a package lists under `flutter: licenses:`.
 
-    flutter_tools fails the build when one is missing; here the fetch does,
-    naming the package and the file, since a label for it cannot be written.
+    flutter_tools fails the build when one is missing; here so does the
+    package's target, added to `problems` naming the package and the file,
+    since a label for it cannot be written.
 
     Returns:
         The package-relative paths, in the order listed, as labels of the
@@ -987,48 +1214,173 @@ def _build_additional_licenses(ctx, package, paths):
     """
     labels = []
     for path in paths:
-        _checked_file_name(package, "licence file", path)
+        _checked_file_name(package, "licence file", path, problems)
         file = ctx.path(path)
         if not file.exists or file.is_dir:
-            fail("package {}: its `flutter: licenses:` lists {}, which is not a file of the package.".format(package, repr(path)))
+            problems.append("package {}: its `flutter: licenses:` lists {}, which is not a file of the package.".format(package, repr(path)))
         labels.append(":" + path)
     return labels
 
-def _build_shaders(ctx, package, parsed_shaders, flavors):
+def _packages_entry(ctx, path):
+    """`struct(package, rest)` when a file entry `path` is `packages/<package>/<rest>`, else None.
+
+    As flutter_tools reads an asset or shader entry, `packages/<package>/<rest>`
+    that is no file at that path is the file `<rest>` of the `lib/` of the
+    package `<package>`, keyed `packages/<package>/<rest>` as listed
+    (`material_ui` lists `packages/material_ui/shaders/ink_sparkle.frag`, the
+    file `lib/shaders/ink_sparkle.frag`). A file at the path as listed wins.
+
+    For the package itself the file stays where it is, so a shader finds what
+    it `#include`s beside it, and the repository writes nothing for it:
+    `<rest>` may be below a directory linked from the package's files, which a
+    write would land in. It is bundled by `<rest>` (`bundle_paths`), which a
+    program keys `packages/<package>/<rest>`. A file of another package is
+    linked (see `_link_lib_file`).
+    """
+    parts = path.split("/", 2)
+    if parts[0] != "packages" or len(parts) < 3:
+        return None
+    as_listed = ctx.path(path)
+    if as_listed.exists and not as_listed.is_dir:
+        return None
+    return struct(package = parts[1], rest = parts[2])
+
+def _link_lib_file(ctx, package, what, listed, named, problems, variants, root = OTHER_PACKAGES_ASSETS, missing = None, includes = False):
+    """Link the file `lib/<named.rest>` of the package `named.package` into this repository.
+
+    A package's files are private to its repository and any of them can be
+    named this way, so the file is linked here rather than named across
+    repositories, as a font of another package is (see `_font_source`). It
+    lands under `root`, by default `OTHER_PACKAGES_ASSETS`, where a
+    contribution is bundled at the key as listed, not under this package's.
+
+    With `variants` the resolution variants beside the file are linked too,
+    and the file itself need not exist when one does (see `_with_variants`).
+
+    With `includes` the GLSL files beside the file are linked too, as
+    flutter_tools compiles a shader from the folder of the file itself, so the
+    shader finds what it `#include`s there. The compiler is pointed at the
+    folder of the link.
+
+    `missing` is what is added to `problems` for a file that is not there, a
+    format string over `package`, `listed`, `rest` and `other`; by default one
+    that names `what`.
+
+    Returns:
+        `struct(path, dir)`: where the file is linked, and the directory above
+        `<package>/` in the link, to strip to get the path from its package.
+    """
+    other, rest = named.package, named.rest
+    dir = "{}/{}/".format(root, other)
+    file = _lib_file_of(ctx, what, listed, other, rest, problems)
+    if file == None:
+        return struct(path = dir + rest, dir = dir)
+    exists = file.exists and not file.is_dir
+    if exists:
+        _link_once(ctx, file, dir + rest)
+    elif not variants:
+        problems.append((missing or "package {package}: it lists the {what} {listed}, but the package {other} has no file lib/{rest}.").format(
+            package = package,
+            what = what,
+            listed = repr(listed),
+            other = other,
+            rest = rest,
+        ))
+    if includes and file.dirname.exists:
+        prefix = rest[:rest.rfind("/") + 1]
+        for sibling in file.dirname.readdir():
+            if not sibling.is_dir and sibling.basename.endswith(_SHADER_SOURCE_EXTENSIONS):
+                _link_once(ctx, sibling, dir + prefix + sibling.basename)
+    if variants:
+        slash = rest.rfind("/")
+        prefix = rest[:slash + 1]
+        beside = file.dirname
+        if beside.exists:
+            for sibling in beside.readdir():
+                if sibling.is_dir and variant_scale(sibling.basename) != None:
+                    variant = sibling.get_child(rest[slash + 1:])
+                    if variant.exists and not variant.is_dir:
+                        _link_once(ctx, variant, "{}{}{}/{}".format(dir, prefix, sibling.basename, rest[slash + 1:]))
+    return struct(path = dir + rest, dir = dir)
+
+def _link_once(ctx, file, link):
+    """Link `file` at `link`, unless it is already: several entries and a shader's includes can name one file."""
+    if not ctx.path(link).exists:
+        ctx.symlink(file, link)
+
+def _bundle_paths():
+    """The paths each file of a package is bundled by, from the entries that list it.
+
+    A file is bundled by its own path, and by `<rest>` for an entry
+    `packages/<package>/<rest>` that names it as `lib/<rest>`; listed both
+    ways, it is bundled by both, as flutter_tools bundles it. `paths()` holds
+    the files bundled by any path but their own alone. `borrowed()` holds the files linked from
+    another package, which a program keys as listed.
+    """
+    keys = {}
+
+    borrowed_files = {}
+
+    def add(path, bundled_as, borrowed = False):
+        listed = keys.setdefault(path, [])
+        if bundled_as not in listed:
+            listed.append(bundled_as)
+        if borrowed:
+            borrowed_files[path] = True
+
+    def borrowed():
+        return sorted(borrowed_files.keys())
+
+    def paths():
+        return {path: sorted(listed) for path, listed in keys.items() if listed != [path]}
+
+    return struct(add = add, paths = paths, borrowed = borrowed)
+
+def _build_shaders(ctx, package, parsed_shaders, flavors, bundle_paths, problems):
     """Expand the package's `flutter: shaders:` entries into files.
 
     The same rules as for assets (see `_build_assets`): an entry with
     `flavors:` ships in builds of those flavors, one with `platforms:` only in
-    builds for those platforms, and `packages/<the package>/x` is its `lib/x`.
-    There are no directories and no resolution variants.
+    builds for those platforms. There are no directories and no resolution
+    variants. A shader listed as `packages/<package>/<path>` may be a file of
+    the package's `lib/` or another package's (see `_packages_entry`).
 
     Args:
         ctx: The repository context.
         package: The package name.
         parsed_shaders: The package's parsed `flutter: shaders:` entries.
         flavors: The package's `flavor_restrictions`, shared with its assets.
+        bundle_paths: The package's `_bundle_paths`, shared with its assets.
+        problems: What keeps the package from being built, added to.
 
     Returns:
-        struct(labels, platforms, bundle_paths): as `_build_assets`'.
+        struct(labels, platforms): `labels` is the `shaders` of the package's
+        target, sorted; `platforms` maps the path of each shader that ships on
+        some platforms only to those platforms.
     """
     files = {}
-    bundle_paths = {}
     restrictions = _platform_restrictions()
     for entry in parsed_shaders:
-        _checked_file_name(package, "shader file", entry.path)
-        in_lib = _own_lib_path(ctx, package, entry.path)
-        shader = entry.path
-        if in_lib != None:
-            shader = "lib/" + in_lib
-            if not ctx.path(shader).exists:
-                fail("package {}: it lists the shader {}, which is its {}, and that file does not exist.".format(package, repr(entry.path), repr(shader)))
-            bundle_paths[shader] = in_lib
-        files[":" + shader] = True
-        restrictions.add(shader, entry.platforms)
-        conflict = flavors.add(shader, entry.path, entry.flavors)
+        listed = _checked_file_name(package, "shader file", entry.path, problems)
+        named = _packages_entry(ctx, listed)
+        path = listed
+        bundled_as = listed
+        if named != None and named.package == package:
+            path = "lib/" + named.rest
+            bundled_as = named.rest
+            source = ctx.path(path)
+            if not source.exists or source.is_dir:
+                problems.append("package {}: it lists the shader {}, but neither that file nor {} exists.".format(package, repr(listed), path))
+        elif named != None:
+            path = _link_lib_file(ctx, package, "shader", listed, named, problems, variants = False, includes = True).path
+            bundled_as = listed
+        bundle_paths.add(path, bundled_as, borrowed = named != None and named.package != package)
+        files[":" + path] = True
+        restrictions.add(path, entry.platforms)
+        conflict = flavors.add(path, entry.path, entry.flavors)
         if conflict:
-            fail(conflict)
-    return struct(labels = sorted(files.keys()), platforms = restrictions.platforms(), bundle_paths = bundle_paths)
+            problems.append(conflict)
+    return struct(labels = sorted(files.keys()), platforms = restrictions.platforms())
 
 def _platform_restrictions():
     """The platforms each file of a package ships on, from the entries that list it.
@@ -1123,7 +1475,7 @@ _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         allow_empty = True,
     ),"""
 
-def _format_pub_asset_attrs(font_families, assets, shaders, asset_platforms = {}, shader_platforms = {}, asset_flavors = {}, shader_flavors = {}, additional_licenses = [], bundle_paths = {}):
+def _format_pub_asset_attrs(font_families, assets, shaders, asset_platforms = {}, shader_platforms = {}, asset_flavors = {}, shader_flavors = {}, additional_licenses = [], bundle_paths = {}, other_package_files = []):
     """Render the pub-asset attrs as BUILD source, omitting empty ones."""
     parts = []
     if font_families:
@@ -1144,6 +1496,8 @@ def _format_pub_asset_attrs(font_families, assets, shaders, asset_platforms = {}
         parts.append("    shader_flavors = {},".format(_format_list_dict_literal(shader_flavors)))
     if bundle_paths:
         parts.append("    bundle_paths = {},".format(_format_list_dict_literal(bundle_paths)))
+    if other_package_files:
+        parts.append("    other_package_files = {},".format(repr(other_package_files)))
     if shaders:
         # What the shaders may `#include`: a package's GLSL anywhere in it,
         # since an include can reach `../`.
@@ -1169,13 +1523,15 @@ _RESOURCES_GLOB_BLOCK = """    resources = glob(
     ),
 """
 
-def _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, purl = ""):
-    """The `dart_package_metadata` of a generated member: the package's facts.
+def _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, source = None):
+    """The package metadata of a generated member: the package's facts.
 
     Shared by the `pub_package_member` and `flutter_pub_member` generators, so
     the two state a package alike: what rules_dart's own pub spokes state.
-    A version or licence that is unknown is not stated. With a purl, the
-    package's identity (`package_metadata`) follows it.
+    A version or licence that is unknown is not stated. With a fetched
+    identity, the package is declared fetched as it, so rules_dart's `pub`
+    copy of the same archive, commit or directory is the same package; a
+    purl's `package_metadata` follows.
     """
     return make_package_metadata_content(
         name,
@@ -1185,9 +1541,10 @@ def _member_metadata(name, language_version, code_assets, unreplaced_hook, versi
         build_hook = unreplaced_hook,
         link_hook = link_hook,
         license_file = license_file,
-    ) + pub_package_identity(purl).target
+        source = source,
+    ) + pub_package_identity(source).target
 
-def make_dart_member_build_content(name, language_version, code_assets, unreplaced_hook, version = "", license_file = "", link_hook = "", purl = ""):
+def make_dart_member_build_content(name, language_version, code_assets, unreplaced_hook, version = "", license_file = "", link_hook = "", source = None):
     """Generate BUILD content for the source repository of a pure-Dart pub package.
 
     A package with nothing of Flutter's in its pubspec is rules_dart's own
@@ -1207,14 +1564,17 @@ def make_dart_member_build_content(name, language_version, code_assets, unreplac
         version: The resolved package version, or "".
         license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
         link_hook: Its `hook/link.dart`, or "".
-        purl: Its purl (`pub_hosted_purl`, `pub_git_purl`), stated on a
-            `package_metadata` that its `REPO.bazel` attaches to every target
-            of the repository; or "" for a package of the user's own.
+        source: Where it came from (`package_fetched`): what it was fetched
+            as, the archive or git commit (`pub_hosted_source`,
+            `pub_git_source`) or the directory a path package is built from
+            (`pub_path_source`), and its purl, stated on a `package_metadata`
+            that its `REPO.bazel` attaches to every target of the repository;
+            or None for a package no fetcher states.
 
     Returns:
         BUILD.bazel content as a string.
     """
-    return PACKAGE_METADATA_LOAD + pub_package_identity(purl).loads + """\
+    return package_metadata_loads(source) + """\
 load("@rules_dart//dart/pub:pub_library.bzl", "pub_package_member")
 
 {metadata}
@@ -1227,7 +1587,7 @@ pub_package_member(
 """.format(
         name = name,
         resources = _RESOURCES_GLOB_BLOCK,
-        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, purl),
+        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, source),
         metadata_target = METADATA_TARGET_NAME,
     )
 
@@ -1307,12 +1667,14 @@ def make_flutter_member_build_content(
         asset_flavors = {},
         shader_flavors = {},
         bundle_paths = {},
+        other_package_files = [],
         has_android_lib = False,
         unbuilt_native_code = {},
         android_group = "",
         license_file = "",
         link_hook = "",
-        purl = ""):
+        source = None,
+        implements = ""):
     """Generate BUILD content for the source repository of a Flutter pub package.
 
     Emits the package's `flutter_pub_member`, a plugin when
@@ -1342,7 +1704,7 @@ def make_flutter_member_build_content(
             `dart_package_metadata` states with its other facts).
         license_file: The package's `NOTICES` or `LICENSE` (`find_pub_license_file`), or "".
         link_hook: Its `hook/link.dart`, or "".
-        purl: Its purl, as for `make_dart_member_build_content`.
+        source: Where it came from, as for `make_dart_member_build_content`.
         has_android_lib: Whether the package has an `android/` sub-package
             that defines `:lib`, which the member lists under `exports`,
             selected on Android.
@@ -1353,6 +1715,7 @@ def make_flutter_member_build_content(
         plugin_platforms: The `flutter.plugin.platforms` dict, of platform
             to its entry's keys and values; None for a package that is not a
             plugin.
+        implements: The plugin's `flutter.plugin.implements`, or "".
         apple_libs: Dict of `ios` and `macos` to the label of the plugin's
             library for that platform, in its Apple repository.
         apple_macos_privacy_manifests: `PrivacyInfo.xcprivacy` paths (macOS).
@@ -1370,8 +1733,11 @@ def make_flutter_member_build_content(
             platforms it ships on, for the shaders a `platforms:` entry restricts.
         shader_flavors: Dict of package-relative shader path -> the flavors
             it ships in, for the shaders a `flavors:` entry restricts.
-        bundle_paths: Dict of package-relative path of an asset or shader
-            -> the path it is bundled by, for those not bundled by their own.
+        bundle_paths: Dict of package-relative path -> every path it is
+            bundled by, for the files of `lib/` listed as
+            `packages/<name>/<path>`.
+        other_package_files: The package-relative paths of the files of
+            `assets` and `shaders` linked from another package.
         version: The resolved package version this spoke was fetched at, or
             empty. Stated only when known, as rules_dart's pub spokes state
             it: its sole use is agreement
@@ -1396,7 +1762,7 @@ def make_flutter_member_build_content(
     extra_targets = []
 
     if unbuilt_native_code:
-        extra_loads.append('load("@rules_flutter//flutter/private:unbuilt_native_code.bzl", "flutter_unbuilt_plugin_library")')
+        extra_loads.append('load("@rules_flutter//flutter/private:generated_repos.bzl", "flutter_unbuilt_plugin_library")')
     if linux_src_dir:
         extra_loads.append('load("@rules_flutter//flutter:linux.bzl", "flutter_linux_plugin_library")')
     if windows_src_dir:
@@ -1478,12 +1844,14 @@ flutter_unbuilt_plugin_library(
             platform_labels.append(":plugin_" + platform)
             extra_targets.append(_format_plugin_platform(platform, plugin_platforms[platform], libs.get(platform), android_group))
         if platform_labels:
-            extra_loads.append('load("@rules_flutter//flutter/private:flutter_plugin_platform.bzl", "flutter_plugin_platform")')
+            extra_loads.append('load("@rules_flutter//flutter/private:generated_repos.bzl", "flutter_plugin_platform")')
     platforms_arg = "    platforms = {},\n".format(_format_label_list_literal(platform_labels)) if platform_labels else ""
+    if implements and plugin_platforms != None:
+        platforms_arg = "    implements = {},\n".format(repr(implements)) + platforms_arg
 
     font_targets = _format_font_targets(fonts)
     if fonts:
-        extra_loads.append('load("@rules_flutter//flutter/private:flutter_font.bzl", "flutter_font", "flutter_font_family")')
+        extra_loads.append('load("@rules_flutter//flutter/private:generated_repos.bzl", "flutter_font", "flutter_font_family")')
         extra_targets.extend(font_targets.targets)
 
     # Android sources travel through a sibling `android/` sub-package, whose
@@ -1521,12 +1889,12 @@ flutter_unbuilt_plugin_library(
             ios_lines = ios_lines,
         )
 
-    pub_attrs = _format_pub_asset_attrs(font_targets.labels, assets, shaders, asset_platforms, shader_platforms, additional_licenses = additional_licenses, asset_flavors = asset_flavors, shader_flavors = shader_flavors, bundle_paths = bundle_paths)
+    pub_attrs = _format_pub_asset_attrs(font_targets.labels, assets, shaders, asset_platforms, shader_platforms, additional_licenses = additional_licenses, asset_flavors = asset_flavors, shader_flavors = shader_flavors, bundle_paths = bundle_paths, other_package_files = other_package_files)
 
     # The `lib/` glob is `allow_empty`: a pub package can be only assets or native
     # code, with no Dart.
-    return PACKAGE_METADATA_LOAD + pub_package_identity(purl).loads + """\
-load("@rules_flutter//flutter/private:flutter_pub_library.bzl", "flutter_pub_member")
+    return package_metadata_loads(source) + """\
+load("@rules_flutter//flutter/private:generated_repos.bzl", "flutter_pub_member")
 {extra_loads}
 {metadata}
 flutter_pub_member(
@@ -1538,7 +1906,7 @@ flutter_pub_member(
 {extra_targets}
 """.format(
         name = name,
-        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, purl),
+        metadata = _member_metadata(name, language_version, code_assets, unreplaced_hook, version, license_file, link_hook, source),
         metadata_target = METADATA_TARGET_NAME,
         resources = _RESOURCES_GLOB_BLOCK,
         platforms_arg = platforms_arg,
@@ -1549,14 +1917,26 @@ flutter_pub_member(
         pub_attrs = pub_attrs,
     )
 
+NO_NAMESPACE_MESSAGE = (
+    "Plugin ships Android resources (android/src/main/res/) but " +
+    "declares no namespace — checked android.namespace in " +
+    "build.gradle(.kts), the AndroidManifest.xml package " +
+    "attribute, and flutter.plugin.platforms.android.package in " +
+    "pubspec.yaml. Without a namespace the R class cannot be " +
+    "generated, so the resources would not compile."
+)
+
 def make_android_subpackage_build_content(
         android_src_dir,
         java_package,
         maven_deps = [],
         annotated_deps = [],
+        plugin_deps = [],
         android_manifest = "",
         consumer_proguard_specs = [],
-        has_resources = False):
+        has_resources = False,
+        jvm_level = AGP_DEFAULT_JVM_LEVEL,
+        build_config_fields = []):
     """Generate `android/BUILD.bazel` content for a Flutter plugin spoke.
 
     Emits a `kt_android_library(name = "lib", ...)`, which the spoke's member
@@ -1587,7 +1967,7 @@ def make_android_subpackage_build_content(
     automatically; rules_android does not. `android_build_config` emits it
     into the library's `srcs`, as Gradle compiles it with the module, with `DEBUG` and `BUILD_TYPE` as Gradle's would be in the build's mode
     (debug: true and `debug`, profile: true and `profile`, release: false
-    and `release`).
+    and `release`), and the fields the plugin's Gradle build adds.
 
     Args:
         android_src_dir: Source dir under the package root (e.g.
@@ -1612,6 +1992,8 @@ def make_android_subpackage_build_content(
             `flutter_pub.annotation` adds to the library's `deps`, for what
             the plugin's Gradle build declares in a form the reader does not
             read.
+        plugin_deps: Labels of the Android libraries of the other plugins
+            the plugin's pubspec.yaml or Gradle build depends on.
         android_manifest: Path to the plugin's
             `android/src/main/AndroidManifest.xml` if it ships one, or
             empty. When set, the generated `kt_android_library` declares
@@ -1631,19 +2013,18 @@ def make_android_subpackage_build_content(
             `android/src/main/res/`. Compiled via `resource_files` so the
             plugin's `R` class is generated against `java_package` and
             the resources merge into the consuming APK.
+        jvm_level: The Java major version the plugin's Gradle build compiles
+            its Java and Kotlin at (`parse_gradle_jvm_level`). The library's
+            `kotlinc_opts` sets it as the `jvm_target` of both halves.
+        build_config_fields: The fields the plugin's Gradle build adds to its
+            `BuildConfig` (`parse_gradle_build_config_fields`).
 
     Returns:
         Generated BUILD content as a string.
     """
     if has_resources and not java_package:
-        fail(
-            "Plugin ships Android resources (android/src/main/res/) but " +
-            "declares no namespace — checked android.namespace in " +
-            "build.gradle(.kts), the AndroidManifest.xml package " +
-            "attribute, and flutter.plugin.platforms.android.package in " +
-            "pubspec.yaml. Without a namespace the R class cannot be " +
-            "generated, so the resources would not compile.",
-        )
+        # The repository writes `make_android_failing_build_content` instead.
+        fail(NO_NAMESPACE_MESSAGE)
 
     if android_src_dir:
         # Source dir is relative to the package root; the sub-package
@@ -1740,7 +2121,7 @@ write_file(
         maven_loads = (
             'load("@flutter_pub_android_maven//:resolved.bzl", "RESOLVED")\n' +
             'load("@rules_android//android:rules.bzl", "android_library")\n' +
-            'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")\n'
+            'load("@rules_flutter//flutter/private:generated_repos.bzl", "maven_labels")\n'
         )
         maven_call = """
 # The artifacts this plugin's Gradle build declares that @rules_flutter_maven
@@ -1767,29 +2148,45 @@ android_library(
     if annotated_deps:
         deps_expr += " + " + repr(annotated_deps)
 
+    # The Android libraries of the other plugins this one's pubspec.yaml
+    # depends on, or its Gradle build (`api project(":x")`).
+    if plugin_deps:
+        deps_expr += " + " + repr(plugin_deps)
+
     # BuildConfig.java stub — Gradle generates this implicitly per
     # plugin's namespace. rules_android does not, so we hand-emit one.
     bc_package = java_package if java_package else "_unknown"
 
     return """\
-{maven_loads}{write_file_load}load("@rules_flutter//flutter/private:android_build_config.bzl", "android_build_config")
+{maven_loads}{write_file_load}load("@rules_flutter//flutter/private:generated_repos.bzl", "android_build_config")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+load("@rules_kotlin//kotlin:core.bzl", "kt_kotlinc_options")
 {maven_call}
 # BuildConfig for the plugin's namespace, which Gradle generates and compiles
 # with the module's sources, and rules_android does not. DEBUG and
-# BUILD_TYPE follow the build mode.
+# BUILD_TYPE follow the build mode; the fields are the Gradle build's
+# `buildConfigField`s.
 android_build_config(
     name = "_build_config",
-    package = "{bc_package}",
+    package = "{bc_package}",{build_config_fields}
+)
+
+# The Java level the plugin's Gradle build compiles at, as Gradle does: rules_kotlin
+# compiles the Kotlin, and the Java with -source/-target, at this jvm_target.
+kt_kotlinc_options(
+    name = "_kotlinc_options",
+    jvm_target = "{jvm_target}",
 )
 {synthesized_manifest}{compile_only_target}
 kt_android_library(
     name = "lib",
     srcs = {srcs} + [":_build_config"],
-{custom_package}{manifest}{resource_files}{proguard_specs}{runtime_deps}    visibility = ["//visibility:public"],
+{custom_package}    kotlinc_opts = ":_kotlinc_options",
+{manifest}{resource_files}{proguard_specs}{runtime_deps}    visibility = ["//visibility:public"],
     deps = {deps},
 )
 """.format(
+        jvm_target = kotlinc_jvm_target(jvm_level),
         srcs = srcs_attr,
         custom_package = custom_package_arg,
         manifest = manifest_arg,
@@ -1801,6 +2198,7 @@ kt_android_library(
         compile_only_target = compile_only_target,
         runtime_deps = runtime_deps_arg,
         bc_package = bc_package,
+        build_config_fields = "\n    fields = %s," % repr(build_config_fields) if build_config_fields else "",
         synthesized_manifest = synthesized_manifest,
         write_file_load = write_file_load,
     )
@@ -1988,6 +2386,31 @@ def apply_overlay_substitutions(content, package_name, version, language_version
         deps,
     )
 
+def overlay_version_folders(version):
+    """The overlay folders to try for a pub version, most specific first.
+
+    Args:
+      version: the pub version, e.g. `0.8.13+13` or `2.4.0-beta.1`.
+
+    Returns:
+      The version itself, `<major>.<minor>`, `<major>`, then `""` for the
+      bare folder, each present only when the version has that many parts.
+      A `+build` suffix is ignored: `0.8.13+13` tries `0.8.13/` first. A
+      pre-release is not its release, so `2.4.0-beta.1` tries
+      `2.4.0-beta.1/` and then `2.4/`, never `2.4.0/`.
+    """
+    release = version.split("+")[0]
+    parts = release.split("-")[0].split(".")
+    candidates = []
+    if len(parts) >= 3:
+        candidates.append(release)
+    if len(parts) >= 2:
+        candidates.append("{}.{}".format(parts[0], parts[1]))
+    if len(parts) >= 1:
+        candidates.append(parts[0])
+    candidates.append("")
+    return candidates
+
 def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, language_version, dep_labels, relpath, guard_hub_deps = False, license_file = ""):
     """Look up an overlay template at `<root>/<package>/<version-ladder>/<relpath>`.
 
@@ -2029,16 +2452,7 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
     if not pkg_dir.exists:
         return ""
 
-    # Build the version ladder.
-    parts = version.split(".")
-    candidates = []
-    if len(parts) >= 3:
-        candidates.append("{}.{}.{}".format(parts[0], parts[1], parts[2]))
-    if len(parts) >= 2:
-        candidates.append("{}.{}".format(parts[0], parts[1]))
-    if len(parts) >= 1:
-        candidates.append(parts[0])
-    candidates.append("")  # bare <pkg>/<relpath>
+    candidates = overlay_version_folders(version)
 
     relpath_parts = relpath.split("/")
     for candidate in candidates:
@@ -2125,42 +2539,41 @@ def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_ve
         license_file = license_file,
     )
 
-def fetch_flutter_source_package(ctx, package_name, flutter_version, sha256, packages):
-    """Extracts `packages/<package_name>` of the pinned Flutter source at the repository root.
+def _linked_repo_metadata(ctx):
+    # Never reproducible: the package's files are links, into this output
+    # base's files repository or to a directory outside Bazel's control (a
+    # `path` package, a framework source). A cached copy would link into
+    # another output base, or miss a change to the directory.
+    return ctx.repo_metadata(reproducible = False)
 
-    The tarball is the one every consumer of the framework source fetches,
-    pinned to the same digest, so Bazel's repository cache serves it to all
-    of them from one download. Only the one package is extracted, straight to
-    the root. Extracting a prefix the archive lacks fails with a message about
-    archive prefixes that names neither the package nor the lock, and a
-    failed extraction cannot be caught, so the package is first looked up in
-    `packages`, the release's own list of them.
+def _link_package_files(ctx):
+    """Links the package's files, held by the repository `files` names, into this one.
 
-    Args:
-        ctx: The `repository_ctx`.
-        package_name: The package under `packages/` of the Flutter source.
-        flutter_version: The Flutter version whose source tarball to fetch.
-        sha256: The recorded digest of that tarball.
-        packages: The packages under `packages/` of that source
-            (`flutter_sdk_packages`).
+    `android/` is a directory of this repository with its entries linked,
+    because the repository writes its `android/BUILD.bazel` there. A `BUILD`
+    file the package ships in `android/` is not linked, for the same reason.
+
+    Returns:
+        The load statement the repository's BUILD file begins with, which
+        makes Bazel set up the files repository before the links are read
+        through: a vendored repository is never fetched again.
     """
-    if not packages:
+    if not ctx.attr.files:
         fail((
-            "flutter_pub_package `{name}` has `flutter_source_version` {version} " +
-            "but no `flutter_source_packages`, so it cannot tell whether the " +
-            "source has packages/{name}."
-        ).format(name = package_name, version = flutter_version))
-    if package_name not in packages:
-        fail((
-            "pubspec.lock lists `{name}` from the Flutter SDK, but Flutter {version}'s " +
-            "source has no packages/{name}; re-resolve the lock with the pinned " +
-            "toolchain (`bazel run @rules_flutter//flutter/pub -- get`)."
-        ).format(name = package_name, version = flutter_version))
-    ctx.download_and_extract(
-        url = flutter_source_tarball_url(flutter_version),
-        sha256 = pinned(flutter_version + ".tar.gz", sha256),
-        stripPrefix = "flutter-{}/packages/{}".format(flutter_version, package_name),
-    )
+            "package {name} (@{repo}) has no files: it is given no repository of them (`files`), " +
+            "and is neither a `path` package (`directory`) nor of a framework source (`framework_json`). " +
+            "A Flutter SDK package's files are its SDK's: `packages/{name}` of its Flutter release, " +
+            "or of its framework."
+        ).format(name = ctx.attr.package_name, repo = ctx.name))
+    prelude = link_pub_files(ctx, ctx.attr.files, written = _WRITTEN)
+    android = ctx.path(ctx.attr.files).dirname.get_child("android")
+    if android.is_dir:
+        # Unwatched: `files_identity` names what the files repository holds,
+        # so new files there remake this repository through its definition.
+        for entry in android.readdir(watch = "no"):
+            if entry.basename not in ("BUILD", "BUILD.bazel"):
+                ctx.symlink(entry, "android/" + entry.basename)
+    return prelude
 
 # What of a package's directory its build reads besides `pubspec.yaml`, its
 # `android/` and what its pubspec lists: pub's (rules_dart links the same) and
@@ -2172,23 +2585,35 @@ def _is_tool_output(name):
     """Whether a name under `android/` is Gradle's or an IDE's, not the package's."""
     return name.startswith(".") or name in ("build", "local.properties")
 
-def _local_package_entries(ctx, directory):
+def _local_package_entries(ctx, directory, problems):
     """What of a local package's directory its build reads, besides its pubspec.
 
     The pubspec, already linked, says which directories its assets, fonts,
     shaders and licenses are in. `android/` is a real directory of the
     repository with its entries linked, because the repository writes its
     `android/BUILD.bazel` there; its listing is watched, so an added entry
-    fetches the repository again.
+    fetches the repository again. A directory the repository cannot link in
+    is added to `problems`, and left out.
     """
-    pubspec = read_pubspec(ctx, ctx.attr.package_name, ctx.attr.version)
-    assets = flutter_assets_block(pubspec.fields)
-    listed = [a.path for a in assets.assets] + [s.path for s in assets.shaders]
-    listed += [font.asset for family in assets.fonts for font in family.fonts]
-    listed += flutter_licenses_block(pubspec.fields)
+    listed = []
+    read = read_pubspec(ctx, ctx.attr.package_name, ctx.attr.version)
+
+    # A pubspec pub refuses lists nothing: the repository says why the package
+    # cannot be built (`_flutter_pub_package_impl`).
+    if not read.error:
+        assets = flutter_assets_block(read.pubspec.fields)
+        listed += [a.path for a in assets.assets] + [s.path for s in assets.shaders]
+        listed += [font.asset for family in assets.fonts for font in family.fonts]
+        listed += flutter_licenses_block(read.pubspec.fields)
     entries = {e: True for e in _LOCAL_PACKAGE_ENTRIES}
     for path in listed:
         top = path.replace("\\", "/").split("/")[0]
+
+        # `android/` is linked a level down, below the directory written here.
+        if top != "android" and top in NEVER_LINKED + _WRITTEN:
+            problems.append(("package {}: its pubspec lists {}, but rules_flutter's repository for the package " +
+                             "writes its own {} there, so it cannot link the package's in.").format(ctx.attr.package_name, repr(path), repr(top)))
+            continue
         if top and top not in (".", "..", "android", "pubspec.yaml"):
             entries[top] = True
     android = ctx.path(directory).get_child("android")
@@ -2198,7 +2623,7 @@ def _local_package_entries(ctx, directory):
                 entries["android/" + child.basename] = True
     return entries.keys()
 
-def fetch_local_package(ctx, directory):
+def fetch_local_package(ctx, directory, problems):
     """Links a `path` package's directory as the repository's package source.
 
     The pubspec first, which says what else of the directory the package
@@ -2206,105 +2631,177 @@ def fetch_local_package(ctx, directory):
 
     Args:
         ctx: The `repository_ctx`.
-        directory: The package's directory, absolute.
+        directory: The package's directory, a `path`.
+        problems: What keeps the package from being built, added to.
+
+    Returns:
+        None, or why the directory cannot serve the package at all: it is not
+        there, has no pubspec or has a Bazel build of its own. Nothing past
+        the pubspec is linked then.
     """
-    fetch_pub_path(ctx, directory, ["pubspec.yaml"])
-    fetch_pub_path(ctx, directory, _local_package_entries(ctx, directory))
+    refusal = link_pub_path(ctx, directory, ["pubspec.yaml"])
+    if not refusal and not ctx.path("pubspec.yaml").exists:
+        # A directory an uninitialized submodule left, say: nothing to build from.
+        refusal = (
+            "{} has no pubspec.yaml. The lock lists the package by path; check it out there, " +
+            "or name it in `resolve` or `ignored` instead."
+        ).format(directory)
+    if not refusal:
+        refusal = link_pub_path(ctx, directory, _local_package_entries(ctx, directory, problems))
+    return "package {}: {}".format(ctx.attr.package_name, refusal) if refusal else None
+
+def package_fetched(ctx, fetched):
+    """What the package is: its version, and its source.
+
+    What rules_dart's `pub` states for the same lock entry, so a program
+    reaching both fetchers' copies of one package takes them for one. A hosted
+    or git package's version and source are what its files repository records
+    it fetched (`pub_files_fetched`), never facts passed beside it, which could
+    describe bytes never fetched. A path package's source is the directory it
+    is built from, named by its lock and the lock's path to it
+    (`pub_lock_path_source`). A Flutter SDK package, whose files repository records
+    nothing, and a package of a framework source have none: rules_dart's `pub`
+    never fetches one, so no second copy has to match.
+
+    Args:
+        ctx: A `flutter_pub_package`'s `repository_ctx`.
+        fetched: What its files repository records it fetched, as
+            `pub_files_fetched` returns it, or None.
+
+    Returns:
+        `struct(version, source)`: the source as `pub_package_identity` takes
+        it, None for a package with none. A path package's is rules_dart's
+        `pub_lock_path_source`: its directory by its repository, or, outside
+        any, where it is on this machine.
+    """
+    attr = ctx.attr
+    if fetched == None:
+        if attr.lock == None:
+            return struct(version = attr.version, source = None)
+        return struct(version = attr.version, source = pub_lock_path_source(ctx, attr.lock, attr.path))
+    if fetched.package_name != attr.package_name:
+        fail("package {}: its files repository fetched package {} {}.".format(attr.package_name, fetched.package_name, fetched.version))
+    if attr.files_identity != fetched.source.purl:
+        fail("package {}: `files_identity` is \"{}\", and its files repository fetched {}.".format(attr.package_name, attr.files_identity, fetched.source.purl))
+    if attr.version:
+        fail("package {}: `version` is set, and a hosted or git package's version is the one its files repository fetched ({}).".format(attr.package_name, fetched.version))
+    return struct(version = fetched.version, source = fetched.source)
+
+def write_android_build(ctx, prelude, content):
+    """Write the `android/BUILD.bazel` of a plugin: `content` after the load of the files repository.
+
+    Its globs read through the same links as the root BUILD file's, so a
+    vendored repository, never fetched again, needs the same load first.
+    """
+    ctx.file("android/BUILD.bazel", prelude + content)
+
+def _write_unbuildable(ctx, identity, version, pubspec_dependencies, message):
+    """Writes the source repository of a package whose own content rules_flutter cannot build.
+
+    Its target fails at analysis with `message` when a build uses it. The
+    package keeps its place in the libraries' plan: its pubspec's
+    dependencies are recorded, and it is a member like any other, so a
+    dependency cycle it is in is planned as it would be.
+    """
+    ctx.file("BUILD.bazel", identity.loads + FAILING_TARGETS_LOAD + failing_targets([ctx.attr.package_name], message) + identity.target)
+    ctx.file(MEMBER_FILE, json.encode({"kind": MEMBER_DART, "material_icons": False, "android_lib": False}))
+    write_pubspec_dependencies(ctx, pubspec_dependencies)
+    _write_maven_deps(ctx, version, [], [], "")
+    return _linked_repo_metadata(ctx)
+
+def _write_stub(ctx, message):
+    """Writes the source repository of a Flutter SDK package its SDK cannot supply.
+
+    Its target fails at analysis with `message` when a build uses it, and
+    the records every source repository has are empty: no dependencies, and
+    no Maven dependencies for the Android data of the build, which reads every
+    package's. Its library is that target, whatever cycle it is in.
+    """
+    write_failing_build(ctx, [ctx.attr.package_name], message)
+    ctx.file(MEMBER_FILE, json.encode({"kind": MEMBER_STUB, "material_icons": False, "android_lib": False}))
+    write_pubspec_dependencies(ctx, [])
+    _write_maven_deps(ctx, ctx.attr.version, [], [], "")
 
 def _flutter_pub_package_impl(ctx):
-    # What the package is and where it came from, for SBOM tools: that of a
-    # hosted or git package, as rules_dart's pub repositories state theirs.
-    # A Flutter SDK package (built from the Flutter source, or linked from a
-    # framework source) and a path package are the user's own, and state
-    # their own, as rules_dart's path packages do.
-    purl = ""
-    if ctx.attr.framework_json:
-        unset = unset_message(ctx)
-        if unset:
-            write_unset_stub(ctx, [ctx.attr.package_name], unset, member = True)
-            return ctx.repo_metadata(reproducible = True)
-        link_framework_package(ctx, ctx.attr.package_name)
-    elif ctx.attr.flutter_source_version:
-        fetch_flutter_source_package(
-            ctx,
-            package_name = ctx.attr.package_name,
-            flutter_version = ctx.attr.flutter_source_version,
-            sha256 = ctx.attr.sha256,
-            packages = ctx.attr.flutter_source_packages,
-        )
-    elif ctx.attr.directory:
-        fetch_local_package(ctx, ctx.attr.directory)
-    elif ctx.attr.git_url:
-        # The lock's commit, laid out as pub lays it out, whichever rule asks.
-        fetch_pub_git(
-            ctx,
-            package_name = ctx.attr.package_name,
-            version = ctx.attr.version,
-            url = ctx.attr.git_url,
-            resolved_ref = ctx.attr.resolved_ref,
-            path = ctx.attr.git_path,
-            lock = ctx.attr.lock,
-        )
-        purl = pub_git_purl(
-            ctx.attr.package_name,
-            ctx.attr.version,
-            ctx.attr.git_url,
-            ctx.attr.resolved_ref,
-            ctx.attr.git_path,
-        )
-    else:
-        # Downloads, verifies and extracts the archive the way every pub-backed
-        # repository does, so a package is laid out the same whichever rule asks.
-        fetch_pub_archive(
-            ctx,
-            package_name = ctx.attr.package_name,
-            version = ctx.attr.version,
-            sha256 = ctx.attr.sha256,
-            base_url = ctx.attr.base_url,
-        )
-        purl = pub_hosted_purl(
-            ctx.attr.package_name,
-            ctx.attr.version,
-            ctx.attr.sha256,
-            ctx.attr.base_url,
-        )
-    identity = pub_package_identity(purl)
-    if purl:
-        ctx.file("REPO.bazel", identity.repo_file)
+    build_prelude = ""
+    fetched = None
+    refusal = None
 
-    # Pub's own reading of the pubspec: a package pub would refuse (malformed
-    # YAML, a `name` that is not this package's, a dependency or constraint of
-    # the wrong type) fails the fetch, naming the package.
-    pubspec = read_pubspec(ctx, ctx.attr.package_name, ctx.attr.version)
+    # What of the package's own content keeps it from being built: its
+    # target fails with the first, when a build uses it, and the repository
+    # still fetches (`bazel fetch --all`), as the package may be one no
+    # target uses.
+    problems = []
+    if ctx.attr.unusable:
+        _write_stub(ctx, ctx.attr.unusable)
+        return ctx.repo_metadata(reproducible = True)
     if ctx.attr.framework_json:
-        # What a Flutter SDK package of a framework other than the release
-        # needs of the hosted packages must be what the locks hold. (A
-        # release's are not held to it here: its pins are checked when the
-        # module is read.)
-        check_dependency_constraints(read_index(ctx, ctx.attr.prefix), ctx.attr.sdk, ctx.attr.package_name, pubspec.fields)
+        unusable = unusable_message(ctx) or link_framework_package(ctx, ctx.attr.package_name, written = _WRITTEN)
+        if unusable:
+            _write_stub(ctx, unusable)
+            return _linked_repo_metadata(ctx)
+    elif ctx.attr.lock:
+        # The directory the lock names, wherever it is, found as pub finds it.
+        refusal = fetch_local_package(ctx, pub_lock_path_directory(ctx, ctx.attr.lock, ctx.attr.path), problems)
+    else:
+        # A hosted, git or Flutter SDK package: its files are another
+        # repository's, linked in.
+        if not ctx.attr.files_identity:
+            fail("package {}: `files` is set without `files_identity`, which names those files in this repository's definition.".format(ctx.attr.package_name))
+        build_prelude = _link_package_files(ctx)
+        fetched = pub_files_fetched(ctx, ctx.attr.files)
+    package = package_fetched(ctx, fetched)
+    version = package.version
+    identity = pub_package_identity(package.source)
+    if identity.repo_file:
+        ctx.file("REPO.bazel", identity.repo_file)
+    if refusal:
+        return _write_unbuildable(ctx, identity, version, [], refusal)
+
+    # Pub's own reading of the pubspec. A package pub would refuse (malformed
+    # YAML, a `name` that is not this package's, a dependency or constraint of
+    # the wrong type) still fetches, as the package may be one no target uses:
+    # its target fails at analysis with pub's words, naming the package. Its
+    # dependencies are unknown, so it has none.
+    #
+    # What a Flutter SDK package needs of the hosted packages must be what the
+    # build uses, so the reader compares its constraints with their versions.
+    sdk_index = read_index(ctx, ctx.attr.prefix) if ctx.attr.sdks else None
+    read = read_pubspec(ctx, ctx.attr.package_name, version, locked_versions = locked_versions(sdk_index) if sdk_index else None)
+    if read.error:
+        return _write_unbuildable(ctx, identity, version, [], read.error)
+    pubspec = read.pubspec
+    if sdk_index:
+        # A package that does not fit fails only a build of its SDK, when
+        # something uses it: every SDK's packages still fetch.
+        misfit = dependency_constraint_message(sdk_index, ctx.attr.sdks, ctx.attr.package_name, pubspec.unsatisfied)
+        if misfit:
+            problems.append(misfit)
     pubspec_dependencies = pubspec.dependencies
     language_version = pubspec.language_version
-    plugin_block = flutter_plugin_block(pubspec.fields)
+    if problems:
+        return _write_unbuildable(ctx, identity, version, pubspec_dependencies, problems[0])
+    plugin_block = flutter_plugin_block(pubspec.fields, pubspec.flutter_minimum)
     manifest_errors = flutter_manifest_errors(pubspec.fields)
     if manifest_errors:
-        fail((
+        return _write_unbuildable(ctx, identity, version, pubspec_dependencies, (
             "package {}: its pubspec.yaml has `flutter:` fonts, assets or shaders that `flutter build` refuses:\n  {}"
         ).format(ctx.attr.package_name, "\n  ".join(manifest_errors)))
     asset_block = flutter_assets_block(pubspec.fields)
-    license_file = find_pub_license_file(ctx)
-    additional_licenses = _build_additional_licenses(ctx, ctx.attr.package_name, flutter_licenses_block(pubspec.fields))
     for asset in asset_block.assets:
         if asset.transformers:
-            fail((
+            return _write_unbuildable(ctx, identity, version, pubspec_dependencies, (
                 "package {}: its asset {} lists `transformers`, which rules_flutter does not run. " +
                 "Bundling the file as it is would ship it untransformed under the transformed file's name."
             ).format(ctx.attr.package_name, repr(asset.path)))
     for shader in asset_block.shaders:
         if shader.transformers:
-            fail((
+            return _write_unbuildable(ctx, identity, version, pubspec_dependencies, (
                 "package {}: its shader {} lists `transformers`, which rules_flutter does not run. " +
                 "Compiling the source as it is would ship a shader `flutter build` does not."
             ).format(ctx.attr.package_name, repr(shader.path)))
+    license_file = find_pub_license_file(ctx)
+    additional_licenses = _build_additional_licenses(ctx, ctx.attr.package_name, flutter_licenses_block(pubspec.fields), problems)
 
     # The names the pubspec depends on, for the libraries of the packages that
     # reach this one. Which of them the lock lists, and what that makes of
@@ -2333,10 +2830,13 @@ def _flutter_pub_package_impl(ctx):
 
     # Pre-compute the pub-asset attr inputs once. Used by either branch
     # below (plugin vs library).
-    font_families = _font_families(ctx, asset_block.fonts)
+    font_families = _font_families(ctx, asset_block.fonts, problems)
     flavors = flavor_restrictions(ctx.attr.package_name)
-    bundled_assets = _build_assets(ctx, ctx.attr.package_name, asset_block.assets, flavors)
-    bundled_shaders = _build_shaders(ctx, ctx.attr.package_name, asset_block.shaders, flavors)
+    bundle_paths = _bundle_paths()
+    bundled_assets = _build_assets(ctx, ctx.attr.package_name, asset_block.assets, flavors, bundle_paths, problems)
+    bundled_shaders = _build_shaders(ctx, ctx.attr.package_name, asset_block.shaders, flavors, bundle_paths, problems)
+    if problems:
+        return _write_unbuildable(ctx, identity, version, pubspec_dependencies, problems[0])
     flavored = flavors.flavors()
     asset_flavors = {p: f for p, f in flavored.items() if ":" + p in bundled_assets.labels}
     shader_flavors = {p: f for p, f in flavored.items() if ":" + p in bundled_shaders.labels}
@@ -2360,7 +2860,7 @@ def _flutter_pub_package_impl(ctx):
             ctx,
             overlay_label,
             ctx.attr.package_name,
-            ctx.attr.version,
+            version,
             language_version,
             dep_labels,
             license_file,
@@ -2374,13 +2874,19 @@ def _flutter_pub_package_impl(ctx):
                 ctx,
                 overlay_label,
                 ctx.attr.package_name,
-                ctx.attr.version,
+                version,
                 language_version,
                 dep_labels,
                 "android/BUILD.bazel.tpl",
             )
             break
 
+    if overlay_content and ctx.attr.build_config_fields:
+        fail((
+            "flutter_pub.annotation(package = \"{pkg}\", build_config_fields = ...) gives " +
+            "fields of the BuildConfig rules_flutter generates, and the plugin overlay of " +
+            "{pkg} supplies its own targets. Remove the annotation."
+        ).format(pkg = ctx.attr.package_name))
     if overlay_content and ctx.attr.android_deps:
         fail((
             "flutter_pub.annotation(package = \"{pkg}\") adds Android dependencies to the " +
@@ -2391,7 +2897,7 @@ def _flutter_pub_package_impl(ctx):
     if overlay_content:
         # The overlay is the whole of the BUILD file, which the package's
         # identity joins, as it joins a generated one.
-        ctx.file("BUILD.bazel", identity.loads + overlay_content + identity.target)
+        ctx.file("BUILD.bazel", build_prelude + identity.loads + overlay_content + identity.target)
         ctx.file(MEMBER_FILE, json.encode({"kind": MEMBER_OVERLAY, "material_icons": False, "android_lib": False}))
 
         # When the overlay ships an `android/BUILD.bazel.tpl`, use it
@@ -2404,15 +2910,17 @@ def _flutter_pub_package_impl(ctx):
         # and its `maven_artifacts` block. Lines the parser cannot read are
         # what the overlay replaces, so they are not reported.
         overlay_maven_deps = []
+        overlay_boms = []
         overlay_script = ""
         if overlay_android_content:
             overlay_parsed = _read_plugin_maven_deps(ctx)
             overlay_maven_deps = _maven_dep_dicts(overlay_parsed)
+            overlay_boms = _bom_dicts(overlay_parsed)
             overlay_script = overlay_parsed.script
-        _write_maven_deps(ctx, overlay_maven_deps, [], overlay_script)
+        _write_maven_deps(ctx, version, overlay_maven_deps, [], overlay_script, boms = overlay_boms)
         if overlay_android_content:
-            ctx.file("android/BUILD.bazel", overlay_android_content)
-        return ctx.repo_metadata(reproducible = not ctx.attr.directory)
+            write_android_build(ctx, build_prelude, overlay_android_content)
+        return _linked_repo_metadata(ctx)
 
     if plugin_block.present:
         macos_info = plugin_block.platforms.get("macos", {})
@@ -2426,7 +2934,7 @@ def _flutter_pub_package_impl(ctx):
         # A platform whose library the plugin's own build makes by means
         # rules_flutter does not run gets a stand-in for its library that
         # fails that platform's build; its sources are not compiled.
-        unbuilt_native_code = _detect_unbuilt_native_code(ctx, plugin_block)
+        unbuilt_native_code = _detect_unbuilt_native_code(ctx, version, plugin_block, pubspec_dependencies)
 
         # Each Apple platform with a plugin class has a library in the
         # plugin's Apple repository, built from its Package.swift or, without
@@ -2478,6 +2986,7 @@ def _flutter_pub_package_impl(ctx):
         android_consumer_proguard_specs = []
         android_has_resources = False
         android_native_build = unbuilt_native_code.get("android", "")
+        android_unbuildable = ""
         if android_info and android_info.get("pluginClass", "") and not android_native_build:
             android_src_dir = _detect_android_source_dir(ctx)
             android_has_resources = _detect_android_resources(ctx)
@@ -2487,30 +2996,41 @@ def _flutter_pub_package_impl(ctx):
             # `package` field locates the plugin class for the registrant;
             # it only stands in for the namespace when the plugin declares
             # none of its own.
-            android_java_package = _checked_java_package(
-                ctx.attr.package_name,
-                "android/build.gradle(.kts), android/src/main/AndroidManifest.xml or pubspec.yaml",
-                (
-                    _detect_android_namespace(ctx) or
-                    android_info.get("package", "") or
-                    ""
-                ),
+            android_java_package = (
+                _detect_android_namespace(ctx) or
+                android_info.get("package", "") or
+                ""
             )
             if android_src_dir or android_has_resources:
+                # What keeps the library from being generated fails the
+                # plugin's Android build, and no other platform's.
+                android_unbuildable = _java_package_message(
+                    ctx.attr.package_name,
+                    "android/build.gradle(.kts), android/src/main/AndroidManifest.xml or pubspec.yaml",
+                    android_java_package,
+                )
+                if android_has_resources and not android_java_package:
+                    android_unbuildable = NO_NAMESPACE_MESSAGE
+            if (android_src_dir or android_has_resources) and not android_unbuildable:
                 android_gradle_maven = _read_plugin_maven_deps(ctx)
                 android_manifest = _detect_android_manifest(ctx)
-                android_consumer_proguard_specs = _detect_consumer_proguard_specs(ctx)
+                proguard_problems = []
+                android_consumer_proguard_specs = _detect_consumer_proguard_specs(ctx, proguard_problems)
+                if proguard_problems:
+                    android_unbuildable = proguard_problems[0]
+                    android_gradle_maven = None
 
         build_content = make_flutter_member_build_content(
             name = ctx.attr.package_name,
             language_version = language_version,
-            version = ctx.attr.version,
+            version = version,
             license_file = license_file,
-            purl = purl,
+            source = package.source,
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
             link_hook = hooks.link_hook,
             plugin_platforms = plugin_block.platforms,
+            implements = plugin_block.implements,
             apple_libs = {
                 platform: apple_library_label(ctx.attr.package_name, platform, ctx.attr.prefix)
                 for platform in apple_layouts
@@ -2523,11 +3043,12 @@ def _flutter_pub_package_impl(ctx):
             assets = bundled_assets.labels,
             asset_platforms = bundled_assets.platforms,
             shaders = bundled_shaders.labels,
+            bundle_paths = bundle_paths.paths(),
+            other_package_files = bundle_paths.borrowed(),
             shader_platforms = bundled_shaders.platforms,
             additional_licenses = additional_licenses,
             asset_flavors = asset_flavors,
             shader_flavors = shader_flavors,
-            bundle_paths = bundled_assets.bundle_paths | bundled_shaders.bundle_paths,
             linux_link = linux_link,
             windows_link = windows_link,
             has_android_lib = bool(android_src_dir or android_has_resources or android_native_build),
@@ -2547,9 +3068,9 @@ def _flutter_pub_package_impl(ctx):
         build_content = make_flutter_member_build_content(
             name = ctx.attr.package_name,
             language_version = language_version,
-            version = ctx.attr.version,
+            version = version,
             license_file = license_file,
-            purl = purl,
+            source = package.source,
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
             link_hook = hooks.link_hook,
@@ -2557,11 +3078,12 @@ def _flutter_pub_package_impl(ctx):
             assets = bundled_assets.labels,
             asset_platforms = bundled_assets.platforms,
             shaders = bundled_shaders.labels,
+            bundle_paths = bundle_paths.paths(),
+            other_package_files = bundle_paths.borrowed(),
             shader_platforms = bundled_shaders.platforms,
             additional_licenses = additional_licenses,
             asset_flavors = asset_flavors,
             shader_flavors = shader_flavors,
-            bundle_paths = bundled_assets.bundle_paths | bundled_shaders.bundle_paths,
         )
         android_src_dir = ""
         android_java_package = ""
@@ -2570,6 +3092,7 @@ def _flutter_pub_package_impl(ctx):
         android_consumer_proguard_specs = []
         android_has_resources = False
         android_native_build = ""
+        android_unbuildable = ""
     else:
         build_content = make_dart_member_build_content(
             name = ctx.attr.package_name,
@@ -2577,9 +3100,9 @@ def _flutter_pub_package_impl(ctx):
             code_assets = ctx.attr.code_assets,
             unreplaced_hook = unreplaced_hook,
             link_hook = hooks.link_hook,
-            version = ctx.attr.version,
+            version = version,
             license_file = license_file,
-            purl = purl,
+            source = package.source,
         )
         android_src_dir = ""
         android_java_package = ""
@@ -2588,8 +3111,9 @@ def _flutter_pub_package_impl(ctx):
         android_consumer_proguard_specs = []
         android_has_resources = False
         android_native_build = ""
+        android_unbuildable = ""
 
-    ctx.file("BUILD.bazel", build_content)
+    ctx.file("BUILD.bazel", build_prelude + build_content)
     is_flutter_member = plugin_block.present or has_asset_contributions or uses_material_icons or bool(additional_licenses)
     ctx.file(MEMBER_FILE, json.encode({
         "kind": MEMBER_FLUTTER if is_flutter_member else MEMBER_DART,
@@ -2608,134 +3132,176 @@ def _flutter_pub_package_impl(ctx):
     # reported here: the library is written as for the ones it read, and the
     # application that links the plugin warns, naming each line
     # (`flutter_android_plugin_libs`).
-    if ctx.attr.android_deps and not (android_src_dir or android_has_resources):
+    annotated_fields = [
+        field
+        for field, given in [("android_deps", ctx.attr.android_deps), ("build_config_fields", ctx.attr.build_config_fields)]
+        if given
+    ]
+    if annotated_fields and not (android_src_dir or android_has_resources):
         fail((
-            "flutter_pub.annotation(package = \"{pkg}\", android_deps = ...) needs a Flutter " +
+            "flutter_pub.annotation(package = \"{pkg}\", {field} = ...) needs a Flutter " +
             "plugin with Android sources or resources whose Android library rules_flutter " +
             "generates, and {pkg} {why}. Remove the annotation."
         ).format(
             pkg = ctx.attr.package_name,
+            field = annotated_fields[0],
             why = ("has an Android library its own Gradle build makes, which rules_flutter cannot translate" if android_native_build else "is not one"),
         ))
     maven_deps = []
+    maven_boms = []
     maven_unread = []
     maven_script = ""
     if android_gradle_maven and not android_native_build:
         maven_deps = _maven_dep_dicts(android_gradle_maven)
+        maven_boms = _bom_dicts(android_gradle_maven)
         maven_unread = _unread_dicts(android_gradle_maven)
         maven_script = android_gradle_maven.script
-    if android_native_build:
-        ctx.file("android/BUILD.bazel", make_android_native_build_content(android_native_build))
+    if android_native_build or android_unbuildable:
+        write_android_build(ctx, build_prelude, make_android_failing_build_content(android_native_build or android_unbuildable))
     elif android_src_dir or android_has_resources:
-        ctx.file("android/BUILD.bazel", make_android_subpackage_build_content(
-            android_src_dir = android_src_dir,
-            java_package = android_java_package,
-            maven_deps = maven_deps,
-            annotated_deps = list(ctx.attr.android_deps),
-            android_manifest = android_manifest,
-            consumer_proguard_specs = android_consumer_proguard_specs,
-            has_resources = android_has_resources,
-        ))
-    _write_maven_deps(ctx, maven_deps, maven_unread, maven_script, list(ctx.attr.android_deps))
-    return ctx.repo_metadata(reproducible = not ctx.attr.directory)
+        # A level the reader cannot read fails the plugin's Android build, as
+        # an unbuilt native library does, rather than compiling at a guess.
+        android_jvm = _read_plugin_jvm_level(ctx)
+        version = pubspec.fields.get("version")
+        build_config = _read_plugin_build_config_fields(ctx, str(version) if version != None else None)
+        plugin_libs = _plugin_project_libraries(
+            ctx,
+            android_gradle_maven.projects if android_gradle_maven else [],
+            pubspec_dependencies,
+        )
+        if android_jvm.error:
+            write_android_build(ctx, build_prelude, make_android_failing_build_content(android_jvm.error))
+        elif plugin_libs.error:
+            write_android_build(ctx, build_prelude, make_android_failing_build_content(plugin_libs.error))
+        elif build_config.unknown:
+            write_android_build(ctx, build_prelude, make_android_failing_build_content(
+                unknown_build_config_message(ctx.attr.package_name, build_config.unknown),
+            ))
+        elif build_config.unread:
+            write_android_build(ctx, build_prelude, make_android_failing_build_content(
+                unread_build_config_message(ctx.attr.package_name, build_config.unread),
+            ))
+        else:
+            write_android_build(ctx, build_prelude, make_android_subpackage_build_content(
+                android_src_dir = android_src_dir,
+                java_package = android_java_package,
+                maven_deps = maven_deps,
+                annotated_deps = list(ctx.attr.android_deps),
+                plugin_deps = plugin_libs.labels,
+                android_manifest = android_manifest,
+                consumer_proguard_specs = android_consumer_proguard_specs,
+                has_resources = android_has_resources,
+                jvm_level = android_jvm.level,
+                build_config_fields = build_config.fields,
+            ))
+    _write_maven_deps(ctx, version, maven_deps, maven_unread, maven_script, list(ctx.attr.android_deps), maven_boms)
+    return _linked_repo_metadata(ctx)
+
+_ATTRS = {
+    "package_name": attr.string(
+        doc = "The pub.dev package name, or the name of the Flutter SDK package under `packages/` of the Flutter source.",
+        mandatory = True,
+    ),
+    "version": attr.string(
+        doc = "A path package's version, as pubspec.lock records it, or a Flutter SDK package's (`0.0.0`). " +
+              "Unset for a hosted or git package, whose version is the one its `files` repository fetched.",
+    ),
+    "files": attr.label(
+        doc = "The repository holding a hosted, git or Flutter SDK package's files, as rules_dart's " +
+              "`pub_files_label` names it: `pub_archive_files`, `pub_git_files` or `flutter_source_files`. " +
+              "What `pub_archive_files` or `pub_git_files` records it fetched is the package's version, " +
+              "source. Unused with `directory` or `framework_json`.",
+    ),
+    "files_identity": attr.string(
+        doc = "What the `files` repository holds, which this repository's definition must name: " +
+              "Bazel fetches a repository again when its definition changes, not when a repository " +
+              "it reads does, so without it a package moved to other files (another version, " +
+              "digest or commit) would keep the dependencies and build it stated for the old ones. " +
+              "For a hosted or git package, the purl of what its files repository is asked to fetch " +
+              "(rules_dart's `pub_hosted_purl`, `pub_git_purl`), which must be the purl of what that " +
+              "repository records it fetched; for a Flutter SDK package, the Flutter release and the " +
+              "digest of its source, as `flutter_sdk_files_identity` names them. Required with `files`.",
+    ),
+    "lock": attr.label(
+        doc = "A `path` package's lock (`flutter_pub_path_package` only). The package is linked from the " +
+              "directory `path` names from it. With `path`, it is what the package is built from, as rules_dart's " +
+              "`pub` states it for the same lock entry (`pub_lock_path_source`).",
+    ),
+    "path": attr.string(
+        doc = "A `path` package's `description.path` in `lock`: relative to the lock's directory, or absolute.",
+        default = "",
+    ),
+    "framework_json": attr.label(
+        doc = "The `flutter_framework.json` of a framework source holding this package as `packages/<package_name>`, " +
+              "for a Flutter SDK package of an SDK whose framework is not the release.",
+        allow_single_file = True,
+    ),
+    "unusable": attr.string(
+        doc = "Why the package cannot be built, for a Flutter SDK package its SDK does not have: " +
+              "the package's target then fails with it when something uses it.",
+    ),
+    "sdks": attr.string_list(
+        doc = "For a Flutter SDK package, the SDKs whose framework it is from, whose " +
+              "needs of the locked packages it checks; empty for any other package.",
+    ),
+    "prefix": attr.string(
+        doc = "The prefix of the index the package is planned against: the build's, or another SDK framework's.",
+        default = "flutter_pub",
+    ),
+    "code_assets": attr.string_list(
+        doc = "Labels of `dart_code_asset` targets standing in for this " +
+              "package's build hook. Resolved by the extension from " +
+              "rules_dart's curated registry, so a user depending on, say, " +
+              "`drift` never names `sqlite3`. Attached to the generated " +
+              "package target rather than to the application, which is what " +
+              "makes them propagate the way pub's own assets do.",
+        default = [],
+    ),
+    "android_deps": attr.string_list(
+        doc = "Labels of `@rules_flutter_maven` artifacts to add to the " +
+              "package's Android library, from the root's " +
+              "`flutter_pub.annotation`. Written as the labels' canonical " +
+              "strings, so the repository stays fetchable by the root's name for it.",
+        default = [],
+    ),
+    "build_config_fields": attr.string_dict(
+        doc = "Values of the plugin's `buildConfigField`s, by field name, from the root's " +
+              "`flutter_pub.annotation`, each a Java expression. They replace what the reader reads.",
+        default = {},
+    ),
+    "ignore_hook": attr.bool(
+        doc = "Treat this package's build hook as irrelevant. Without it, a " +
+              "package shipping a hook that nothing replaces is recorded and " +
+              "the application that reaches it fails, rather than building " +
+              "cleanly and dying at runtime on an unresolved native symbol.",
+        default = False,
+    ),
+    "overlay_roots": attr.label_list(
+        doc = "BUILD.bazel anchors for overlay trees. Each label points at " +
+              "a `flutter/ext/BUILD.bazel` (or equivalent) that anchors a directory " +
+              "tree of `<package>/<version>/BUILD.bazel.tpl` overrides. The " +
+              "rule walks the roots in order and uses the first match. " +
+              "User-supplied roots come before the bundled " +
+              "`@rules_flutter//flutter/ext:BUILD.bazel`.",
+        allow_files = True,
+        default = [],
+    ),
+}
 
 flutter_pub_package = repository_rule(
     implementation = _flutter_pub_package_impl,
-    attrs = {
-        "package_name": attr.string(
-            doc = "The pub.dev package name, or the name of the Flutter SDK package under `packages/` of the Flutter source.",
-            mandatory = True,
-        ),
-        "version": attr.string(
-            doc = "The package version, as pubspec.lock records it (`0.0.0` for an SDK package). Downloaded when `flutter_source_version` is empty.",
-            mandatory = True,
-        ),
-        "sha256": attr.string(
-            doc = "SHA256 hash of the archive fetched: the package's, as pubspec.lock records it, or, with `flutter_source_version`, the Flutter source tarball's (`flutter_source_sha256`). Mandatory for both: nothing is downloaded without one. Unused for a git package.",
-            default = "",
-        ),
-        "git_url": attr.string(
-            doc = "A git package's repository: `description.url` in the lock. When set, the package is fetched from it at `resolved_ref` instead of downloaded.",
-            default = "",
-        ),
-        "resolved_ref": attr.string(
-            doc = "A git package's locked commit: `description.resolved-ref`, a full commit id.",
-            default = "",
-        ),
-        "git_path": attr.string(
-            doc = "A git package's directory in the repository: `description.path`.",
-            default = ".",
-        ),
-        "lock": attr.label(
-            doc = "The lock, against whose directory a relative `git_url` is resolved, as pub resolves it. Read only for a relative `git_url`.",
-            allow_single_file = True,
-        ),
-        "directory": attr.string(
-            doc = "A `path` package's directory, absolute: the lock's `description.path`, resolved against the lock's directory. " +
-                  "When set, the package is linked from it instead of downloaded.",
-            default = "",
-        ),
-        "base_url": attr.string(
-            doc = "Base URL for the pub repository. Ignored with `flutter_source_version`.",
-            default = "https://pub.dev",
-        ),
-        "framework_json": attr.label(
-            doc = "The `flutter_framework.json` of a framework source holding this package as `packages/<package_name>`, " +
-                  "for a Flutter SDK package of an SDK whose framework is not the release.",
-            allow_single_file = True,
-        ),
-        "sdk": attr.string(
-            doc = "For a Flutter SDK package, the SDK whose framework it is from, for messages.",
-            default = "flutter",
-        ),
-        "prefix": attr.string(
-            doc = "The prefix of the index the package is planned against: the build's, or another SDK framework's.",
-            default = "flutter_pub",
-        ),
-        "flutter_source_version": attr.string(
-            doc = "The Flutter version whose pinned source tarball holds this package as `packages/<package_name>`, for a Flutter SDK package " +
-                  "(`source: sdk` in the lock). When empty, the package is downloaded from a pub registry.",
-            default = "",
-        ),
-        "flutter_source_packages": attr.string_list(
-            doc = "With `flutter_source_version`, the packages under `packages/` of that Flutter version's source " +
-                  "(`flutter_sdk_packages`). A `package_name` not among them fails the fetch, before anything is " +
-                  "downloaded, saying to re-resolve the lock.",
-            default = [],
-        ),
-        "code_assets": attr.string_list(
-            doc = "Labels of `dart_code_asset` targets standing in for this " +
-                  "package's build hook. Resolved by the extension from " +
-                  "rules_dart's curated registry, so a user depending on, say, " +
-                  "`drift` never names `sqlite3`. Attached to the generated " +
-                  "package target rather than to the application, which is what " +
-                  "makes them propagate the way pub's own assets do.",
-            default = [],
-        ),
-        "android_deps": attr.string_list(
-            doc = "Labels of `@rules_flutter_maven` artifacts to add to the " +
-                  "package's Android library, from the root's " +
-                  "`flutter_pub.annotation`. Written as the labels' canonical " +
-                  "strings, so the repository stays fetchable by the root's name for it.",
-            default = [],
-        ),
-        "ignore_hook": attr.bool(
-            doc = "Treat this package's build hook as irrelevant. Without it, a " +
-                  "package shipping a hook that nothing replaces is recorded and " +
-                  "the application that reaches it fails, rather than building " +
-                  "cleanly and dying at runtime on an unresolved native symbol.",
-            default = False,
-        ),
-        "overlay_roots": attr.label_list(
-            doc = "BUILD.bazel anchors for overlay trees. Each label points at " +
-                  "a `flutter/ext/BUILD.bazel` (or equivalent) that anchors a directory " +
-                  "tree of `<package>/<version>/BUILD.bazel.tpl` overrides. The " +
-                  "rule walks the roots in order and uses the first match. " +
-                  "User-supplied roots come before the bundled " +
-                  "`@rules_flutter//flutter/ext:BUILD.bazel`.",
-            allow_files = True,
-            default = [],
-        ),
-    },
-    doc = "Fetches (or, for a `path` package, links) a single Flutter pub package, its source repository, and emits its member: a `flutter_pub_member` (a plugin when `flutter.plugin` is present, otherwise a package bundling fonts, assets or shaders) or rules_dart's `pub_package_member` (for a package with nothing of Flutter's). When Apple sources are detected, also emits per-platform `flutter_apple_plugin_library` sub-targets. Honors per-package overlay BUILD.bazel.tpl overrides under `overlay_roots`, which replace the member with a whole target. The package's library repository (`flutter_pub_library_repo`) builds the member with the others of its dependency cycle. The `flutter pub get` analog of `pub_lock_package`.",
+    attrs = _ATTRS,
+    doc = "Links in a single Flutter pub package's files, its source repository, and emits its member: a `flutter_pub_member` (a plugin when `flutter.plugin` is present, otherwise a package bundling fonts, assets or shaders) or rules_dart's `pub_package_member` (for a package with nothing of Flutter's). When Apple sources are detected, also emits per-platform `flutter_apple_plugin_library` sub-targets. Honors per-package overlay BUILD.bazel.tpl overrides under `overlay_roots`, which replace the member with a whole target. The package's library repository (`flutter_pub_library_repo`) builds the member with the others of its dependency cycle. The `flutter pub get` analog of `pub_lock_package`.",
+)
+
+# A `path` package, built from its directory: the checkout's, or this
+# machine's, outside the repository. Local, as Bazel's `local_repository` is,
+# and as rules_dart's `pub_lock_path_package`: never reproducible, fetched
+# again when the server restarts or a file it read changes, and left out by
+# `bazel vendor`, which would fix it to one content.
+flutter_pub_path_package = repository_rule(
+    implementation = _flutter_pub_package_impl,
+    attrs = _ATTRS,
+    local = True,
+    doc = "`flutter_pub_package` of a `path` package of a lock, built from the directory the lock names.",
 )

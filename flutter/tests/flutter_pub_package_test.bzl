@@ -19,14 +19,16 @@ load(
     "find_hardcoded_language_version",
     "flavor_restrictions",
     "has_removed_hub_placeholder",
+    "make_android_failing_build_content",
     "make_android_subpackage_build_content",
     "make_dart_member_build_content",
     "make_flutter_member_build_content",
-    "own_lib_path",
+    "overlay_version_folders",
     "parse_android_manifest_package",
     "parse_gradle_android_namespace",
     "removed_hub_placeholder_error",
     "render_overlay_deps",
+    "write_android_build",
 )
 
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
@@ -187,9 +189,40 @@ def _annotated_deps_test_impl(ctx):
         annotated_deps = ["@@maven//:androidx_browser_browser"],
     )
     asserts.true(env, '+ ["@@maven//:androidx_browser_browser"]' in content, content)
+
+    # Another plugin's library, whose Gradle project the plugin's build depends on.
+    content = make_android_subpackage_build_content(
+        android_src_dir = "android/src/main",
+        java_package = "io.flutter.plugins.firebase.firestore",
+        plugin_deps = ["@flutter_pub__firebase_core//android:lib"],
+    )
+    asserts.true(env, '+ ["@flutter_pub__firebase_core//android:lib"]' in content, content)
     return unittest.end(env)
 
 annotated_deps_test = unittest.make(_annotated_deps_test_impl)
+
+def _jvm_level_test_impl(ctx):
+    """The library compiles at the level the plugin's Gradle build declares."""
+    env = unittest.begin(ctx)
+
+    content = make_android_subpackage_build_content(
+        android_src_dir = "android/src/main",
+        java_package = "dev.example.java17",
+        jvm_level = 17,
+    )
+    asserts.true(env, 'kt_kotlinc_options(\n    name = "_kotlinc_options",\n    jvm_target = "17",\n)' in content, content)
+    asserts.true(env, '    kotlinc_opts = ":_kotlinc_options",\n' in content, content)
+
+    # Java 8 is Kotlin's `1.8`.
+    content = make_android_subpackage_build_content(
+        android_src_dir = "android/src/main",
+        java_package = "dev.example.java8",
+        jvm_level = 8,
+    )
+    asserts.true(env, 'jvm_target = "1.8",' in content, content)
+    return unittest.end(env)
+
+jvm_level_test = unittest.make(_jvm_level_test_impl)
 
 def _resources_without_manifest_test_impl(ctx):
     """Resources force a manifest: synthesize one when the plugin ships none."""
@@ -248,7 +281,7 @@ def _no_resources_subpackage_test_impl(ctx):
     asserts.false(env, "check()" in content, "the spoke runs no build-wide check:\n" + content)
     for needle in [
         'load("@flutter_pub_android_maven//:resolved.bzl", "RESOLVED")',
-        'load("@rules_flutter//flutter/private:android_plugin_maven.bzl", "maven_labels")',
+        'load("@rules_flutter//flutter/private:generated_repos.bzl", "maven_labels")',
         "_maven = maven_labels(",
         ", RESOLVED)",
         "deps = [\"@rules_flutter//flutter/private/android:plugin_engine\"] + _maven.deps + [\":_compile_only\"],",
@@ -296,6 +329,31 @@ def _member_exports_android_lib_test_impl(ctx):
     return unittest.end(env)
 
 member_exports_android_lib_test = unittest.make(_member_exports_android_lib_test_impl)
+
+def _member_implements_test_impl(ctx):
+    """A plugin member states the plugin it implements, as its pubspec's `implements:` names it."""
+    env = unittest.begin(ctx)
+    implementation = make_flutter_member_build_content(
+        name = "url_launcher_android",
+        language_version = "3.4",
+        code_assets = [],
+        unreplaced_hook = "",
+        plugin_platforms = {"android": {"pluginClass": "UrlLauncherPlugin", "package": "io.flutter.plugins.urllauncher"}},
+        implements = "url_launcher",
+    )
+    asserts.true(env, '    implements = "url_launcher",\n' in implementation, implementation)
+
+    app_facing = make_flutter_member_build_content(
+        name = "url_launcher",
+        language_version = "3.4",
+        code_assets = [],
+        unreplaced_hook = "",
+        plugin_platforms = {"android": {"default_package": "url_launcher_android"}},
+    )
+    asserts.false(env, "implements" in app_facing, app_facing)
+    return unittest.end(env)
+
+member_implements_test = unittest.make(_member_implements_test_impl)
 
 def _member_declares_fonts_and_platforms_test_impl(ctx):
     """A member's fonts and plugin platforms are targets it lists, one for each.
@@ -545,11 +603,12 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
     """A spoke with shaders lists its GLSL as what they may `#include`.
 
     The compile runs sandboxed with only declared inputs, so a shader that
-    includes a sibling `.glsl` fails unless the spoke declares it.
+    includes a sibling `.glsl` fails unless the spoke declares it. A shader
+    bundled by another path (`bundle_paths`) is one of them all the same.
     """
     env = unittest.begin(ctx)
 
-    def content(shaders):
+    def content(shaders, bundle_paths = {}):
         return make_flutter_member_build_content(
             name = "shader_pkg",
             language_version = "3.4",
@@ -557,30 +616,60 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
             unreplaced_hook = "",
             assets = [],
             shaders = shaders,
+            bundle_paths = bundle_paths,
         )
 
     with_shaders = content([":shaders/glow.frag"])
     asserts.true(env, "shader_includes = glob(" in with_shaders, with_shaders)
     asserts.true(env, '"**/*.glsl"' in with_shaders, with_shaders)
     asserts.false(env, "shader_includes" in content([]))
+    from_lib = content([":lib/shaders/glow.frag"], {"lib/shaders/glow.frag": ["shaders/glow.frag"]})
+    asserts.true(env, "bundle_paths = {\n        \"lib/shaders/glow.frag\": [\"shaders/glow.frag\"]," in from_lib, from_lib)
+    asserts.true(env, "shader_includes = glob(" in from_lib, from_lib)
+    asserts.false(env, "bundle_paths" in with_shaders, with_shaders)
 
     return unittest.end(env)
 
 spoke_with_shaders_declares_their_includes_test = unittest.make(_spoke_with_shaders_declares_their_includes_test_impl)
 
-def _own_lib_path_test_impl(ctx):
-    """A file entry `packages/<self>/x` is the package's lib/x, unless a file is at the path as written."""
-    env = unittest.begin(ctx)
-    asserts.equals(env, "shaders/ink_sparkle.frag", own_lib_path("material_ui", "packages/material_ui/shaders/ink_sparkle.frag", False))
-    asserts.equals(env, None, own_lib_path("material_ui", "packages/material_ui/shaders/ink_sparkle.frag", True))
-    asserts.equals(env, None, own_lib_path("glass_plugin", "shaders/tint.frag", False))
+def _android_build_file_begins_with_the_files_repository_load_test_impl(ctx):
+    """A plugin's `android/BUILD.bazel` begins with the load the root BUILD file does.
 
-    # Another package's prefix is not this package's lib/.
-    asserts.equals(env, None, own_lib_path("glass_plugin", "packages/material_ui/x.png", False))
-    asserts.equals(env, None, own_lib_path("material", "packages/material_ui/x.png", False))
+    Its globs read through the same links; a vendored repository is never
+    fetched again, so without the load they match nothing in a new output base.
+    """
+    env = unittest.begin(ctx)
+    written = {}
+    fake = struct(file = lambda path, content: written.update({path: content}))
+    load_line = 'load("@@files//:pub_files.bzl", "FILES")\n'
+    write_android_build(fake, load_line, make_android_failing_build_content("broken"))
+    asserts.true(env, written["android/BUILD.bazel"].startswith(load_line), written)
     return unittest.end(env)
 
-own_lib_path_test = unittest.make(_own_lib_path_test_impl)
+android_build_file_begins_with_the_files_repository_load_test = unittest.make(_android_build_file_begins_with_the_files_repository_load_test_impl)
+
+def _spoke_states_the_files_it_links_from_other_packages_test_impl(ctx):
+    """A member states which of its files are another package's, rather than leaving the rule to guess by folder name."""
+    env = unittest.begin(ctx)
+    content = make_flutter_member_build_content(
+        name = "borrower",
+        language_version = "3.4",
+        code_assets = [],
+        unreplaced_hook = "",
+        assets = [":_assets_of_other_packages/o/a.png"],
+        other_package_files = ["_assets_of_other_packages/o/a.png"],
+    )
+    asserts.true(env, '    other_package_files = ["_assets_of_other_packages/o/a.png"],' in content, content)
+    asserts.false(env, "other_package_files" in make_flutter_member_build_content(
+        name = "own",
+        language_version = "3.4",
+        code_assets = [],
+        unreplaced_hook = "",
+        assets = [":a.png"],
+    ))
+    return unittest.end(env)
+
+spoke_states_the_files_it_links_from_other_packages_test = unittest.make(_spoke_states_the_files_it_links_from_other_packages_test_impl)
 
 def _overlay_substitutes_the_language_version_test_impl(ctx):
     """An overlay declares the language version by placeholder, never by value.
@@ -1057,6 +1146,19 @@ def _removed_hub_placeholder_is_refused_test_impl(ctx):
 
 removed_hub_placeholder_is_refused_test = unittest.make(_removed_hub_placeholder_is_refused_test_impl)
 
+def _overlay_version_folders_test_impl(ctx):
+    env = unittest.begin(ctx)
+    full = ["3.1.2", "3.1", "3", ""]
+    asserts.equals(env, full, overlay_version_folders("3.1.2"))
+    asserts.equals(env, ["0.8.13", "0.8", "0", ""], overlay_version_folders("0.8.13+13"))
+    asserts.equals(env, ["2.4.0-beta.1", "2.4", "2", ""], overlay_version_folders("2.4.0-beta.1"))
+    asserts.equals(env, ["2.4.0-beta.1", "2.4", "2", ""], overlay_version_folders("2.4.0-beta.1+5"))
+    asserts.equals(env, ["1.0", "1", ""], overlay_version_folders("1.0"))
+    asserts.equals(env, ["1", ""], overlay_version_folders("1"))
+    return unittest.end(env)
+
+overlay_version_folders_test = unittest.make(_overlay_version_folders_test_impl)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -1071,19 +1173,23 @@ def flutter_pub_package_test_suite(name):
         members_name_their_package_metadata_test,
         hardcoded_overlay_dependency_is_rejected_test,
         removed_hub_placeholder_is_refused_test,
+        overlay_version_folders_test,
         parse_gradle_android_namespace_test,
         parse_android_manifest_package_test,
         record_android_subpackage_test,
         resources_without_manifest_test,
         annotated_deps_test,
+        jvm_level_test,
         no_resources_subpackage_test,
         member_exports_android_lib_test,
+        member_implements_test,
         member_declares_fonts_and_platforms_test,
         plugin_spoke_carries_resources_test,
         library_spoke_carries_resources_test,
         file_names_are_written_as_string_literals_test,
         spoke_with_shaders_declares_their_includes_test,
-        own_lib_path_test,
+        android_build_file_begins_with_the_files_repository_load_test,
+        spoke_states_the_files_it_links_from_other_packages_test,
         desktop_plugin_libraries_carry_their_link_libraries_test,
         platform_restricted_assets_are_stated_in_the_spoke_test,
         platform_restricted_shaders_are_stated_in_the_spoke_test,

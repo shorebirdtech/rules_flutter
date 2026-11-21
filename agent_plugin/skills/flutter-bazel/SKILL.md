@@ -92,6 +92,23 @@ code in it.
 The first run builds the tool and the app, which takes minutes on a cold cache.
 A slow start is not a hang. Bazel's progress is in `err`.
 
+To give an iOS app environment variables, set them for the tool with the
+platform's prefix, which is removed on the way: `SIMCTL_CHILD_<NAME>` for the
+simulator, `DEVICECTL_CHILD_<NAME>` for an iPhone. Put
+`DEVICECTL_CHILD_API_URL=http://10.0.0.5:8080` before `bazel run`, and the app
+process has `API_URL`. Read it natively (`getenv`, `ProcessInfo`): Dart's
+`Platform.environment` is empty on iOS.
+
+On an iPhone, the first debug or profile launch of an app (of its bundle id)
+asks "Allow "<app>" to find devices on local networks?" on the phone. You
+cannot tap it, and over a cable you need not: the tool reaches the app through
+the cable and leaves the question open. Over Wi-Fi the tool finds the app only
+through that network, so the launch waits until someone taps Allow. It says so
+in an `app.log` line on stdout, `<bundle id> is running, but iOS has not let it
+onto the local network`, and keeps waiting: ask the user to tap Allow, or plug
+the phone in. Later launches of the same bundle id on that phone go straight
+through.
+
 ## 3. Find the channel and the app, then send a request
 
 Wait until the app is up and the channel with it, or the run has ended. If your

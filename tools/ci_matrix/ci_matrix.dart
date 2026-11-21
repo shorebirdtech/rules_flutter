@@ -1,9 +1,11 @@
-// Prints the matrices of the `E2E` and `Lock files` jobs in
-// .github/workflows/ci.yaml, as `matrix=<json>` and `locks=<json>` lines for
-// $GITHUB_OUTPUT, after checking that the table in e2e_matrix.dart accounts
-// for every workspace under e2e/ on every system, that some `Lock files` job
-// checks every tracked MODULE.bazel.lock, and that .gitattributes leaves every
-// e2e/ entry but `smoke` out of the release archive.
+// Prints the matrices of the `E2E`, `E2E deep` and `Lock files` jobs in
+// .github/workflows/ci.yaml, as `matrix=<json>`, `deep=<json>` and
+// `locks=<json>` lines for $GITHUB_OUTPUT, after checking that the table in
+// e2e_matrix.dart accounts for every workspace under e2e/ on every system, that
+// some `Lock files` job checks every tracked MODULE.bazel.lock, that
+// .gitattributes leaves every e2e/ entry but `smoke` out of the release
+// archive, and that every workspace with `deep`-tagged tests says what the
+// weekly `E2E deep` job runs them for.
 //
 //   dart run tools/ci_matrix/ci_matrix.dart       from the repository root
 //   bazel run //tools/ci_matrix
@@ -27,7 +29,7 @@ void main() {
     );
     exit(2);
   }
-  final problems = matrixProblems(e2eWorkspaces, found);
+  final problems = matrixProblems(e2eEntries, found);
   if (problems.isNotEmpty) {
     stderr
       ..writeln('ci_matrix: the e2e matrix does not match e2e/:')
@@ -54,16 +56,23 @@ void main() {
       ..writeln(archiveIssues.map((p) => '  $p').join('\n'));
     exit(1);
   }
-  String buildFile(String workspace) =>
-      File('$repo/e2e/$workspace/BUILD.bazel').readAsStringSync();
-  final targetIssues = targetProblems(e2eWorkspaces, buildFile);
-  if (targetIssues.isNotEmpty) {
+  Iterable<String> buildFiles(String module) =>
+      readBuildFiles(Directory('$repo/e2e/$module'));
+  final tagIssues = tagProblems(e2eEntries, buildFiles);
+  if (tagIssues.isNotEmpty) {
     stderr
       ..writeln('ci_matrix: the e2e matrix selects tests that are not there:')
-      ..writeln(targetIssues.map((p) => '  $p').join('\n'));
+      ..writeln(tagIssues.map((p) => '  $p').join('\n'));
     exit(1);
   }
-  final locks = lockCheckWorkspaces(e2eWorkspaces);
+  final deepIssues = deepProblems(e2eEntries, buildFiles);
+  if (deepIssues.isNotEmpty) {
+    stderr
+      ..writeln('ci_matrix: the e2e matrix and the `deep` tests disagree:')
+      ..writeln(deepIssues.map((p) => '  $p').join('\n'));
+    exit(1);
+  }
+  final locks = lockCheckWorkspaces(e2eEntries);
   final listing = Process.runSync('git', [
     'ls-files',
     '--',
@@ -86,7 +95,8 @@ void main() {
   }
   stdout
     ..writeln(
-      'matrix=${jsonEncode({'include': matrixInclude(e2eWorkspaces, buildFile)})}',
+      'matrix=${jsonEncode({'include': matrixInclude(e2eEntries)})}',
     )
+    ..writeln('deep=${jsonEncode({'include': deepInclude(e2eEntries)})}')
     ..writeln('locks=${jsonEncode({'include': lockCheckInclude(locks)})}');
 }

@@ -3,9 +3,9 @@
 ///
 /// ## The contract
 ///
-/// **Input:** a list of [ProbeRepo]s — a repository rule of rules_flutter and
-/// the attributes to declare it with — and the bytes of the archives the
-/// fetches may use.
+/// **Input:** a list of [ProbeRepo]s — a repository rule of rules_flutter (or
+/// the function that declares one) and the attributes to declare it with — and
+/// the bytes of the archives the fetches may use.
 ///
 /// **Output:** a [Probe] whose [Probe.fetch] runs `bazel fetch --repo=@name`
 /// and reports the exit code and Bazel's output.
@@ -13,13 +13,13 @@
 /// ## How a fetch gets bytes without the network
 ///
 /// rules_flutter's engine URLs are fixed to Google Cloud Storage and GitHub, so
-/// no test can point them at a local file. What Bazel does offer is `--distdir`:
-/// a download that names a `sha256` is served from a file of the same name in
-/// the distdir, if its digest matches, before any request is made. A fetch with
-/// a *correct* digest therefore succeeds offline, and a fetch with *no* digest
-/// cannot be served from there and goes to the network, where the test's fake
-/// engine revision answers 404. That asymmetry is what lets a test tell "the
-/// bytes were checked" from "the bytes were not asked about".
+/// no test can point them at a local file. What Bazel does offer is
+/// `--distdir`: a download that names a `sha256` is served from a file of the
+/// same name in the distdir, if its digest matches, before any request is made.
+/// A fetch with a *correct* digest therefore succeeds offline, and a fetch with
+/// *no* digest cannot be served from there and goes to the network, where the
+/// test's fake engine revision answers 404. That asymmetry is what lets a test
+/// tell "the bytes were checked" from "the bytes were not asked about".
 ///
 /// A hosted pub package takes a `base_url`, so it is served from `file://`
 /// instead, and an unpinned fetch of it succeeds — which is the case that
@@ -47,21 +47,80 @@ const fakeFlutterVersion = '0.0.0';
 
 /// One repository to declare in the generated workspace.
 class ProbeRepo {
-  const ProbeRepo(this.name, this.rule, this.attrs, {String? bzl})
-    : bzl = bzl ?? rule;
+  const ProbeRepo(this.name, this.rule, this.attrs, {this.bzl});
 
   /// The apparent name, as given to `--repo=@name`.
   final String name;
 
-  /// The repository rule's symbol.
+  /// The symbol that declares the repository: a repository rule, or a
+  /// function that calls one.
   final String rule;
 
-  /// The file under `//flutter/private` that defines [rule], without `.bzl`.
-  final String bzl;
+  /// The label of another module's file that defines [rule]
+  /// (`@rules_dart//...`), or null for a rule of rules_flutter's, which
+  /// `generated_repos.bzl` exports.
+  final String? bzl;
+
+  /// The label of the file to load [rule] from.
+  String get bzlLabel =>
+      bzl ?? '@rules_flutter//flutter/private:generated_repos.bzl';
 
   /// Starlark source of each attribute's value.
   final Map<String, String> attrs;
 }
+
+/// A hosted pub package's source repository [name] and the repository its
+/// files are fetched into, from [baseUrl] and checked against [sha256], as
+/// `flutter_pub.from_lock()` declares the two.
+List<ProbeRepo> hostedPubPackage(
+  String name, {
+  required String package,
+  required String version,
+  required String sha256,
+  required String baseUrl,
+}) => [
+  ProbeRepo(
+    '${name}_files',
+    'pub_archive_files',
+    {
+      'package_name': str(package),
+      'version': str(version),
+      'sha256': str(sha256),
+      'base_url': str(baseUrl),
+    },
+    bzl: '@rules_dart//dart/pub:pub_lock_package.bzl',
+  ),
+  ProbeRepo(name, 'flutter_pub_package', {
+    'files': str('@${name}_files//:BUILD.bazel'),
+    'package_name': str(package),
+  }),
+];
+
+/// A Flutter SDK package's source repository [name] and the repository its
+/// files are extracted into from the Flutter source tarball of
+/// [fakeFlutterVersion], checked against [sha256], as `flutter_pub.from_lock()`
+/// declares the two. [packages] are those the release's source has; [attrs]
+/// are more attributes of the package's repository (its `sdk`, say).
+List<ProbeRepo> sdkSourcePackage(
+  String name, {
+  required String package,
+  required String sha256,
+  required List<String> packages,
+  Map<String, String> attrs = const {},
+}) => [
+  ProbeRepo('${name}_files', 'flutter_source_files', {
+    'package_name': str(package),
+    'flutter_version': str(fakeFlutterVersion),
+    'sha256': str(sha256),
+    'packages': '[${packages.map(str).join(', ')}]',
+  }),
+  ProbeRepo(name, 'flutter_pub_package', {
+    'files': str('@${name}_files//:BUILD.bazel'),
+    'package_name': str(package),
+    'version': str('0.0.0'),
+    ...attrs,
+  }),
+];
 
 /// A Starlark string literal.
 String str(String value) => jsonEncode(value);
@@ -98,6 +157,9 @@ class Probe {
 
   final EditableWorkspace _workspace;
 
+  /// The workspace's root.
+  String get root => _workspace.root;
+
   /// Where `--distdir` points; each archive is a file here.
   String get distdir => p.join(_workspace.root, 'distdir');
 
@@ -132,7 +194,7 @@ class Probe {
 /// Call from `setUpAll`: the workspace is disposed after the group.
 ///
 /// Repositories that find each other by name through one module extension (a
-/// hub's, `flutter_pub_index.bzl`) can only be declared by one: [extension] is
+/// hub's, `flutter_pub_index`) can only be declared by one: [extension] is
 /// the source of a module extension named `probe` that declares them, and
 /// [extensionRepos] the names it makes, which are `use_repo`d into the probe.
 Future<Probe> probe({
@@ -153,22 +215,34 @@ Future<Probe> probe({
     ..writeln('module(name = "fetch_probe")')
     ..writeln('bazel_dep(name = "rules_flutter", version = "0.0.0")')
     ..writeln('bazel_dep(name = "rules_dart", version = "${rulesDart[1]}")');
+  // Declared by an extension of the probe's own, which can call both a
+  // repository rule and a function that declares one, as rules_flutter's own
+  // extensions do.
+  final declarations = StringBuffer();
   for (final repo in {for (final r in repos) r.rule: r}.values) {
-    module.writeln(
-      '${repo.rule} = use_repo_rule('
-      '"@rules_flutter//flutter/private:${repo.bzl}.bzl", "${repo.rule}")',
+    declarations.writeln('load("${repo.bzlLabel}", "${repo.rule}")');
+  }
+  declarations
+    ..writeln('\ndef _declare(module_ctx):')
+    ..writeln('    pass');
+  for (final repo in repos) {
+    final attrs = repo.attrs.entries.map((e) => '${e.key} = ${e.value}');
+    declarations.writeln(
+      '    ${repo.rule}(name = ${str(repo.name)}, ${attrs.join(', ')})',
     );
   }
+  declarations.writeln('\nprobe_repos = module_extension(_declare)');
+  module
+    ..writeln(
+      'probe_repos = use_extension("//:probe_repos.bzl", "probe_repos")',
+    )
+    ..writeln(
+      'use_repo(probe_repos, ${repos.map((r) => str(r.name)).join(', ')})',
+    );
   if (extension != null) {
     module
       ..writeln('probe = use_extension("//:probe_extension.bzl", "probe")')
       ..writeln('use_repo(probe, ${extensionRepos.map(str).join(', ')})');
-  }
-  for (final repo in repos) {
-    final attrs = repo.attrs.entries.map((e) => '${e.key} = ${e.value}');
-    module.writeln(
-      '${repo.rule}(name = ${str(repo.name)}, ${attrs.join(', ')})',
-    );
   }
 
   // The repo's own .bazelrc.user carries a developer's overrides (on this
@@ -178,6 +252,7 @@ Future<Probe> probe({
   final workspace = await generatedWorkspace('fetch_probe', {
     'MODULE.bazel': module.toString(),
     'BUILD.bazel': '',
+    'probe_repos.bzl': declarations.toString(),
     if (extension != null) 'probe_extension.bzl': extension,
     if (userConfig != null) '.bazelrc.user': userConfig,
     '.bazelrc': [

@@ -31,11 +31,11 @@ class ToolchainPaths {
 /// How [resolveToolchainPaths] reaches bazel.
 ///
 /// Required, with no default that spawns `bazel` itself: in the dev tool this
-/// is `Bazel.run`, so a `bazel fetch` of the toolchain — minutes, on a fresh
-/// output base — is one a stopped run can stop. A default would be a way to
-/// run bazel that nothing stops. It is also the seam a test here needs: a test
-/// target runs inside a Bazel sandbox, where nesting a `bazel` invocation is
-/// not possible (see the comment on the analysis targets in this package's
+/// is `Bazel.run`, so the analysis that fetches the toolchain — minutes, on a
+/// fresh output base — is one a stopped run can stop. A default would be a way
+/// to run bazel that nothing stops. It is also the seam a test here needs: a
+/// test target runs inside a Bazel sandbox, where nesting a `bazel` invocation
+/// is not possible (see the comment on the analysis targets in this package's
 /// BUILD file), so the failures below cannot be provoked without one.
 typedef BazelRunner = Future<ProcessResult> Function(
   List<String> args, {
@@ -45,14 +45,13 @@ typedef BazelRunner = Future<ProcessResult> Function(
 /// What the Flutter host toolchain repo for [platform] is called inside an
 /// output base, in each of the two positions `rules_flutter` can occupy.
 ///
-/// A module extension's repos are named
-/// `<canonical repo of the module that DEFINES the extension>+<extension>+<repo>`.
-/// This extension is defined in `rules_flutter`, whose own canonical repo name
-/// is `''` when it is the root module and `rules_flutter+` when it is a
-/// dependency — so there are exactly two possible names, a workspace resolves
-/// `rules_flutter` in one position or the other, and never both. This is an
-/// enumeration of a two-valued fact, not a search: at most one of these exists
-/// in any one output base.
+/// A module extension's repos are named `<canonical repo of the module that
+/// DEFINES the extension>+<extension>+<repo>`. This extension is defined in
+/// `rules_flutter`, whose own canonical repo name is `''` when it is the root
+/// module and `rules_flutter+` when it is a dependency — so there are exactly
+/// two possible names, a workspace resolves `rules_flutter` in one position or
+/// the other, and never both. This is an enumeration of a two-valued fact, not
+/// a search: at most one of these exists in any one output base.
 List<String> flutterToolchainRepoNames(String platform) => [
   'rules_flutter++flutter+flutter_$platform',
   '+flutter+flutter_$platform',
@@ -66,13 +65,20 @@ List<String> flutterToolchainRepoNames(String platform) => [
 ///
 /// Runs before anything is built, because the run needs its `dart` before the
 /// build has said anything. That is
-/// what makes the fetch below load-bearing rather than incidental: on a
+/// what makes the analysis below load-bearing rather than incidental: on a
 /// workspace whose output base has never been built there is no external repo
 /// to find yet, and this is the call that creates it.
 ///
 /// [buildFlags] are the configuration flags the run's own build uses. The
-/// fetch analyses [target], so it has to see that configuration: an iOS
-/// simulator app is refused at analysis outside `-c dbg`.
+/// analysis has to see that configuration: an iOS simulator app is refused at
+/// analysis outside `-c dbg`.
+///
+/// It is `bazel build --nobuild` rather than `bazel fetch`, so that it is the
+/// same command as the build after it: a wrapper that adds options to builds
+/// (an execution platform, say) adds them here too, and Bazel keeps this
+/// analysis for that build. `bazel fetch` gets neither, and an execution
+/// platform missing from it once made the same tool compile twice, a
+/// conflict that failed the run before it built anything.
 Future<ToolchainPaths> resolveToolchainPaths(
   String target, {
   required String workspace,
@@ -99,30 +105,33 @@ Future<ToolchainPaths> resolveToolchainPaths(
 
   var externalDir = _existingRepo(externalBase, candidates);
   if (externalDir == null) {
-    // `bazel fetch` analyses the target, and analysis is what resolves the
+    // Analysing the target is what resolves the
     // Flutter toolchain and materializes its repo. Its result is checked: this
     // is the first bazel command a run makes, so every way the workspace is
     // unusable surfaces here, and discarding it would turn all of them into
     // "could not find Flutter toolchain".
-    final fetch = await runBazel([
-      'fetch',
+    final analysis = await runBazel([
+      'build',
+      '--nobuild',
       target,
       ...buildFlags,
     ], workingDirectory: workspace);
-    if (fetch.exitCode != 0) {
+    if (analysis.exitCode != 0) {
       throw DevToolException(
-        'Could not fetch what $target needs, so the Flutter toolchain was '
-        'never materialized.\n'
-        '  cd $workspace && bazel fetch ${[target, ...buildFlags].join(' ')}\n'
-        '  exit ${fetch.exitCode}\n'
-        '${_tail(fetch.stderr as String)}',
+        'Could not analyse $target, so the Flutter toolchain was never '
+        'materialized.\n'
+        '  cd $workspace && bazel build --nobuild '
+        '${[target, ...buildFlags].join(' ')}\n'
+        '  exit ${analysis.exitCode}\n'
+        '${_tail(analysis.stderr as String)}',
       );
     }
     externalDir = _existingRepo(externalBase, candidates);
   }
   if (externalDir == null) {
     throw DevToolException(
-      '`bazel fetch $target` succeeded but left no Flutter toolchain in '
+      '`bazel build --nobuild $target` succeeded but left no Flutter '
+      'toolchain in '
       '$externalBase.\n'
       'Looked for: ${candidates.join(', ')}.\n'
       'That means $target resolves no rules_flutter toolchain — check that '
@@ -235,11 +244,11 @@ class DevConfig {
   /// Deliberately a second field rather than a second use of
   /// [devPackageConfig]. The two answer different questions and a
   /// source-assembled app is where they diverge: the dev config's `rootUri` is
-  /// `<filesystemScheme>:///<package_root>`, which the frontend_server
-  /// resolves through `--filesystem-root` and `Uri.toFilePath()` refuses
-  /// outright. The compiler wants the dev one (live sources); DWDS wants this
-  /// one, because its job is to read the source off disk and show it. Handed
-  /// the dev one it throws `Cannot extract a file path from a org-dartlang-app URI` on every
+  /// `<filesystemScheme>:///<package_root>`, which the frontend_server resolves
+  /// through `--filesystem-root` and `Uri.toFilePath()` refuses outright. The
+  /// compiler wants the dev one (live sources); DWDS wants this one, because
+  /// its job is to read the source off disk and show it. Handed the dev one it
+  /// throws `Cannot extract a file path from a org-dartlang-app URI` on every
   /// first-party library and the debugger shows a blank pane.
   final String buildPackageConfig;
 
@@ -296,8 +305,9 @@ class DevConfig {
   ///
   /// Every entry of [nativeLibs] is a key, so an empty list means "nothing
   /// describes this library's bindings" rather than "this library is not
-  /// bundled". The dev tool needs to tell those apart: the first makes a rebuilt
-  /// library withhold a reload, the second would mean there is nothing to check.
+  /// bundled". The dev tool needs to tell those apart: the first makes a
+  /// rebuilt library withhold a reload, the second would mean there is nothing
+  /// to check.
   final Map<String, List<String>> nativeLibContracts;
 
   /// Per library in [nativeLibs], the first-party sources it is built from,
@@ -366,7 +376,7 @@ class DevConfig {
   /// synthetic entrypoint it generates and reaches it through DWDS. The native
   /// rules compile the same source into the app's kernel; a debug web bundle
   /// compiles it in too, behind the bridge that serves it without a VM service
-  /// (`agent_extensions/web_bridge.dart`), and needs nothing from this field.
+  /// (`dev_tool_support/web_bridge.dart`), and needs nothing from this field.
   final String agentExtensions;
 
   /// Absolute path to the bootstrap the dev server answers
@@ -540,10 +550,9 @@ class DevConfig {
 ///
 /// [files] are one target's outputs in one configuration (see
 /// `Bazel.build`), so they hold at most one dev config. More than one is a
-/// listing that spans configurations, and picking among them is how a run
-/// came to read the launch build's copy: its generated sources and native
-/// libraries are paths the dev build never rewrites, so every hot reload
-/// compiled the codegen output the app launched with.
+/// listing that spans configurations, which says nothing about which of them
+/// the app runs, so it is refused rather than picked from. A listing that
+/// spans them on purpose is read with [devConfigOfApp].
 String? findDevConfig(List<String> files) {
   final candidates = [
     for (final f in files)
@@ -558,6 +567,43 @@ String? findDevConfig(List<String> files) {
   return candidates.firstOrNull;
 }
 
+/// The `_dev_config.json` of the configuration the running app was built in.
+///
+/// [files] are the dev files the launch target's aspect collected (see
+/// `devFilesAspect`): the application's outputs in every configuration the
+/// launch target reaches it in. An Android app reaches it in one per ABI, so
+/// the dev config is the one in the output directory of the app's own
+/// [assetsDir], which the app reports and nothing here guesses.
+///
+/// Throws [DevToolException] when that configuration has no dev config among
+/// [files], naming the ones there are.
+String devConfigOfApp(List<String> files, {required String assetsDir}) {
+  final candidates = [
+    for (final f in files)
+      if (f.endsWith('_dev_config.json')) f,
+  ];
+  final configuration = _outputDirectory(assetsDir);
+  final matching = [
+    for (final c in candidates)
+      if (configuration != null && _outputDirectory(c) == configuration) c,
+  ];
+  if (matching.length != 1) {
+    throw DevToolException(
+      'The app reports its assets at "$assetsDir", and the build of its launch '
+      'target has ${matching.isEmpty ? 'no' : 'more than one'} _dev_config.json '
+      'in that configuration${configuration == null ? '' : ' ($configuration)'}.'
+      '${candidates.isEmpty ? '' : '\nDev configs it has:\n  ${candidates.join('\n  ')}'}',
+    );
+  }
+  return matching.single;
+}
+
+/// The configuration directory of a path under `bazel-out/`
+/// (`darwin_arm64-dbg-macos-arm64-min12.0-ST-<hash>`), or null for a path
+/// outside it.
+String? _outputDirectory(String path) =>
+    RegExp(r'(?:^|/)bazel-out/([^/]+)/').firstMatch(path)?.group(1);
+
 /// Parse dev config JSON from a file path, resolving symlinks.
 ///
 /// Paths in the JSON are execution-root-relative (e.g. `external/repo/...`).
@@ -569,10 +615,11 @@ DevConfig parseDevConfig(String path) {
   final json =
       jsonDecode(File(resolved).readAsStringSync()) as Map<String, dynamic>;
 
-  // Derive execution root: resolved path contains .../execroot/_main/bazel-out/...
-  // Split into path components (separator-agnostic, so it works on Windows
-  // where File.resolveSymbolicLinksSync returns '\'-separated paths) and strip
-  // from the 'bazel-out' segment onward.
+  // Derive the execution root: the resolved path contains
+  // `.../execroot/_main/bazel-out/...`. Split it into path components
+  // (separator-agnostic, so it works on Windows, where
+  // File.resolveSymbolicLinksSync returns '\'-separated paths) and strip from
+  // the 'bazel-out' segment onward.
   final parts = p.split(resolved);
   final bazelOutIdx = parts.indexOf('bazel-out');
   final execRoot = bazelOutIdx > 0

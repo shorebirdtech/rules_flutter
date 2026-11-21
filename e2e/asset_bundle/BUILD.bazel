@@ -1,3 +1,4 @@
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
 load("@rules_flutter//flutter:defs.bzl", "dart_package_metadata", "flutter_application", "flutter_asset_bundle")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("//tools:bundle.bzl", "bundled_app", "tree_of")
@@ -67,6 +68,7 @@ bundled_app(
         deps = ["@%s" % package],
     )
     for package in [
+        "fx_asset_borrower",
         "fx_dirs",
         "fx_extra",
         "fx_flavors",
@@ -80,6 +82,10 @@ bundled_app(
 
 # -- The same package, bundled for each platform ----------------------------------
 
+# An iOS or macOS bundle needs Xcode's toolchain, so only a Mac host builds or
+# analyses it. Elsewhere it, and each test of it, is skipped.
+_APPLE_HOSTS = ["@platforms//os:macos"]
+
 platform(
     name = "android_arm64",
     constraint_values = [
@@ -91,6 +97,10 @@ platform(
 [
     bundled_app(
         name = "app_with_fx_platforms_" + os,
+        bundle_compatible_with = _APPLE_HOSTS if os in [
+            "ios",
+            "macos",
+        ] else None,
         platform = platform,
         deps = ["@fx_platforms"],
     )
@@ -143,6 +153,20 @@ tree_of(
     ]
 ]
 
+# A package's Android-only asset that is a file of its `lib/`.
+bundled_app(
+    name = "app_with_fx_self_paths_android",
+    platform = ":android_arm64",
+    deps = ["@fx_self_paths"],
+)
+
+# A package's Android-only asset that is a file of another package's `lib/`.
+bundled_app(
+    name = "app_with_fx_asset_borrower_android",
+    platform = ":android_arm64",
+    deps = ["@fx_asset_borrower"],
+)
+
 # The platform and the flavor are independent filters: one Android build.
 bundled_app(
     name = "app_with_fx_flavors_paid_android",
@@ -175,6 +199,10 @@ bundled_app(
 [
     bundled_app(
         name = "app_with_fx_shaders_" + os,
+        bundle_compatible_with = _APPLE_HOSTS if os in [
+            "ios",
+            "macos",
+        ] else None,
         platform = platform,
         deps = ["@fx_shaders"],
     )
@@ -252,4 +280,17 @@ flutter_asset_bundle(
     tags = ["manual"],
     visibility = ["//visibility:public"],
     deps = ["@rules_flutter//flutter:material_icons"],
+)
+
+dart_analysis_options(
+    name = "options",
+    src = "analysis_options.yaml",
+)
+
+# Every `analysis_options.yaml` in this workspace, for the `dart_analyze`
+# aspect `.bazelrc` enables: each Dart file is checked against the nearest
+# listed one above it.
+dart_analysis_config(
+    name = "analysis_config",
+    options = [":options"],
 )

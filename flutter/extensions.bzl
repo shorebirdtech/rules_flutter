@@ -10,70 +10,285 @@ Every module can ask for a toolchain version under the default name, "flutter",
 which rules_flutter always registers. The root module's version is the one
 used; without one, the highest version any module asks for is used.
 
-The root module can declare more toolchains under other names (each name
-resolved the same way) and register them as it sees fit, overriding the default
-one by toolchain resolution precedence.
+The root module can declare more releases under other names, each name's
+version resolved the same way. rules_flutter registers the toolchains of every
+declared SDK. The root module can also declare SDKs
+that are not releases, each form its own tag: `flutter.custom_framework` (a
+release's engine under another framework), `flutter.custom_engine` (a release's
+framework over another engine), `flutter.custom_sdk` (both halves given) and
+`flutter.checkout` (a flutter/flutter checkout, its framework and the engine
+built in it).
+
+A build uses one SDK. `flutter.use_sdk` in the root module says which, and
+without it the build uses `flutter`. `--@rules_flutter//flutter:sdk=<name>`
+overrides that choice for one build, or for one machine in `.bazelrc.user`.
 """
 
 load("@rules_dart//dart:repositories.bzl", "dart_kernel_source")
+load("//flutter:local_sdk.bzl", "flutter_local_framework")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
+load("//flutter/private:custom_sdks.bzl", "checkout_repo_names", "custom_sdks")
 load("//flutter/private:engine_labels.bzl", "android_arches")
+load("//flutter/private:engine_out_dirs.bzl", "unread_machine_message")
 load("//flutter/private:flutter_android_emulator_repo.bzl", "flutter_android_emulator_repo", "flutter_android_system_image_repo")
 load("//flutter/private:flutter_chrome_for_testing.bzl", "flutter_chrome_for_testing")
 load("//flutter/private:flutter_dev_root_repo.bzl", "flutter_dev_root_repo")
-load("//flutter/private:flutter_face_repo.bzl", "IOS_ENGINE_EXTRA", "IOS_ENGINE_TARGETS", "MACOS_ENGINE_EXTRA", "MACOS_ENGINE_TARGETS", "WEB_SDK_TARGETS", "android_engine_face_extra", "flutter_face_repo")
+load("//flutter/private:flutter_face_repo.bzl", "IOS_ENGINE_EXTRA", "IOS_ENGINE_TARGETS", "MACOS_ENGINE_EXTRA", "MACOS_ENGINE_TARGETS", "SKY_ENGINE_TARGETS", "WEB_SDK_TARGETS", "android_engine_face_extra", "flutter_face_repo")
+load("//flutter/private:flutter_ios_usb_repo.bzl", "flutter_ios_usb_repo")
 load("//flutter/private:flutter_linux_runtime_repo.bzl", "flutter_linux_runtime_repo")
 load("//flutter/private:flutter_material_fonts_repo.bzl", "flutter_material_fonts_repo")
 load("//flutter/private:flutter_sdk_toolchains_repo.bzl", "flutter_sdk_toolchains_repo")
 load("//flutter/private:flutter_sdks_repo.bzl", "encode_sdks", "flutter_sdks_repo")
+load("//flutter/private:flutter_web_sdk_repo.bzl", "host_platform")
 load("//flutter/private:linux_runtime_pins.bzl", "LINUX_RUNTIME")
-load("//flutter/private:pub_extension.bzl", "DEFAULT_SDK_NAME", "framework_json")
+load("//flutter/private:local_engine.bzl", "flutter_checkout_engine")
+load("//flutter/private:pub_extension.bzl", "DEFAULT_SDK_NAME")
 load("//flutter/private:repositories.bzl", "flutter_register_toolchains")
 load("//flutter/private:toolchain_version.bzl", "select_flutter_version")
-load("//flutter/private:toolchains_repo.bzl", "flutter_toolchains_repo", "sdk_repo_name")
-load("//flutter/private:versions.bzl", "ANDROID_EMULATOR", "ANDROID_SYSTEM_IMAGE", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "flutter_source_sha256", "require_supported_flutter_version")
+load("//flutter/private:toolchains_repo.bzl", "HOST_PLATFORMS", "flutter_toolchains_repo", "sdk_repo_name")
+load("//flutter/private:versions.bzl", "ANDROID_EMULATOR", "ANDROID_SYSTEM_IMAGE", "CHROME_FOR_TESTING", "FLUTTER_VERSIONS", "IOS_USB_DEPENDENCIES", "flutter_source_sha256", "require_supported_flutter_version")
 
-flutter_toolchain = tag_class(attrs = {
-    "name": attr.string(doc = """\
-The name of the SDK this declares. `flutter` is the stock release (or the SDK a
-team always builds against, given sources); any other name is another SDK, which
-a build chooses with `--@rules_flutter//flutter:sdk=<name>`. A name other than
-the default is only permitted in the root module.
+flutter_toolchain = tag_class(
+    doc = """\
+A Flutter release. Any module may ask for a version of the default one,
+`flutter`; the root module may declare others under other names.
+""",
+    attrs = {
+        "name": attr.string(doc = """\
+The name of the SDK this declares. `flutter` is the default; any other name is
+another SDK, which `flutter.use_sdk` or `--@rules_flutter//flutter:sdk`
+chooses. A name other than the default is only permitted in the root module.
 """, default = DEFAULT_SDK_NAME),
-    "flutter_version": attr.string(doc = """\
-Version of the Flutter release that supplies whichever half of the SDK is not
-given as `framework` or `engine`. An error when both are given, and required
-when either is not.
+        "flutter_version": attr.string(doc = """\
+Version of the Flutter release. Some module must give one for each name.
 """),
-    "framework": attr.label(doc = """\
-A repository whose root is a flutter/flutter tree and which holds
-`flutter_framework.json` (the framework contract): the SDK's packages come from
-it instead of the release. Root module only.
-"""),
-    "engine": attr.label(doc = """\
-A repository whose slices are the engine contract's labels (see
-`@rules_flutter//flutter:engine.bzl`): the SDK's engine comes from it instead of
-the release. Root module only.
-"""),
-    "allow_upgrade_by_dependencies": attr.bool(doc = """\
+        "allow_upgrade_by_dependencies": attr.bool(doc = """\
 Root module only. When False (the default) the root's `flutter_version` is used
 exactly, and a dependency asking for a newer release fails the build. When True,
 the highest version any module asks for is used. As `dart.toolchain`'s attribute
 of the same name.
 """),
-    "material_fonts_sha256": attr.string(doc = """\
-The checksum of the Material fonts archive a non-release framework expects, when
-its `bin/internal/material_fonts.version` names a revision no pinned release does.
+    },
+)
+
+_SDK_NAME_DOC = """\
+The name of the SDK this declares: what `flutter.use_sdk` and
+`--@rules_flutter//flutter:sdk` choose it by. Not `flutter`, the release every
+module may ask a version of.
+"""
+
+_FRAMEWORK_DOC = """\
+A repository whose root is a flutter/flutter tree and which holds
+`flutter_framework.json` (the framework contract), such as a
+`flutter_local_framework` of `@rules_flutter//flutter:local_sdk.bzl`.
+"""
+
+_ENGINE_DOC = """\
+A repository whose slices are the engine contract's labels (see
+`@rules_flutter//flutter:engine.bzl`), such as a `flutter_local_engine` of
+`@rules_flutter//flutter:local_sdk.bzl`.
+"""
+
+_MATERIAL_FONTS_DOC = """\
+The checksum of the Material fonts archive the framework expects, when its
+`bin/internal/material_fonts.version` names an archive no pinned release does.
+"""
+
+_HOSTS_DOC = """\
+The machines the engine's host tools run on, which the SDK's toolchains are
+registered for alone: any of `darwin-arm64`, `darwin-x64`, `linux-x64`,
+`linux-arm64` and `windows-x64`, or `host`, the machine Bazel runs on, for an
+engine built there such as `flutter_local_engine`'s out dirs. Bazel takes the
+first execution platform a toolchain is registered for, so a host the engine
+does not serve would take the build and fail it.
+"""
+
+flutter_custom_framework = tag_class(
+    doc = "A release's engine under another framework. Root module only.",
+    attrs = {
+        "name": attr.string(doc = _SDK_NAME_DOC, mandatory = True),
+        "framework": attr.label(doc = _FRAMEWORK_DOC, mandatory = True),
+        "flutter_version": attr.string(doc = "Version of the Flutter release whose engine this uses.", mandatory = True),
+        "material_fonts_sha256": attr.string(doc = _MATERIAL_FONTS_DOC),
+    },
+)
+
+flutter_custom_engine = tag_class(
+    doc = "A release's framework over another engine. Root module only.",
+    attrs = {
+        "name": attr.string(doc = _SDK_NAME_DOC, mandatory = True),
+        "engine": attr.label(doc = _ENGINE_DOC, mandatory = True),
+        "hosts": attr.string_list(doc = _HOSTS_DOC, mandatory = True, allow_empty = False),
+        "flutter_version": attr.string(doc = "Version of the Flutter release whose framework this uses.", mandatory = True),
+    },
+)
+
+flutter_custom_sdk = tag_class(
+    doc = """\
+A framework and an engine, neither of them a release's. Root module only. For a
+checkout's own framework and the engine built in it, `flutter.checkout` is one
+declaration.
+""",
+    attrs = {
+        "name": attr.string(doc = _SDK_NAME_DOC, mandatory = True),
+        "framework": attr.label(doc = _FRAMEWORK_DOC, mandatory = True),
+        "engine": attr.label(doc = _ENGINE_DOC, mandatory = True),
+        "hosts": attr.string_list(doc = _HOSTS_DOC, mandatory = True, allow_empty = False),
+        "material_fonts_sha256": attr.string(doc = _MATERIAL_FONTS_DOC),
+    },
+)
+
+flutter_checkout = tag_class(
+    doc = """\
+An SDK that is a flutter/flutter checkout: its framework, from `packages/`, and
+the engine built in its `engine/src/out`, as `flutter run --local-engine` pairs
+them. Root module only.
+
+The checkout's path is machine-local, so it is not an attribute: it is the
+environment variable `path_env` names, set in `.bazelrc.user`:
+
+    common --repo_env=FLUTTER_CHECKOUT=/Users/me/src/flutter
+
+To pair a checkout's framework or engine with another's, declare the halves
+with `@rules_flutter//flutter:local_sdk.bzl` and give them to
+`flutter.custom_sdk`, `flutter.custom_framework` or `flutter.custom_engine`.
+""",
+    attrs = {
+        "name": attr.string(doc = _SDK_NAME_DOC, mandatory = True),
+        "path_env": attr.string(
+            doc = "The environment variable holding the checkout's path. Set it with `--repo_env`.",
+            default = "FLUTTER_CHECKOUT",
+        ),
+        "engines_env": attr.string(
+            doc = "The environment variable naming the out dirs to use, when a slot has more than one candidate.",
+            default = "FLUTTER_LOCAL_ENGINES",
+        ),
+        "checkout": attr.label(doc = """\
+A file at the root of a checkout that another repository lays out, in place of
+the environment variable: for a checkout that Bazel itself produces, such as
+the stand-in a test builds from the official artifacts.
 """),
-})
+        "material_fonts_sha256": attr.string(doc = _MATERIAL_FONTS_DOC),
+    },
+)
+
+flutter_use_sdk = tag_class(
+    doc = """\
+Chooses the Flutter SDK the build uses, from those declared. Root module only, once.
+
+Without it the build uses `flutter`. `--@rules_flutter//flutter:sdk=<name>`, when
+given, overrides this for that build.
+""",
+    attrs = {
+        "name": attr.string(doc = "The name of a declared SDK.", mandatory = True),
+    },
+)
+
+def _label_prefix(label):
+    """A label's repository, as a prefix any repository can name it by."""
+    return "@@" + label.repo_name
+
+def _framework_json(sdk):
+    """The label of the `flutter_framework.json` of an SDK whose framework is not the release's."""
+    return sdk.framework + "//:flutter_framework.json"
+
+# What `hosts` names the machine Bazel runs on by.
+_THIS_HOST = "host"
+
+def _sdk(name, version = None, framework = None, engine = None, material_fonts_sha256 = "", checkout = None, hosts = None):
+    """One SDK: the release that supplies a half not given, and the halves given, as label prefixes.
+
+    `hosts` are the hosts its engine serves (`_HOSTS_DOC`), None for every host.
+    """
+    if version:
+        require_supported_flutter_version(version)
+    for host in hosts or []:
+        if host != _THIS_HOST and host not in HOST_PLATFORMS:
+            fail("The Flutter SDK \"{}\" names the host \"{}\" in `hosts`, which is none of {} and {}.".format(
+                name,
+                host,
+                ", ".join(sorted(HOST_PLATFORMS.keys())),
+                _THIS_HOST,
+            ))
+    return struct(
+        name = name,
+        version = version,
+        framework = framework,
+        engine = engine,
+        material_fonts_sha256 = material_fonts_sha256,
+        checkout = checkout,
+        hosts = hosts,
+    )
+
+def _served_hosts(sdks, machine):
+    """The hosts each SDK whose engine does not serve every one serves, with `host` as the machine Bazel runs on."""
+    served = {}
+    for name, sdk in sdks.items():
+        if sdk.hosts != None:
+            served[name] = sorted({
+                (machine if h == _THIS_HOST else h): True
+                for h in sdk.hosts
+                if h != _THIS_HOST or machine
+            }.keys())
+    return served
+
+def _unknown_machine(sdks, machine, os):
+    """Why each SDK that serves the machine Bazel runs on cannot here, by SDK: none when the machine is one the engine is built for."""
+    if machine:
+        return {}
+    return {
+        name: "The Flutter SDK \"{}\" runs on the machine Bazel runs on alone. {}".format(name, unread_machine_message(os))
+        for name, sdk in sdks.items()
+        if sdk.hosts and _THIS_HOST in sdk.hosts
+    }
+
+def _custom_framework_sdk(tag):
+    return _sdk(
+        tag.name,
+        version = tag.flutter_version,
+        framework = _label_prefix(tag.framework),
+        material_fonts_sha256 = tag.material_fonts_sha256,
+    )
+
+def _custom_engine_sdk(tag):
+    return _sdk(tag.name, version = tag.flutter_version, engine = _label_prefix(tag.engine), hosts = tag.hosts)
+
+def _custom_sdk_sdk(tag):
+    return _sdk(
+        tag.name,
+        framework = _label_prefix(tag.framework),
+        engine = _label_prefix(tag.engine),
+        material_fonts_sha256 = tag.material_fonts_sha256,
+        hosts = tag.hosts,
+    )
+
+def _checkout_sdk(tag):
+    # A checkout's framework and engine, as repositories of this extension.
+    repos = checkout_repo_names(tag.name)
+    return _sdk(
+        tag.name,
+        framework = "@" + repos.framework,
+        engine = "@" + repos.engine,
+        material_fonts_sha256 = tag.material_fonts_sha256,
+        checkout = tag,
+        # Out dirs hold the machine's own build.
+        hosts = [_THIS_HOST],
+    )
+
+# The SDK each of the custom-SDK tags declares, by the tag's name.
+_CUSTOM_SDK = {
+    "custom_framework": _custom_framework_sdk,
+    "custom_engine": _custom_engine_sdk,
+    "custom_sdk": _custom_sdk_sdk,
+    "checkout": _checkout_sdk,
+}
 
 def _declared_sdks(module_ctx):
-    """The SDKs the modules declare: a struct for each, by name."""
+    """The SDKs the modules declare, a struct for each by name, and the one the root module chooses."""
 
     # The root module's version for a name is used exactly; a dependency asking
     # for newer fails, unless the root sets `allow_upgrade_by_dependencies`.
     # A name the root does not pin takes the highest version asked for.
-    tags = {}
     requests = {}
     root_versions = {}
     allow_upgrade = {}
@@ -99,103 +314,100 @@ def _declared_sdks(module_ctx):
                         "Only the root module may: a library must not decide the SDK of the apps that use it."
                     ).format(toolchain.name, mod.name))
                 allow_upgrade[toolchain.name] = True
-            if (toolchain.framework or toolchain.engine) and not mod.is_root:
-                fail((
-                    "flutter.toolchain(name = \"{}\") in module {} gives a framework or an engine. " +
-                    "Only the root module may: a library module must not impose a fork on its dependents."
-                ).format(toolchain.name, mod.name))
-            tags.setdefault(toolchain.name, []).append(toolchain)
             requests.setdefault(toolchain.name, [])
             if toolchain.flutter_version:
                 requests[toolchain.name].append((mod.name, toolchain.flutter_version))
 
     sdks = {}
-    for name, name_tags in tags.items():
-        versions = [t.flutter_version for t in name_tags if t.flutter_version]
-        frameworks = {str(t.framework): t.framework for t in name_tags if t.framework}
-        engines = {str(t.engine): t.engine for t in name_tags if t.engine}
-        if len(frameworks) > 1 or len(engines) > 1:
-            fail("flutter.toolchain(name = \"{}\") is declared with more than one framework or engine.".format(name))
-        framework = frameworks.values()[0] if frameworks else None
-        engine = engines.values()[0] if engines else None
-        if framework and engine and versions:
-            fail((
-                "flutter.toolchain(name = \"{}\") gives a framework and an engine, so its " +
-                "flutter_version = \"{}\" would be unused. Drop it."
-            ).format(name, versions[0]))
-        if not (framework and engine) and not versions:
-            fail((
-                "flutter.toolchain(name = \"{}\") needs flutter_version: the release that " +
-                "supplies the half of the SDK that is not given."
-            ).format(name))
-        selected = None
-        if versions:
-            selection = select_flutter_version(name, root_versions.get(name), requests[name], allow_upgrade.get(name, False))
-            if selection.error:
-                fail(selection.error)
-            selected = selection.version
-        if selected:
-            require_supported_flutter_version(selected)
-        fonts_sha256 = [t.material_fonts_sha256 for t in name_tags if t.material_fonts_sha256]
-        sdks[name] = struct(
-            name = name,
-            version = selected,
-            framework = framework,
-            engine = engine,
-            material_fonts_sha256 = fonts_sha256[0] if fonts_sha256 else "",
-        )
+    for name, name_requests in requests.items():
+        if not name_requests:
+            fail("flutter.toolchain(name = \"{}\") needs a flutter_version, in some module.".format(name))
+        selection = select_flutter_version(name, root_versions.get(name), name_requests, allow_upgrade.get(name, False))
+        if selection.error:
+            fail(selection.error)
+        sdks[name] = _sdk(name, version = selection.version)
+
+    customs = custom_sdks(module_ctx.modules, requests.keys(), DEFAULT_SDK_NAME)
+    if customs.error:
+        fail(customs.error)
+    for name, custom in customs.sdks.items():
+        sdks[name] = _CUSTOM_SDK[custom.kind](custom.tag)
     if DEFAULT_SDK_NAME not in sdks:
         fail("A flutter.toolchain() is required: the default SDK, named \"{}\".".format(DEFAULT_SDK_NAME))
-    return sdks
+    return struct(sdks = sdks, use = customs.use or DEFAULT_SDK_NAME)
 
-def _label_prefix(label):
-    """A label's repository, as a prefix any repository can name it by."""
-    return "@@" + label.repo_name
-
-def _register_sdk(sdk):
+def _register_sdk(sdk, host):
     """Declares the repositories of one SDK; returns the label prefix of its engine source."""
     name = sdk.name
-    if sdk.engine == None:
-        # The release engine, with the artifact repositories it is made of.
-        flutter_register_toolchains(
-            name = name,
-            flutter_version = sdk.version,
-            framework_json = str(framework_json(sdk.framework)) if sdk.framework else "",
-            framework_json_file = framework_json(sdk.framework) if sdk.framework else None,
+    if sdk.checkout:
+        # One checkout, read from one path, makes both halves.
+        repos = checkout_repo_names(name)
+        flutter_local_framework(
+            name = repos.framework,
+            path_env = sdk.checkout.path_env,
+            checkout = sdk.checkout.checkout,
         )
+        flutter_checkout_engine(
+            name = repos.engine,
+            path_env = sdk.checkout.path_env,
+            engines_env = sdk.checkout.engines_env,
+            checkout = sdk.checkout.checkout,
+        )
+    if sdk.engine == None and sdk.framework == None:
+        # The release, with the artifact repositories it is made of.
+        flutter_register_toolchains(name = name, flutter_version = sdk.version, host = host)
         return "@{}_stock_engine".format(name)
 
-    # An engine of the root module's choosing: the toolchains are written
-    # against its slices. The Material fonts come with the framework.
-    version_meta = FLUTTER_VERSIONS[sdk.version] if sdk.version else None
+    # The Material fonts come with the framework: the ones its
+    # `bin/internal/material_fonts.version` names, or the release's.
     fonts = name + "_material_fonts"
     flutter_material_fonts_repo(
         name = fonts,
         flutter_version = sdk.version or "",
-        framework_json = framework_json(sdk.framework) if sdk.framework else None,
+        framework_json = _framework_json(sdk) if sdk.framework else None,
         sha256 = sdk.material_fonts_sha256,
     )
+    fonts_label = "@{}//:material-fonts/MaterialIcons-Regular.otf".format(fonts)
+    if sdk.engine == None:
+        # A framework of the root module's choosing over the release engine,
+        # with the artifact repositories it is made of.
+        flutter_register_toolchains(
+            name = name,
+            flutter_version = sdk.version,
+            host = host,
+            framework_json = _framework_json(sdk),
+            framework_json_file = _framework_json(sdk),
+            material_fonts = fonts_label,
+        )
+        return "@{}_stock_engine".format(name)
+
+    # An engine of the root module's choosing: the toolchains are written
+    # against its slices.
     flutter_sdk_toolchains_repo(
         name = sdk_repo_name(name),
-        engine = _label_prefix(sdk.engine),
+        engine = sdk.engine,
         sdk = name,
         version = sdk.version or "",
-        engine_revision = version_meta.engine_revision if version_meta else "",
-        material_fonts = "@{}//:material-fonts/MaterialIcons-Regular.otf".format(fonts),
+        material_fonts = fonts_label,
         sysroot_prefix = DEFAULT_SDK_NAME,
-        framework_json = str(framework_json(sdk.framework)) if sdk.framework else "",
-        framework_json_file = framework_json(sdk.framework) if sdk.framework else None,
-        engine_json_file = Label("@@{}//:flutter_engine.json".format(sdk.engine.repo_name)),
+        framework_json = _framework_json(sdk) if sdk.framework else "",
+        framework_json_file = _framework_json(sdk) if sdk.framework else None,
+        engine_json_file = sdk.engine + "//:flutter_engine.json",
     )
-    return _label_prefix(sdk.engine)
+    return sdk.engine
 
 def _toolchain_extension(module_ctx):
-    sdks = _declared_sdks(module_ctx)
+    declared = _declared_sdks(module_ctx)
+    sdks = declared.sdks
+
+    # The web SDK repository holds the Dart SDK of the machine Bazel runs on,
+    # so the extension's repositories depend on its OS and CPU.
+    host = host_platform(module_ctx.os)
     engine_prefixes = {}
     outline_packages = {}
     for name in sorted(sdks.keys()):
         sdk = sdks[name]
-        engine_prefixes[name] = _register_sdk(sdk)
+        engine_prefixes[name] = _register_sdk(sdk, host)
 
         # The SDK's dev root, for `@rules_flutter//flutter/pub`. Declared
         # unconditionally because bzlmod repositories are lazy: a workspace
@@ -204,11 +416,11 @@ def _toolchain_extension(module_ctx):
         flutter_dev_root_repo(
             name = name + "_dev_root_src",
             flutter_version = sdk.version or "",
-            framework_json = framework_json(sdk.framework) if sdk.framework else None,
-            sky_engine = (
-                "@@{}//sky_engine:pubspec.yaml".format(sdk.engine.repo_name) if sdk.engine else "@{}_sky_engine//sky_engine:pubspec.yaml".format(name)
-            ) if sdk.framework else None,
-            engine_revision = FLUTTER_VERSIONS[sdk.version].engine_revision if released else "",
+            framework_json = _framework_json(sdk) if sdk.framework else None,
+            sky_engine = sdk.engine + "//sky_engine:pubspec.yaml" if sdk.engine else (
+                "@{}_stock_sky_engine//sky_engine:pubspec.yaml".format(name) if sdk.framework else None
+            ),
+            engine_json = sdk.engine + "//:flutter_engine.json" if sdk.engine else None,
             sha256 = flutter_source_sha256(sdk.version) if released else "",
         )
 
@@ -220,10 +432,11 @@ def _toolchain_extension(module_ctx):
             dart_kernel_source(
                 name = name + "_outline_tool_src",
                 dart_version = FLUTTER_VERSIONS[sdk.version].dart_version,
+                sha256 = FLUTTER_VERSIONS[sdk.version].dart_source_sha256,
             )
             outline_packages[name] = "@{}_outline_tool_src//".format(name)
         else:
-            outline_packages[name] = _label_prefix(sdk.engine) + "//outline_tool"
+            outline_packages[name] = sdk.engine + "//outline_tool"
 
     # The repositories rules_flutter and its users name by fixed names, each
     # an alias into the selected SDK's own.
@@ -244,12 +457,22 @@ def _toolchain_extension(module_ctx):
         sdks = engine_prefixes,
         targets = WEB_SDK_TARGETS,
     )
+    flutter_face_repo(
+        name = "flutter_sky_engine",
+        sdks = engine_prefixes,
+        targets = SKY_ENGINE_TARGETS,
+    )
     for arch in android_arches():
         flutter_face_repo(
             name = "flutter_android_engine_" + arch,
             sdks = engine_prefixes,
             targets = {},
-            extra = android_engine_face_extra(engine_prefixes, arch, ANDROID_ABI_FOR_ARCH[arch]),
+            extra = android_engine_face_extra(
+                engine_prefixes,
+                arch,
+                ANDROID_ABI_FOR_ARCH[arch],
+                custom = [name for name, sdk in sdks.items() if sdk.engine != None],
+            ),
         )
     flutter_face_repo(
         name = "flutter_outline_tool",
@@ -266,12 +489,18 @@ def _toolchain_extension(module_ctx):
     flutter_sdks_repo(
         name = "flutter_sdks",
         sdks = encode_sdks(sdks),
+        frameworks = {name: _framework_json(sdk) for name, sdk in sdks.items() if sdk.framework},
     )
 
-    # Every SDK's toolchains, chosen among by `--@rules_flutter//flutter:sdk`.
+    # Every SDK's toolchains, and the settings that say which one the build
+    # uses: the one `--@rules_flutter//flutter:sdk` names, or without the flag
+    # the one `flutter.use_sdk` chooses.
     flutter_toolchains_repo(
         name = "flutter_toolchains",
         sdks = sorted(sdks.keys()),
+        default_sdk = declared.use,
+        hosts = _served_hosts(sdks, host),
+        unknown_machine = _unknown_machine(sdks, host, module_ctx.os),
     )
 
     # The browser web integration tests run in, one repository per host it is
@@ -285,6 +514,13 @@ def _toolchain_extension(module_ctx):
             version = CHROME_FOR_TESTING.version,
             sha256 = sha256,
         )
+
+    # The iproxy the dev tool forwards a wired iPhone's VM service through.
+    # Fetched only when the dev tool is built for macOS.
+    flutter_ios_usb_repo(
+        name = "flutter_ios_usb",
+        dependencies = IOS_USB_DEPENDENCIES,
+    )
 
     # The emulator Android integration tests run on by default, one repository
     # per host it is pinned for, and the system image it boots, one per ABI.
@@ -332,8 +568,13 @@ flutter = module_extension(
     implementation = _toolchain_extension,
     tag_classes = {
         "toolchain": flutter_toolchain,
+        "custom_framework": flutter_custom_framework,
+        "custom_engine": flutter_custom_engine,
+        "custom_sdk": flutter_custom_sdk,
+        "checkout": flutter_checkout,
+        "use_sdk": flutter_use_sdk,
     },
-    os_dependent = False,
-    arch_dependent = False,
-    doc = "Installs the Flutter SDKs and their toolchains.",
+    os_dependent = True,
+    arch_dependent = True,
+    doc = "Installs the Flutter SDKs and their toolchains. The module docstring says which SDKs exist and which a build uses.",
 )
