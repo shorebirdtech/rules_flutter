@@ -66,9 +66,8 @@ This is a Dart family of projects. Write repo tooling in Dart, as a
 `dart_binary` run with `bazel run`. Do not add shell scripts or wrapper
 scripts. When a rule can call a tool directly (multitool's `workspace_root`
 with `args`, say), use it rather than a script that only forwards arguments.
-Shell is acceptable only where an outside interface requires it, such as the
-`release_prep.sh` the bazel-contrib release workflow calls; keep it to the
-lines that interface needs.
+Shell is acceptable only where an outside interface requires it; keep it to
+the lines that interface needs.
 
 Tooling these repositories share lives in overhead, a module in rules_dart's
 `overhead/` that each takes as a dev dependency: the commit policy, release

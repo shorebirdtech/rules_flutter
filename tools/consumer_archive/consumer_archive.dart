@@ -3,7 +3,7 @@
 //   bazel run //tools/consumer_archive [-- <revision>]
 //
 // What a consumer of the published module gets is `git archive` output, which
-// `.gitattributes` trims (`release_prep.sh` builds it the same way): files the
+// `.gitattributes` trims (as GitHub's archive of a commit does): files the
 // archive omits are files the module must not need. The revision is HEAD by
 // default; changes not committed are not in it.
 import 'dart:io';

@@ -15,11 +15,10 @@
 # `@rules_flutter//...` from `e2e/external_module` checks that.
 #
 # `/e2e/` is listed workspace by workspace rather than wholesale: the archive
-# has to keep `e2e/smoke`, which `.bcr/presubmit.yml` names as `module_path`
-# and BCR resolves inside the extracted archive. Adding an e2e workspace means
+# keeps `e2e/smoke`, the minimal consumer module, which upstream's BCR
+# presubmit resolves inside the extracted archive. Adding an e2e workspace means
 # adding it here — the whole tree is 12MB against a 1.2MB archive, so the
 # exclusions are what keep the download small.
-/.bcr/ export-ignore
 /.devcontainer/ export-ignore
 /.github/ export-ignore
 /.gitattributes export-ignore
