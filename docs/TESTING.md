@@ -188,8 +188,8 @@ merely load:
     bazel build --lockfile_mode=error //path/to:target
     mv .bazelrc.user.aside .bazelrc.user
 
-To check one workspace's lock by hand, use the lock check below, which moves
-nothing aside.
+To check one workspace's lock by hand, use the lock check below, with the
+`.bazelrc.user` files moved aside as it describes.
 
 Two cautions:
 
@@ -237,16 +237,18 @@ overhead is the dev-tooling module rules_flutter shares with rules_dart (see
 `MODULE.bazel` it runs both `bazel mod deps` and `bazel build --nobuild //...`
 with `--lockfile_mode=error`. Run both: each has passed a lock the other rejected
 (`mod deps` caught a stale `rules_dart` `pub` entry in `e2e/smoke` and a
-missing protobuf entry in what is now `e2e/package_assets`;
+missing protobuf entry in what is now `e2e/packages/package_assets`;
 `build --nobuild` passed both; and a `build --nobuild` has caught a stale lock
 `mod deps` passed). Workspaces are found from `git ls-files`, so a new tracked
 workspace is covered without being listed anywhere. A workspace that is meant to
 fail carries a `lock_expected_failure.txt` naming what its failure prints.
 
-It runs Bazel with each workspace's committed `.bazelrc` but without its
-gitignored `.bazelrc.user` (keeping that file's `startup` lines, so the server is
-not restarted). Nothing in your tree is moved or edited. Your `~/.bazelrc` still
-applies.
+It runs Bazel with every rc file Bazel reads: each workspace's committed
+`.bazelrc`, its gitignored `.bazelrc.user` and your `~/.bazelrc`. Move the
+`.bazelrc.user` files (the root's and every workspace's) aside first, and put
+them back afterwards: their `--override_module` lines would put a local checkout
+into the lock. Startup options such as `--max_idle_secs` do not reach a lock, so
+a `.bazelrc.user` holding only those can stay.
 
 It lists each stale workspace with the command that fixes it:
 
@@ -254,8 +256,8 @@ It lists each stale workspace with the command that fixes it:
 
 which runs `bazel mod tidy --lockfile_mode=refresh`, then
 `bazel mod deps` and `bazel build --nobuild --lockfile_mode=update //...`, again
-without the `.bazelrc.user` (regenerating through it writes a lock that omits
-the registry entry for rules_dart). A stale Maven lock fails these steps; see
+with the `.bazelrc.user` files moved aside (regenerating through them writes a
+lock that omits the registry entry for rules_dart). A stale Maven lock fails these steps; see
 "Maven lock files" below for the re-pin, then refresh again. Commit the changed
 lock with the change that made it stale.
 
@@ -428,15 +430,26 @@ $ echo $?
 0
 ```
 
-Zero tests ran; the shell was told everything is fine. Nine of the seventeen
-e2e files are `skip:`-gated on `Platform.isMacOS`, so on any other host each of
-them "passes" having executed nothing.
+Zero tests ran; the shell was told everything is fine. About half the e2e files
+have at least one case `skip:`-gated on `Platform.isMacOS` (or on a flag derived
+from it). On any other host, a file whose cases are all gated "passes" having
+executed nothing; a file that also has Chrome cases runs those and skips the
+rest.
 
 `tool/e2e.dart` closes that by reading `dart test`'s machine-readable result
 stream instead of its exit code, and failing when the number of tests that
 actually *ran* is zero. It runs the suite on `Platform.resolvedExecutable`, the
 VM running the runner itself, so the `dart` its first line of output names is
 the one that runs — see the next section.
+
+The same goes for each selector you pass. A test file, `--plain-name` or
+`--name` that ran no case fails the run and is named in the verdict, even when
+the other selectors ran plenty: `dart test` joins them, so a mistyped name, or
+one file of six that is all gated on macOS, would otherwise leave the run green
+having proved nothing about it. A selector whose cases were all skipped on this
+host fails the same way and says so. A `--tags` selector is not checked
+one by one, since the result stream does not say which tags a case has; a run
+that selects nothing at all names the tags `dart_test.yaml` does not declare.
 
 One trap worth naming if you ever parse that stream yourself: a skipped test
 reports `result: "success"` in the JSON reporter, for backwards compatibility.
@@ -642,15 +655,16 @@ When re-running to reproduce, use `--nocache_test_results` and read the
 | `plugin_example_e2e_test.dart` | macOS/iOS-sim/Android/Chrome | Plugin apps render non-blank frames; Dart plugin registration survives `app.restart` (macOS); web plugins register in both DDC and `--wasm` dev mode (Chrome) |
 | `digest_pinned_e2e_test.dart` | Any | Fetches of rules_flutter's own repositories (`flutter_sky_engine_repo`, the profile, Android, iOS, desktop and cross repos, the web SDK repo with its per-host Dart SDK digests, a hosted pub package) in a generated workspace: the artifacts under test are served from a `--distdir` (a correct digest fetches from it), while the workspace's module graph still resolves from Bazel's registry or repository cache; a wrong one or one that is not a SHA-256 fails. The control for `digest_missing_e2e_test.dart` |
 | `android_engine_query_e2e_test.dart` | Any | `bazel query 'deps(//...)'` in `e2e/hello_world` (including the device-signed iOS app, whose provisioning profile is the `//:device_profile` flag, so a clean clone without the git-ignored `//device` still loads) loads every package, though the workspace names the Android engine repository of no ABI in `use_repo`. `flutter_android_engine` `select()`s over one repository per ABI and a query loads every branch, so the labels have to resolve from rules_flutter's own `use_repo`. The check that the workspace leaves an ABI out keeps it from passing vacuously |
-| `digest_missing_e2e_test.dart` | Any | The same repositories declared with a blank, unset or malformed digest must fail the fetch, naming the digest and the artifact, before a request is made (a fake engine revision answers 404, so a fetch that got that far did not ask). Also the web SDK repo's second archive, the Dart SDK, whose digest is looked up per host, and a hosted pub package served from `file://`, where an unpinned fetch succeeds (its `sha256` is a mandatory attribute, so a declaration without one is refused by Bazel itself; one that is blank is refused by rules_dart's `fetch_pub_archive`). Neither digest file is a Bazel target: each case runs `bazel fetch` in a second, generated workspace, which has to resolve its module graph and so cannot sit inside a sandboxed `bazel test`. The always-run parts are `//flutter/tests:pinned_test` and `//tools/download_guard:flutter_sources_test` |
-| `sdk_source_e2e_test.dart` | Any | How a Flutter SDK package is fetched from the pinned Flutter source: `flutter_pub_package` with `flutter_source_version`, over a fake release tarball served from a distdir (`digest_probe.dart`). A package in the tarball arrives with its own files at the repository root and nothing else of `packages/`, and one the release lacks (not in its `flutter_source_packages`, which `FLUTTER_SDK_PACKAGES` records per release) fails the fetch naming the package, the Flutter version and `bazel run @rules_flutter//flutter/pub -- get`. No network, no device |
+| `digest_missing_e2e_test.dart` | Any | The same repositories declared with a blank, unset or malformed digest must fail the fetch, naming the digest and the artifact, before a request is made (a fake engine revision answers 404, so a fetch that got that far did not ask). Also the web SDK repo's second archive, the Dart SDK, whose digest is looked up per host, and a hosted pub package served from `file://`, where an unpinned fetch succeeds (its files repository's `sha256`, rules_dart's `pub_archive_files`, is a mandatory attribute, so a declaration without one is refused by Bazel itself; one that is blank is refused by rules_dart's `fetch_pub_archive`). Neither digest file is a Bazel target: each case runs `bazel fetch` in a second, generated workspace, which has to resolve its module graph and so cannot sit inside a sandboxed `bazel test`. The always-run parts are `//flutter/tests:pinned_test` and `//tools/download_guard:flutter_sources_test` |
+| `sdk_source_e2e_test.dart` | Any | How a Flutter SDK package is fetched from the pinned Flutter source: `flutter_pub_package` over the files `flutter_source_files` extracts from a fake release tarball served from a distdir (`digest_probe.dart`). A package in the tarball arrives with its own files at the repository root and nothing else of `packages/`, and one the release lacks (not in its `packages`, which `FLUTTER_SDK_PACKAGES` records per release) fails the fetch naming the package, the Flutter version and `bazel run @rules_flutter//flutter/pub -- get`. A package the SDK lacks fetches with the Maven and member records every package has, and its target fails saying why. A package planned against an index whose version of a locked package its pubspec allows fetches, and one whose pubspec forbids it (`flutter_test`'s exact `test_api` pin) fetches too, its target failing at analysis naming the SDK, the lock that brings the version and the command that re-resolves it against that SDK. No network, no device |
 | `pub_archive_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`; the link cases skip on Windows) | How a hosted pub package's archive is fetched, through the `flutter_pub.from_lock()` hub of `pub_inputs_fixture.dart` over `file://`: a lock entry without a `sha256` is refused when the lock is read (a query of the hub fails, naming `pubspec.lock` and the package, not at a later fetch), and symbolic links in an archive that leave the package, point at nothing, or reach outside through another link are not extracted, while one that stays inside is kept and the package still loads |
-| `pubspec_reading_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | How a hosted package's pubspec is read, through the `flutter_pub.from_lock()` hub of `pub_inputs_fixture.dart` over `file://`. rules_dart's `read_pubspec` reads it as pub does, so what pub refuses fails the fetch of the package's repository naming the package and saying what pub says (YAML that does not load, a `name` that is not the package's or is missing, an empty file, `dependencies` that is not a map, a numeric `environment.sdk`, a package listing itself); and the `flutter:` block is projected from the document, not its layout: assets, fonts and an Android plugin in YAML flow style arrive as the block style's do |
-| `framework_pubspec_e2e_test.dart` | Any | What `package:flutter`'s repository (`flutter_framework_package`) takes from its pubspec, over a fake release tarball served from a distdir (`digest_probe.dart`, with the hub's index declared by a module extension of the probe): the language version `environment.sdk` implies (`^3.11.0-0` is `3.11`, none is pub's `2.7`), the library's deps being the runtime dependencies the lock lists and no `dev_dependencies` (the Flutter pubspec verbatim, comments inside the dependency block and nested `sdk: flutter` entries included), and a missing pubspec, a `name` that is not `flutter`, or YAML that does not load failing the fetch naming the package |
-| `pub_inputs_e2e_test.dart`, `pub_inputs_properties_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | What `flutter_pub.from_lock()` does with the inputs a lock and its packages hand it, in a generated workspace over `file://` packages (`pub_inputs_fixture.dart`, `generatedWorkspace` in `editable_workspace.dart`); no network, no device. The first file pins what works: legal odd file names, overlays at every rung of the version ladder and their edits, either Gradle dialect, `sdk: flutter` entries of any name in the hub. The second states the properties a pub input rules_flutter cannot honour must hold: a file name that cannot be a Bazel label, or an Android namespace that is not a Java package name, is refused at fetch naming the package, or built with the value kept as a string (never run as Starlark); an asset or a shader with `transformers` is refused at fetch naming the package; a lock entry it has no repository for (an unknown `source:`) leaves the hub loading, and its target fails at analysis naming the package when something depends on it; an overlay added after the first build, or beside a less specific one, is used by the next; a dependency in an `apply from:` script is read or reported, and the dependencies come from the build file Gradle uses; `bazel run @rules_flutter//flutter/pub -- get` writes nothing into the HOME it runs under (a canary directory, with the cache elsewhere) |
+| `pub_vendor_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`; the link case skips on Windows) | `bazel vendor` of a hosted pub package and of a Flutter SDK package (`digest_probe.dart`'s `hostedPubPackage` and `sdkSourcePackage`, from a distdir and `file://`): each source repository's BUILD file begins with the `pub_files.bzl` load that sets up its files repository, no vendored link names the vendoring output base, and a query of each package's `srcs` in a new output base, after the vendoring one is deleted, lists its `lib/` file. Without the load the glob reads through links to a files repository nothing has set up yet and `lib/**` matches nothing. Makes and deletes two output bases of its own. No device, no network |
+| `pubspec_reading_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | How a hosted package's pubspec is read, through the `flutter_pub.from_lock()` hub of `pub_inputs_fixture.dart` over `file://`. rules_dart's `read_pubspec` reads it as pub does, so what pub refuses (YAML that does not load, a `name` that is not the package's or is missing, an empty file, `dependencies` that is not a map, a numeric `environment.sdk`, a package listing itself) leaves the package's repository fetching (`bazel fetch --all` succeeds) and its target failing at analysis, naming the package and saying what pub says; and the `flutter:` block is projected from the document, not its layout: assets, fonts and an Android plugin in YAML flow style arrive as the block style's do; a `flutter:` block flutter_tools refuses leaves the package fetching, its target failing at analysis naming the package and the entry |
+| `framework_pubspec_e2e_test.dart` | Any | What `package:flutter`'s repository (`flutter_framework_package`) takes from its pubspec, over a fake release tarball served from a distdir (`digest_probe.dart`, with the hub's index declared by a module extension of the probe): the language version `environment.sdk` implies (`^3.11.0-0` is `3.11`, none is pub's `2.7`), the library's deps being the runtime dependencies the lock lists and no `dev_dependencies` (the Flutter pubspec verbatim, comments inside the dependency block and nested `sdk: flutter` entries included), and a missing pubspec, a `name` that is not `flutter`, or YAML that does not load leaving the fetch succeeding and the target failing at analysis naming the package, and a release's pubspec that forbids the version the build uses of a locked package (its exact `material_color_utilities` pin) fetching, its target failing at analysis naming the lock that brings it |
+| `pub_inputs_e2e_test.dart`, `pub_inputs_properties_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | What `flutter_pub.from_lock()` does with the inputs a lock and its packages hand it, in a generated workspace over `file://` packages (`pub_inputs_fixture.dart`, `generatedWorkspace` in `editable_workspace.dart`); no network, no device. The first file pins what works: legal odd file names, overlays at every rung of the version ladder and their edits, either Gradle dialect, `sdk: flutter` entries of any name in the hub, and a lock that holds a package at another version than the release's SDK packages pin loading (the pin is checked when the SDK package is fetched). The second states the properties a pub input rules_flutter cannot honour must hold: a file name that cannot be a Bazel label leaves the package loading and its target refusing it at analysis, naming the package, or is built with the value kept as a string (never run as Starlark); an Android namespace that is not a Java package name leaves the package loading and fails its Android library at analysis, naming the package, never run as Starlark; an asset or a shader with `transformers` is refused by the package's target at analysis, naming the package; a lock entry it has no repository for (an unknown `source:`) leaves the hub loading, and its target fails at analysis naming the package when something depends on it; an overlay added after the first build, or beside a less specific one, is used by the next; a dependency in an `apply from:` script is read or reported, and the dependencies come from the build file Gradle uses; `bazel run @rules_flutter//flutter/pub -- get` writes nothing into the HOME it runs under (a canary directory, with the cache elsewhere) |
 | `pub_commit_pinned_e2e_test.dart` | Any (needs `git`, `tar`, `shasum`/`sha256sum`) | A lock's `source: git` packages (`GitPackage` in `pub_inputs_fixture.dart` makes the repositories on the spot, so no network): the spoke is the locked commit's tree at its root, the whole repository or a `path:` directory of a monorepo, without later commits or the rest of the repository; a plain package is a plain library, a plugin a plugin, and one with assets bundles them; a hosted package depending on one reaches its library; a `resolved-ref` that is not a full commit id is refused when the lock is read, a commit the repository lacks or a `path:` that is no directory of it at the fetch, each naming the package; a git entry mapped by `resolve` is never fetched |
 | `pub_versions_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | Several `flutter_pub.from_lock()` locks sharing one repository per package (`PubInputsFixture.otherHubs`): two hubs reach one `flutter_pub_lib__<package>`; the highest version any lock records is built, whichever module's lock it is (`PubInputsFixture.modules`), silently when it raises only another module's lock, with a warning naming both locks, versions and `pub -- upgrade` when it raises one of the root's, nothing at `flutter_pub.settings(check_direct_dependencies = "off")`, and failing at `"error"`; that exact command, run while the failure stands against a registry served over HTTP, moves the lock forward and the hub then analyses; hosted vs git, two registries and one version with two digests fail naming both, at any level; a dependency module's `ignore_hooks` fails; `resolve` maps a package for every hub and two different maps fail; two tags of one name are one hub. No network, no device |
-| `pub_resolve_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | A lock's packages built from the workspace targets `flutter_pub.from_lock(resolve = {...})` maps, in the generated monorepo workspace of `pub_inputs_fixture.dart` (the lock at `apps/app/pubspec.lock`). A map that does not fit the lock is refused when the lock is read, naming the lock and the package (a path package mapped to nothing, a mapped name the lock lacks, a path package's absolute path, path out of the repository, label in another repository or another Bazel package than the path names); what needs a path package's files is refused when the hub's label is fetched (no `pubspec.yaml`, another name, a dependency the lock lacks; another version is accepted), and editing the pubspec re-runs the check. The hub, and a hosted package that depends on the mapped one, reach the workspace target; it is one configured target however it is reached; a cycle through a hosted package is Bazel's cycle error. A hosted package mapped to a target replaces it for the whole graph and is never fetched (its lock entry names an archive that does not exist), and a target that declares another package name than its key fails analysis naming both |
+| `pub_resolve_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | A lock's packages built from the workspace targets `flutter_pub.from_lock(resolve = {...})` maps, in the generated monorepo workspace of `pub_inputs_fixture.dart` (the lock at `apps/app/pubspec.lock`). A map that does not fit the lock is refused when the lock is read, naming the lock and the package (a path package mapped to nothing, a mapped name the lock lacks, a path package's absolute path, path out of the repository, label in another repository or another Bazel package than the path names); what needs a path package's files is refused when the hub's label is fetched (no `pubspec.yaml`, another name, a dependency the lock lacks; another version is accepted), and editing the pubspec re-runs the check. The hub, and a hosted package that depends on the mapped one, reach the workspace target; it is one configured target however it is reached; the mapped package's pubspec is read where the lock says it is, inside the repository or out, so a cycle through it and a hosted package is refused when the packages are planned, naming the target, and an outside pubspec that is not there fails nothing. A hosted package mapped to a target replaces it for the whole graph and is never fetched (its lock entry names an archive that does not exist), and a target that declares another package name than its key fails analysis naming both |
 | `pub_path_package_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | A lock's `path` packages that no Bazel target builds, in the generated workspace of `pub_inputs_fixture.dart`. A package named in `build_from_pubspec` is its directory, in the repository or outside it, and a library that depends on the hub's label builds; a file added to its `lib/` is built by the next build, while tool output written into it (`build/`, `.dart_tool/`, `android/.gradle/`, `android/build/`) neither enters its repository nor fetches it again; a directory holding a `BUILD.bazel`, or no directory, is refused at the fetch saying what to do. A package named in `ignored` leaves the hub loading, and a library that depends on it fails analysis with the module's reason |
 | `pub_cycle_e2e_test.dart` | Any (macOS/Linux: needs `tar` and `shasum`/`sha256sum`) | Packages that depend on each other, which pub allows and Bazel does not, in the generated `flutter_pub.from_lock()` workspace of `pub_inputs_fixture.dart` over `file://` packages, plus the real `dio` 5.11.1 and `dio_web_adapter` 2.2.2 lock. Whichever package of a cycle an app depends on, every package of it is in the build at the locked version, each keeps its own assets (under `packages/<name>/`), its plugin registers once and its own Android library; a cycle mixes pure-Dart packages and packages with assets, one asking for the Material icon font gets it, and a package built from a plugin overlay cannot be in a cycle (the build says so). The fixture's cycles are declared with `flutter_pub.cycle()`; `dio`'s builds with no declaration, through rules_dart's curated one. An undeclared cycle fails naming it and the declaration to add, a root declaration of part of a cycle or of packages in no cycle fails, and one naming a package the build does not build fails when the module is read. The checks are analysis-time assertions over the providers a target carries |
 
@@ -803,7 +817,7 @@ bazel run //tools/consumer_archive                            # extract the rele
 cd e2e/external_module && bazel query "@rules_flutter//..."   # a consumer lists the whole module (CI: consumer-query)
 cd e2e/external_module && bazel build --nobuild "@rules_flutter//..."   # and analyses all of it
 bazel run @overhead//preset -- --check                       # the generated .bazelrc preset is current
-cd e2e/dual_hub && bazel test //...
+cd e2e/packages && bazel test //dual_hub/...
 cd e2e/hello_world && bazel test //...
 cd e2e/hello_world && bazel coverage --combined_report=lcov //coverage/... \
   && bazel run //coverage/check -- "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage/lib/shapes.dart coverage/units/lib/units.dart
@@ -814,14 +828,15 @@ cd e2e/ffi_example && bazel test //...
 cd e2e/plugin_example && bazel test //...
 cd e2e/plugin_example && bazel test //... --config=deep  # before a merge: the live Gradle metadata check, the Gradle-built host app
 cd e2e/macos_example && bazel test //...
-cd e2e/integration_test && bazel test //...  # macOS: needs an unlocked, awake desktop; Windows: `build //...`, its tests run on the VM (below)
+cd e2e/integration_test && bazel test //...  # the tests that need no desktop, simulator or emulator
+cd e2e/integration_test && bazel test --config=machine //...  # all of them: macOS needs an unlocked, awake desktop; Windows ones run on the VM (below)
 cd e2e/ios_example && bazel test //...
 cd e2e/multi_window_example && bazel test //...
 cd e2e/android_example && bazel test //...
 cd e2e/web_example && bazel test //...
 cd e2e/pub_resolve && bazel test //...  # macOS, Linux (:render_test)
 cd e2e/desktop_example && bazel test //...  # Linux and Windows targets, each target_compatible_with its own OS: on macOS nothing runs
-cd e2e/package_assets && bazel test //...   # the link hook tests on any host; the macOS app's tests on macOS only (target_compatible_with)
+cd e2e/packages && bazel test //package_assets/...   # the link hook tests on any host; the macOS app's tests on macOS only (target_compatible_with)
 ```
 
 **Platform notes:**
@@ -883,18 +898,17 @@ cd e2e/package_assets && bazel test //...   # the link hook tests on any host; t
   SDK build *that workspace's* hooks before the tool's `main` runs at all, so
   the process dies before `daemon.connected`. The hook's actual error is in
   `<workspace>/.dart_tool/hooks_runner/<pkg>/<hash>/stderr.txt`.
-- `cross_compile_example` has **no test targets**, so it is verified with
-  `bazel build //...`, not `bazel test`. Its `.bazelrc` pins
-  `--platforms=linux_x64` for every command, and a test there would find no test
-  toolchain on a macOS host. The analysis and format checks are an aspect, not
-  tests, and that workspace enables it under `build`, so one command covers the
-  cross-compiled bundle and the checks:
+- `cross_compile_example` sets no `--platforms` for the workspace. Its
+  `:linux_x64_debug_test` is a `build_test` of every Linux target built for
+  `:linux_x64_llvm` (`linux_x64` with the LLVM toolchains, which only that
+  platform names) with `-c dbg` by a transition, so a plain `bazel test //...` on a
+  Mac checks the cross build, and the Linux targets themselves, compatible with
+  Linux alone, are skipped in the host's configuration. To build the bundle
+  itself for a VM, name the platform on the command line:
   ```sh
   cd e2e/cross_compile_example
-  bazel build //...
+  bazel build --platforms=//:linux_x64_llvm -c dbg :cross_linux
   ```
-  `bazel test //...` there exits 4 ("No test targets were found") however clean
-  the checks are.
 
 ### `e2e/integration_test`
 
@@ -910,7 +924,9 @@ launch a window, so run it on a Mac with an unlocked screen and an awake display
 the display awake itself and fails, saying which, when the screen is locked or the
 display asleep. The Android tests boot an emulator each (below), which needs the
 host's hypervisor and nothing attached; the iOS ones need Xcode with an iOS
-runtime installed. `bazel test //...` there runs:
+runtime installed. Those tests are tagged for what they need (§ "What a test
+needs from the machine"), so a plain `bazel test //...` builds them and runs
+the rest, and `bazel test --config=machine //...` runs these too:
 
 | Target | Property |
 |---|---|
@@ -957,10 +973,10 @@ has no `dart:ui`), so an app on a phone or in a browser compares exactly as one 
 the desktop does. The update round trip, run for macOS: `bazel run
 //:macos_golden_mismatch -- --update-goldens` rewrites `goldens/macOS/swatch.png`
 as the orange swatch (the file's `shasum` changes), `bazel test
-//:macos_golden_test` then fails with the pixel diff, and `bazel run
+--config=machine //:macos_golden_test` then fails with the pixel diff, and `bazel run
 //:macos_golden_test -- --update-goldens` writes the blue one back, byte for byte
 what is committed (`git status` shows nothing) and `bazel test
-//:macos_golden_test` passes.
+--config=machine //:macos_golden_test` passes.
 
 The web tests run in a headless browser and need no desktop session. macOS and Linux run them; on Linux the browser loads the pinned Linux runtime's libraries and runs without its sandbox. Windows skips them: they are not verified there.
 
@@ -977,7 +993,7 @@ app for arm64-v8a and installs it on the attached device (left installed, as
 `flutter test` leaves it: `adb uninstall com.example.integration_test_example`
 after):
 
-    bazel test //:android_pass_test //:android_filter_test //:android_red_twin_test \
+    bazel test --config=machine //:android_pass_test //:android_filter_test //:android_red_twin_test \
         --@rules_flutter//flutter/integration_test:android_device=attached \
         --test_env=ANDROID_SERIAL=<serial>
 
@@ -1007,9 +1023,9 @@ each tapping once a second for forty seconds and awaiting a frame after each tap
 both finished all forty, so a window another covers keeps drawing, unlike macOS's.
 They also ran from the VM's SSH logon, which has no visible desktop, as well as from
 its console session, so the interactive session is for the screenshot, not for the
-test (a host with no display adapter was not tried). CI builds this workspace, Android
-apps included, and does not run it (it never runs a test that needs a GUI session or a
-device).
+test (a host with no display adapter was not tried). CI runs `bazel test //...`
+here on each system, which builds every test, Android and iOS apps included, and
+runs those that need no desktop session, simulator or emulator.
 
 Changing the integration test rules (`flutter/integration_test.bzl`,
 `flutter/private/flutter_integration_*.bzl`, the support library in
@@ -1045,7 +1061,28 @@ fourth thing to do when none applies.
   `//tools/e2e_copy_guard:copies_identical_test` fails when copies differ. A new
   patch is covered by its name; any other file goes into
   `tools/e2e_copy_guard/mirrored.bzl`. `.bazelversion` is checked against the
-  root's automatically, for every workspace.
+  root's automatically, for every workspace, and so are the `--incompatible_*`
+  flags of each `.bazelrc`: change them in the root and every e2e `.bazelrc`
+  together.
+
+### What a test needs from the machine
+
+A test that needs more of the machine than a plain `bazel test` may assume is
+tagged for it:
+
+| Tag | Needs |
+|---|---|
+| `requires-gui` | the host's desktop session: an app window on an unlocked, awake macOS desktop, or the console session of a Windows host |
+| `requires-simulator` | Xcode with an iOS runtime, for a simulator the test makes for itself |
+| `requires-emulator` | the host's hypervisor, for an Android emulator the test boots for itself |
+
+A workspace with such tests leaves them out of every `bazel test` in its
+`.bazelrc` (`--test_tag_filters`), so `bazel test //...` passes on any host and
+on CI's runners. It still builds them. `bazel test --config=machine //...`
+runs them too. The filter applies to a test named on the command line as
+well, so a command that names one passes `--config=machine`. Only
+`e2e/integration_test` uses the tags so far; elsewhere a test like these is
+`manual` and run by the dev tool's e2e harness or by hand (§ 2, § 4).
 
 ### What CI covers
 
@@ -1056,17 +1093,22 @@ fourth thing to do when none applies.
   targets, on Linux for the rest), which fails on a stale or incomplete
   `MODULE.bazel.lock` in any workspace, see "Lock files" in § 1;
 - the pre-commit hooks, the dev_tool unit tests, and the web smoke test (§ 5);
-- `bazel test //...` in every e2e workspace (`build //...` where it has no test
-  targets, or its tests need a desktop session or a device), on each operating
-  system where it exercises something no other job does. A system can have its
-  own command and tests in the table: `integration_test` builds on macOS and
-  Windows, and on Linux tests the `:linux_*` and `:web_*` targets, which need
-  no desktop. The table names the prefixes (`testsNamed`), not the targets: the
-  plan reads every `<prefix>...test` target from the workspace's `BUILD.bazel`,
-  so a new `web_*_test` runs in CI without a table edit, and a prefix that
-  matches nothing fails the plan.
+- `bazel test //...` in every e2e workspace, on each operating system where it
+  exercises something no other job does. A test that needs a desktop session, a
+  simulator or an emulator is tagged for it and left out by the workspace's
+  `.bazelrc` (§ "What a test needs from the machine"), so `//...` passes on a
+  runner. An entry of the table is a module and its target patterns (`//...`
+  for every workspace today), and a system can run only the entry's tests of
+  one tag: `plugin_example` on Windows runs those tagged `windows_host`, with
+  `--build_tests_only --test_tag_filters=windows_host`. The table names the
+  tag (`testsTagged`), not the targets, so a test given the tag runs in CI
+  without a table edit, and a tag that no BUILD file of the module has fails
+  the plan;
+- weekly only, `bazel test --config=deep --test_tag_filters=deep --build_tests_only //...`
+  in each e2e workspace that has `deep` tests, on Linux (the `E2E deep` jobs,
+  below).
 
-The last is a matrix of one job per workspace and system, named `E2E
+The matrix of one job per workspace and system is named `E2E
 (<workspace>, <runner>)`. It is generated: the `Plan E2E jobs` job runs
 `tools/ci_matrix/e2e_matrix.dart`, and that table is the one place that says
 where a workspace runs and why. A job costs runner time (a macOS minute costs
@@ -1091,21 +1133,33 @@ finds a gap before a push.
 | `smoke` | macOS, Linux, Windows | the BCR presubmit module, which BCR runs on each | |
 | `hello_world` | macOS, Linux, Windows | the Tier-1 app over each `flutter create` runner; profile bundles on Linux and Windows; Android and web from each host | |
 | `codegen` | macOS, Linux, Windows | Native Assets loaded by each host's `flutter_tester` | |
-| `plugin_example` | macOS, Linux, Windows (the `:windows_*` tests and `:android_bundle_build_test`) | each platform's implementations of real pub plugins; on Windows also one arm64 APK, whose AAR resources are the longest paths aapt2 opens ("Windows and MAX_PATH") | |
+| `plugin_example` | macOS, Linux, Windows (the tests tagged `windows_host`) | each platform's implementations of real pub plugins; on Windows also one arm64 APK, whose AAR resources are the longest paths aapt2 opens ("Windows and MAX_PATH") | |
 | `ffi_example` | macOS, Linux, Windows | native libraries in each platform's bundle, and a plugin with a Dart plugin class and `native_deps` (`//plugin_class`) | |
-| `cross_compile_example` | macOS (`build`) | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
+| `cross_compile_example` | macOS | the Mac-to-Linux cross toolchain | Linux: a native build is `hello_world`'s; Windows: no such pair |
 | `macos_example`, `ios_example`, `multi_window_example` | macOS | Apple-only features | Linux, Windows: Apple-only |
-| `integration_test` | macOS, Windows (`build`), Linux (`test` of the `:linux_*` and `:web_*` targets) | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on Linux those tests running headless on the pinned Linux runtime, fetched with every file of it and of the Chrome that loads it checked against the oldest supported host; on Windows the Windows ones (the Android tests, which run on an emulator pinned for macOS and Linux only, are skipped there): most of its tests need a GUI session or a hypervisor, which CI never runs a test in | |
+| `integration_test` | macOS, Linux, Windows | the integration test rules building the app and test of each case, the Android and iOS apps included on macOS; on macOS and Linux the web tests in headless Chrome, and on Linux the Linux ones on the pinned Linux runtime, fetched with every file of it and of the Chrome that loads it checked against the oldest supported host; on Windows the Windows ones building (the Android tests, which run on an emulator pinned for macOS and Linux only, are skipped there). The tests that need a desktop session, a simulator or an emulator are built and not run: CI never runs a test that needs one | |
 | `pub_resolve` | Linux | a monorepo's path pub packages and a fork of a hosted one, built from the workspace targets the lock maps (platform-neutral); its `:render_test` runs the app in the pinned headless Chrome with the pinned Linux runtime | macOS, Windows: the same again |
-| `dual_hub`, `web_example`, `android_example` | Linux | their platform-neutral subject, once, on the cheapest runner; web_example's `:render_test` runs the app in the pinned headless Chrome with the pinned Linux runtime | macOS, Windows: the same again |
+| `packages` (`//dual_hub/...`), `web_example`, `android_example` | Linux | their platform-neutral subject, once, on the cheapest runner; web_example's `:render_test` runs the app in the pinned headless Chrome with the pinned Linux runtime | macOS, Windows: the same again |
 | `android_example` | Windows (also) | an Android build on a Windows host: `gen_snapshot.exe`, engine-strip path separators, rules_android JVMs without an up-front heap commit (the committed patch) | |
 | `asset_bundle` | macOS | the `flutter_assets/` tree of every platform against `flutter build`'s, once | Linux, Windows: no other host can analyse its iOS targets |
 | `desktop_example` | Linux, Windows | Tier-2 Linux rules on Linux, Tier-2 Windows rules on Windows | macOS: its targets are Linux-only or Windows-only |
-| `package_assets` | Linux, macOS | on Linux the package link hooks over a release compile's recorded uses (platform-neutral, run once, on the cheapest runner); on macOS a hand-linked code asset and a data asset on the app's own package, loaded by the macOS app | Windows: the same again |
+| `packages` (`//package_assets/...`) | Linux, macOS | on Linux the package link hooks over a release compile's recorded uses (platform-neutral, run once, on the cheapest runner); on macOS a hand-linked code asset and a data asset on the app's own package, loaded by the macOS app | Windows: the same again |
+
+The `E2E deep` jobs run on the weekly schedule only, one per workspace whose
+table entry has a `deep` field saying what its run exercises. The `deep` tier
+is left out of the jobs above, and these are the only tests of a real Gradle
+build consuming our Android add-to-app output. They run on Linux because a
+Gradle host needs only the JDK and the Android SDK, which Bazel downloads on any
+host. The plan fails when a workspace has a `deep`-tagged target and no `deep`
+entry, or an entry and no such target.
+
+| Workspace | What the weekly deep run adds |
+|---|---|
+| `plugin_example` | `gradle_host_test`: a Gradle-built host app, offline, against the debug, profile and release repositories of the module, with each APK's native libraries per ABI, dexed plugin classes and merged manifest checked; `gradle_module_metadata_live_test`: the pinned Gradle module metadata against the live Maven repositories |
+| `custom_engine` | `gradle_host_test`: a Gradle-built host app, offline, against the stand-in engine's module, whose APK must carry the module repository's `libflutter.so` |
 
 The table in `e2e_matrix.dart` is the source; if this one disagrees, that one is
-right. The macOS and Linux jobs run exactly `bazel test //...` (`build` for
-`cross_compile_example`), with the flags of `CI_BAZELRC` in ci.yaml, which
+right. The macOS and Linux jobs run exactly `bazel test //...`, with the flags of `CI_BAZELRC` in ci.yaml, which
 every setup-bazel step writes to the user's `.bazelrc` (a quiet log, and a
 failing test's output in it), so a target the system cannot build must
 carry `target_compatible_with` and is then skipped, not failed. The Windows jobs
@@ -1178,11 +1232,11 @@ instead of extracting it.
 | multi_window_example | Multi-window macOS + multi-scene iOS builds with FlutterEngineGroup; macOS bundle verification |
 | android_example | Android APK build (3 approaches: flutter_android_app, Bazel-generated manifest, custom manifest) + APK content verification + web build |
 | desktop_example | Linux desktop app (2 approaches: flutter_linux_app, Bazel-generated runner, with its window title) and Windows desktop app (3 approaches: flutter_windows_app, Bazel-generated runner, custom cc_binary), each with bundle structure verification |
-| package_assets | Package link hooks over a release compile's recorded uses (data assets dropped and kept, native and web, a hook that fails the build, an app's own hook), and a code asset and a data asset declared on an app's own package (`//own_assets`), with a macOS runtime test |
+| packages: package_assets | Package link hooks over a release compile's recorded uses (data assets dropped and kept, native and web, a hook that fails the build, an app's own hook), and a code asset and a data asset declared on an app's own package (`//package_assets/own_assets`), with a macOS runtime test |
 
 ### Plugin verification matrix
 
-`e2e/plugin_example` exercises real pub.dev plugins — `path_provider` (federated, SwiftPM Apple, **jnigen Android** — path_provider_android ≥ 2.3 calls Java through `package:jni`, whose C support library `libdartjni.so` is built from source by the bundled `flutter/ext/jni` overlay and packaged at `lib/<abi>/` — pure-Dart Linux/Windows), `url_launcher` (federated, SwiftPM Apple, Kotlin Android, real C++ Linux/Windows, web Dart), `package_info_plus` (monolithic, every platform including web), `shared_preferences` (federated; its Android Gradle build declares `androidx.datastore` and `androidx.preference`, which must come from the workspace's `rules_flutter_maven` install; every platform including web), `audio_session` (curated `flutter/ext/` overlay), and `record_android` 1.5.1 (Android-only federated implementation used without its umbrella — regression case for a plugin that ships `android/src/main/res/` resources referenced as `R.drawable.ic_mic` and declares **no** Gradle dependencies, compiling purely against the embedding's exported androidx classpath) — plus the hand-written `:greeting_plugin` (regression case for pure-Bazel-deps plugins). `lib/main.dart` resolves a string from each plugin and renders + emits them on a single `plugin_example_results …` log line. Each platform's e2e check asserts the line is correct; empty/null/error content fails loudly.
+`e2e/plugin_example` exercises real pub.dev plugins — `path_provider` (federated, SwiftPM Apple, **jnigen Android** — path_provider_android ≥ 2.3 calls Java through `package:jni`, whose C support library `libdartjni.so` is built from source by the bundled `flutter/ext/jni` overlay and packaged at `lib/<abi>/` — pure-Dart Linux/Windows), `url_launcher` (federated, SwiftPM Apple, Kotlin Android, real C++ Linux/Windows, web Dart), `package_info_plus` (monolithic, every platform including web), `shared_preferences` (federated; its Android Gradle build declares `androidx.datastore` and `androidx.preference`, which must come from the workspace's `rules_flutter_maven` install; every platform including web), `audio_session` (SwiftPM Apple whose `Package.swift` reads `AUDIO_SESSION_MICROPHONE`: `:verify_ios_app_test` checks an app that sets it to 0 leaves out the record permission code and one that sets nothing keeps it), and `record_android` 1.5.1 (Android-only federated implementation used without its umbrella — regression case for a plugin that ships `android/src/main/res/` resources referenced as `R.drawable.ic_mic` and declares **no** Gradle dependencies, compiling purely against the embedding's exported androidx classpath) — plus the hand-written `:greeting_plugin` (regression case for pure-Bazel-deps plugins). `lib/main.dart` resolves a string from each plugin and renders + emits them on a single `plugin_example_results …` log line. Each platform's e2e check asserts the line is correct; empty/null/error content fails loudly.
 
 | Assertion | Source | Expected |
 |---|---|---|
@@ -1199,7 +1253,7 @@ instead of extracting it.
 | Web | `plugin_example_e2e_test.dart`, group `Web e2e` (asserts the four strings from the app-output line the run emits). |
 | macOS | `:verify_macos_app_test` (manual stdout check) plus the `macOS e2e` group of `tools/dev_tool/test/e2e/plugin_example_e2e_test.dart` (runs `:plugin_macos`, captures a screenshot via the dev_tool's HTTP control channel, asserts the PNG is well-formed and non-blank). Run with `bazel run //tools/dev_tool:e2e -- test/e2e/plugin_example_e2e_test.dart --plain-name="macOS"`. |
 | iOS Simulator | `iOS Simulator e2e` group of the same file. Boot any iOS simulator first (`xcrun simctl boot <udid>`), then run `bazel run //tools/dev_tool:e2e -- … --plain-name="iOS Simulator"`. |
-| Android | `:android_bundle_build_test` (build), `:verify_android_apk_test` (APK content of five builds: arm64-v8a, arm64-v8a under `-c dbg`, armeabi-v7a, x86_64 and all three at once, each holding exactly its ABIs' `libflutter.so`, `libapp.so`, `libdartjni.so` and `androidx.datastore`'s AAR library, ELF/ABI-valid, jni support classes in dex — runs in `bazel test //...`), `:verify_android_build_config_identity_test` (reads the plugins' generated `BuildConfig` classes from the dex of a debug, a profile and two release APKs: each is present and its `LIBRARY_PACKAGE_NAME` is its plugin's package), `:verify_android_build_config_mode_test` (the same classes say what Gradle's would for the mode: `DEBUG` true and `BUILD_TYPE` `debug` in a debug build, `profile` in a profile build, false and `release` in release), `:verify_android_app_test` (manual: installs the both-ABI APK on the emulator or device attached, RESUMED + crash-buffer fail-fast, asserts the `plugin_example_results` logcat line reports a real `/data/user/0/…` path from path_provider — proves jnigen plugin registration end to end), plus the `Android e2e` group. Pre-step: bring up a device — either USB-authorize a phone (`adb devices` shows `device`) or boot an emulator (`emulator -avd flutter_test &`). Run `verify_android_app_test` (here and in `android_example`) with `bazel test :verify_android_app_test --test_tag_filters= --test_output=all`, plus `--test_env=ANDROID_SERIAL=<serial>` when more than one device is attached (a phone and an emulator, say). With several attached and no `$ANDROID_SERIAL`, the test fails at once naming the attached devices and how to choose, rather than letting `adb install` refuse mid-test; a serial `adb` does not list in the `device` state (not attached, `offline`, `unauthorized`) fails the same way, and every `adb` call after that carries `-s <serial>` (`AdbApp.chooseDevice` in `tools/e2e_testing`). It needs no `adb` on `PATH`: it runs the `adb` of the `@androidsdk` repository, the Android SDK at `$ANDROID_HOME` (exported as above) that Bazel already resolves for the build, which the target names in `data` and hands to the test as `$ADB_RUNFILE` (`$(rlocationpath @androidsdk//:adb)`; `AdbApp.fromRunfiles`). A target missing either fails naming what to set, and an SDK without `platform-tools` fails naming the package. Separately, the dev tool's own Android e2e cases (`glass_plugin_e2e_test.dart` and `plugin_example_e2e_test.dart`) resolve their device via `AndroidDeviceProbe.detect()`, which asks the `adb` of the root's downloaded SDK that `//tools/dev_tool:e2e` hands the suite as `$FLUTTER_BAZEL_E2E_ADB` (the dev tool drives the device with its workspace's own `@androidsdk`), and run `:plugin_android_fat` against it; both emulator and connected-device paths must pass. That probe separates two outcomes a single nullable serial would collapse: `adb` running and listing nothing is the one legitimate skip, while an `adb` that cannot be run, exits non-zero, prints output it cannot parse, or lists only devices outside the `device` state (`unauthorized`, `offline`) **fails the test** naming the cause — a broken detector must not report itself as an empty bench. Set `$ANDROID_SERIAL` to choose between an attached phone and a booted emulator; naming one that `adb` does not offer in the `device` state is a failure, not a skip. The dev_tool screenshot goes through the platform — `adb screencap` on a physical device, the emulator console on an emulator (see "Why an emulator is captured through its console") — because Android declares `supportsFlutterScreenshot => false` (Impeller cannot encode one) and the `screenshot/flutter` endpoint refuses with `501`. |
+| Android | `:android_bundle_build_test` (build), `:verify_android_apk_test` (APK content of five builds: arm64-v8a, arm64-v8a under `-c dbg`, armeabi-v7a, x86_64 and all three at once, each holding exactly its ABIs' `libflutter.so`, `libapp.so`, `libdartjni.so` and `androidx.datastore`'s AAR library, ELF/ABI-valid and stripped, jni support classes in dex — runs in `bazel test //...`), `:verify_android_build_config_identity_test` (reads the plugins' generated `BuildConfig` classes from the dex of a debug, a profile and two release APKs: each is present and its `LIBRARY_PACKAGE_NAME` is its plugin's package), `:verify_android_build_config_mode_test` (the same classes say what Gradle's would for the mode: `DEBUG` true and `BUILD_TYPE` `debug` in a debug build, `profile` in a profile build, false and `release` in release), `:verify_android_app_test` (manual: installs the both-ABI APK on the emulator or device attached, RESUMED + crash-buffer fail-fast, asserts the `plugin_example_results` logcat line reports a real `/data/user/0/…` path from path_provider — proves jnigen plugin registration end to end), plus the `Android e2e` group. Pre-step: bring up a device — either USB-authorize a phone (`adb devices` shows `device`) or boot an emulator (`emulator -avd flutter_test &`). Run `verify_android_app_test` (here and in `android_example`) with `bazel test :verify_android_app_test --test_tag_filters= --test_output=all`, plus `--test_env=ANDROID_SERIAL=<serial>` when more than one device is attached (a phone and an emulator, say). With several attached and no `$ANDROID_SERIAL`, the test fails at once naming the attached devices and how to choose, rather than letting `adb install` refuse mid-test; a serial `adb` does not list in the `device` state (not attached, `offline`, `unauthorized`) fails the same way, and every `adb` call after that carries `-s <serial>` (`AdbApp.chooseDevice` in `tools/e2e_testing`). It needs no `adb` on `PATH`: it runs the `adb` of the `@androidsdk` repository, the Android SDK at `$ANDROID_HOME` (exported as above) that Bazel already resolves for the build, which the target names in `data` and hands to the test as `$ADB_RUNFILE` (`$(rlocationpath @androidsdk//:adb)`; `AdbApp.fromRunfiles`). A target missing either fails naming what to set, and an SDK without `platform-tools` fails naming the package. Separately, the dev tool's own Android e2e cases (`glass_plugin_e2e_test.dart` and `plugin_example_e2e_test.dart`) resolve their device via `AndroidDeviceProbe.detect()`, which asks the `adb` of the root's downloaded SDK that `//tools/dev_tool:e2e` hands the suite as `$FLUTTER_BAZEL_E2E_ADB` (the dev tool drives the device with its workspace's own `@androidsdk`), and run `:plugin_android_fat` against it; both emulator and connected-device paths must pass. That probe separates two outcomes a single nullable serial would collapse: `adb` running and listing nothing is the one legitimate skip, while an `adb` that cannot be run, exits non-zero, prints output it cannot parse, or lists only devices outside the `device` state (`unauthorized`, `offline`) **fails the test** naming the cause — a broken detector must not report itself as an empty bench. Set `$ANDROID_SERIAL` to choose between an attached phone and a booted emulator; naming one that `adb` does not offer in the `device` state is a failure, not a skip. The dev_tool screenshot goes through the platform — `adb screencap` on a physical device, the emulator console on an emulator (see "Why an emulator is captured through its console") — because Android declares `supportsFlutterScreenshot => false` (Impeller cannot encode one) and the `screenshot/flutter` endpoint refuses with `501`. |
 | Linux | `:linux_bundle_build_test` (build only). Visual verification on the GCP VM is manual (see § Linux visual verification). |
 | Windows | `:windows_bundle_build_test` (build only). Visual verification on the GCP VM is manual (see § Windows visual verification). |
 
@@ -1256,7 +1310,7 @@ Pub allows packages to depend on each other (`dio` imports `dio_web_adapter`, wh
 * its **source** repository, `flutter_pub__<pkg>` (one per package for the whole build, however many hubs list it): the package's files, its **member** (`flutter_pub_member`, or rules_dart's `pub_package_member` for a package with nothing of Flutter's in its pubspec), the per-platform plugin libraries (`<pkg>_apple_macos`, `<pkg>_linux`, ...), its `android/` sub-package and the facts it records for its library repository (`pubspec_dependencies.txt`, `flutter_pub_member.json`). A member has no dependencies.
 * its **library** repository, `flutter_pub_lib__<pkg>` (`flutter_pub_library_repo`): it reads the pubspec dependencies of every package the package reaches, finds its dependency cycle with rules_dart's `dependency_cycle()` and builds the cycle as one `flutter_pub_library` over the members' labels, with the cycle's dependencies outside itself as `deps`. The cycle's first package by name owns the library; the others of the cycle alias it. A package in no cycle is a cycle of one, built as before. A cycle of several is built only where it is declared: by the root module's `flutter_pub.cycle()`, which must be exactly the cycle at the build's versions, or by another module's or rules_dart's curated ones (`curated_cycles()`), which apply only where they are exactly the cycle. `pub_cycles.bzl` checks the declarations' form when the module is read and passes them through `flutter_pub_index`; `dependency_cycle()` fails on an undeclared cycle or a wrong root declaration, naming the declaration to write.
 
-A Flutter SDK package other than `package:flutter` (`flutter_test`, `integration_test`, `flutter_driver`, ...) is built the same way, with `packages/<pkg>` of the pinned Flutter source tarball as its files in place of a hosted archive (`flutter_pub_package`'s `flutter_source_version`). `lock_entry_kind.bzl` says which entries these are: every `sdk` entry but `flutter` and `sky_engine`, never by a list of names. Their Android libraries link into the Android apps that depend on them, as any plugin's does (`integration_test`'s needs `androidx.test`, Espresso and Guava in the app's `maven.install`).
+A Flutter SDK package other than `package:flutter` (`flutter_test`, `integration_test`, `flutter_driver`, ...) is built the same way, with `packages/<pkg>` of the pinned Flutter source tarball as its files in place of a hosted archive (`flutter_source_files`, linked in by `flutter_pub_package`). `lock_entry_kind.bzl` says which entries these are: every `sdk` entry but `flutter` and `sky_engine`, never by a list of names. Their Android libraries link into the Android apps that depend on them, as any plugin's does (`integration_test`'s needs `androidx.test`, Espresso and Guava in the app's `maven.install`).
 
 `@<hub>//:<pkg>` is the package's library. The lock's other entries (`package:flutter`, which `flutter_framework_package` builds, and the stubs for entries nothing supplies) are one repository each, `flutter_pub__<pkg>`, which is their library. `flutter_pub_index` holds the package names of every lock once for all of them, so no repository's attributes grow with the locks. `@<hub>//:<pkg>` is an alias to the shared repository; a hub holds exactly the packages its own lock(s) list.
 
@@ -1351,8 +1405,8 @@ unpacked bundle goes with it), streams the output to the test log, copies back
 what the test wrote under its test-log directory, and removes the directory.
 The exit code is the test's. A timeout or Ctrl-C stops the test's process
 group on the host before the runner exits. The same flags work for
-`e2e/plugin_example` and `e2e/package_assets` (with
-`//own_assets:verify_macos_app_test`; add `-c dbg` for its second mode). A host name belongs in your
+`e2e/plugin_example` and `e2e/packages/package_assets` (with
+`//package_assets/own_assets:verify_macos_app_test`; add `-c dbg` for its second mode). A host name belongs in your
 `.bazelrc.user`, not in a checked-in file, for example as
 `test:gui_host --run_under=@rules_flutter//tools/e2e_testing:ssh_test_runner --test_env=RULES_FLUTTER_TEST_HOST=<host>`.
 
@@ -1373,7 +1427,10 @@ host's loopback (`ssh -R`), so the page loads from the same
 `http://localhost:<port>` URL, and forwards Chrome's debugging port back
 (`ssh -L`), so the port Chrome announces answers here. Hot reload, hot restart,
 the agent commands and CDP screenshots go through those forwards. Stopping the
-run quits that Chrome and removes its profile. To see the page, capture the
+run quits that Chrome and removes its profile. A Chrome that restarts itself
+(it exits 0 and a relauncher starts another on the same profile with
+`--restart`) cannot be followed: `ssh_chrome` ends the new one and exits 1 with
+a message saying so, which the dev tool reports as the browser exiting. To see the page, capture the
 host's screen: `ssh <host> screencapture -x /tmp/shot.png`, then copy it back.
 
 **What cannot run there:** the dev tool's macOS-desktop runs. `MacOSDevice`
@@ -1431,16 +1488,16 @@ bazel test :verify_windows_runtime_test --test_tag_filters= --strategy=TestRunne
 bundling (`flutter_ios_native_frameworks`, `flutter_macos_native_libs`), or
 kernel compilation flags.
 
-`e2e/package_assets/own_assets` checks the same at runtime for
+`e2e/packages/package_assets/own_assets` checks the same at runtime for
 assets its app's own package declares: a `dart_code_asset` and a
 `dart_data_asset`, the second read with `rootBundle`. The app prints
 `native_assets_synthetic canary=0x42424242 blob=native-assets-synthetic-data-blob-v1`
 before `runApp`. Run it in both modes:
 
 ```sh
-cd e2e/package_assets
-bazel test //own_assets:verify_macos_app_test --test_tag_filters= --strategy=TestRunner=standalone
-bazel test //own_assets:verify_macos_app_test -c dbg --test_tag_filters= --strategy=TestRunner=standalone
+cd e2e/packages
+bazel test //package_assets/own_assets:verify_macos_app_test --test_tag_filters= --strategy=TestRunner=standalone
+bazel test //package_assets/own_assets:verify_macos_app_test -c dbg --test_tag_filters= --strategy=TestRunner=standalone
 ```
 
 ### macOS visual verification
@@ -1563,7 +1620,7 @@ is reload-observable. Verify:
   touches the stale slot.
 
   **`app.waitFor`'s `text` selector is exact equality on the widget's own
-  string** (`flutter/private/agent_extensions/agent.dart`), not a substring
+  string** (`flutter/private/dev_tool_support/agent.dart`), not a substring
   search: wait for `{name: Grace Hopper, age: 45}`, not `Grace Hopper`. A
   `waitFor` that finds nothing answers with a top-level `error` and **no**
   `result`, so any check shaped `response['result']?['error'] == null` reads a
@@ -1819,7 +1876,7 @@ Each screenshot shows "Hello from Flutter Android!", `native add(19, 23) = 42` a
 
 ### Android mobile-install (manual)
 
-`bazel mobile-install` is rules_android's; nothing in `bazel test //...` runs it, and a Bazel test cannot run another Bazel command against a device. This checks that a `flutter_android_app` installs, renders and takes an edit through it. With the phone attached and `ANDROID_SERIAL` set to it, `adb` on your PATH, in `e2e/android_example`:
+`bazel mobile-install` is rules_android's. `android_example`'s `:android_mobile_install_build_test` builds what it would install, through the same aspect (`tools/e2e_testing/mobile_install_build.bzl`), so a rule the aspect cannot walk fails `bazel test //...` on Linux and macOS (the aspect needs the host's `zip`, which Windows lacks); but a Bazel test cannot run another Bazel command against a device. This checks that a `flutter_android_app` installs, renders and takes an edit through it. With the phone attached and `ANDROID_SERIAL` set to it, `adb` on your PATH, in `e2e/android_example`:
 
 ```sh
 bazel mobile-install //:app
@@ -1864,7 +1921,7 @@ Cross-compile a Linux debug bundle from macOS, deploy to a GCP VM, and verify th
 
 ```sh
 # 1. Cross-compile (requires LLVM toolchain — use cross_compile_example)
-cd e2e/cross_compile_example && bazel build :cross_linux
+cd e2e/cross_compile_example && bazel build --platforms=//:linux_x64_llvm -c dbg :cross_linux
 
 # 2. Create a Linux VM
 bazel run //tools/vm:create_linux_vm -- flutter-linux-test
@@ -1975,12 +2032,13 @@ the visual verification installs:
   --lockfile_mode=off`, as the workstation's `.bazelrc.user` does.
 - **A short output base**, `--output_base=C:/b/<n>` (§ "Windows and MAX_PATH").
 
-The first build takes about eight minutes. `build //...` works from a Windows host: the Android
-integration tests' runner takes the `adb` of the downloaded SDK for the host (`adb.exe`), and CI
-builds this workspace on Windows. Run the tests by name, as they need the console session:
+The first build takes about eight minutes. `test //...` works from a Windows host and runs what
+needs no desktop: the Android integration tests' runner takes the `adb` of the downloaded SDK for
+the host (`adb.exe`), and CI runs this workspace on Windows. Run the Windows tests by name with
+`--config=machine`, as they need the console session:
 
 ```sh
-bazel --output_base=C:/b/2 test //:windows_pass_test //:windows_filter_test \
+bazel --output_base=C:/b/2 test --config=machine //:windows_pass_test //:windows_filter_test \
   //:windows_red_twin_test //:windows_crash_test //:windows_golden_test \
   //:windows_golden_mismatch_twin_test
 ```
@@ -2023,6 +2081,13 @@ bazel test //:linux_pass_test //:linux_filter_test //:linux_red_twin_test \
 
 and web_example's `:render_test`. The first run fetches the runtime (about 160
 Debian packages, 350 MB unpacked) and checks it (`FlutterLinuxRuntimeCheck`).
+
+A passing Linux app logs two GTK critical messages, `atk_socket_embed: assertion
+'plug_id != NULL' failed` and `fl_gnome_settings_set_interface_settings: ...
+assertion 'G_IS_SETTINGS(settings)' failed`. They are the engine's on any system
+with no session bus and no `org.gnome.desktop.interface` schema, a bundle from
+`flutter build linux` included: the runtime gives the app neither, so it gets
+the engine's defaults (light theme, 24-hour clock, text scale 1) on every host.
 
 **When to run:** After any change to the integration test rules or the runner for
 Linux (`flutter_linux_integration_test`, `LinuxDevice`,
@@ -2137,7 +2202,7 @@ runner needs both).
 | Windows runner / bundle (`flutter/private/*windows*`) | desktop_example (on Windows), GCP VM visual test |
 | Windows integration tests (`flutter_windows_integration_test`, `WindowsDevice`) | `e2e/integration_test`'s Windows targets on the GCP VM (§ Windows integration tests), desktop_example `//...` on Windows, and the platform-neutral integration row |
 | Linux integration tests and the Linux runtime (`flutter_linux_integration_test`, `LinuxDevice`, `flutter_linux_runtime*`, `linux_runtime_pins.bzl`, `tools/update_linux_runtime`) | `e2e/integration_test`'s `:linux_*` and `:web_*` targets and web_example's `:render_test` on the x86_64 and arm64 GCP VMs (§ Linux integration tests), desktop_example `//...` on Linux, and the platform-neutral integration row |
-| Desktop engine selection (debug/profile/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
+| Desktop engine selection (debug/profile/release) | cross_compile_example `bazel test //...` + verify on VM |
 | Profile mode (`flutter:profile` selects, profile engine repos) | Root `//...`, macOS and a device by hand, hello_world `//...` on Linux and Windows (CI does this), and the profile run on the Linux and Windows VMs (§ Profile mode on Linux and Windows) |
 | Integration tests (`flutter/integration_test.bzl`, `flutter/private/flutter_integration_*.bzl`, `flutter/private/integration_test/support/`, `tools/dev_tool/lib/integration/`, `bin/integration_test_runner.dart`) | `e2e/integration_test` `//...` on each platform the change touches (macOS, with an unlocked screen, for macOS desktop; the Windows VM for Windows; macOS for web; for Android, the emulator tests on macOS, and on the attached phone with `--@rules_flutter//flutter/integration_test:android_device=attached` and `ANDROID_SERIAL` when the Android runner changed), dev_tool unit, plus the platform's row; for web, `e2e/web_example` `:render_test` and the Web support row |
 | The `flutter_test` runner and its suite protocol (`flutter/private/tools/flutter_test_runner.dart`, `flutter/private/tools/lib/`: tag selection, `--test_filter`, shards, the no-tests failure) | Root `//...`, `e2e/integration_test` `//...` (its `tags_*` and `no_tests_test` outcome tests, and `web_*`), dev_tool unit |
@@ -2147,20 +2212,22 @@ runner needs both).
 | Asset bundling | hello_world, plugin_example |
 | Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and plugin_example's `//impeller_shader:app_flutter_sksl_required_test`: with SkSL required, the shader compile of `:app_flutter_sksl_required` (`manual`, since it does not build) fails, saying the shader does not compile for Skia |
 | Web support | web_example `//...` (a WASM-only bundle, an `Int64List` app that keeps the dart2js fallback through a per-compiler `select()`, and `:render_test`, the render check in headless Chrome) + `web_smoke_e2e_test.dart` (render) + `web_per_compiler_e2e_test.dart` (both programs of a per-compiler app, in Chrome) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
-| FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests, and `//plugin_class`), `package_assets` (incl. `//own_assets:verify_macos_app_test`, manual, in debug and release) |
-| Data assets and link hooks (`dart_data_asset` handling, `link_hook_assets` on package metadata, `flutter_build_assets`' data assets) | root `//flutter/tests:data_asset_test`, `package_assets` `//...` with and without `-c dbg` plus its `//own_assets:verify_macos_app_test` |
+| FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests, and `//plugin_class`), `packages`' `//package_assets/...` (incl. `//package_assets/own_assets:verify_macos_app_test`, manual, in debug and release) |
+| Data assets and link hooks (`dart_data_asset` handling, `link_hook_assets` on package metadata, `flutter_build_assets`' data assets) | root `//flutter/tests:data_asset_test`, `packages`' `//package_assets/...` with and without `-c dbg` plus its `//package_assets/own_assets:verify_macos_app_test` |
 | Plugins | plugin_example, ffi_example (`//plugin_class`) |
 | Apple add-to-app (`flutter/private/apple_add_to_app.bzl`, `flutter_apple_xcframeworks.bzl`, `flutter_apple_plugin_xcframeworks.bzl`, `flutter_apple_registrant.bzl`, `apple_xcframeworks_*.bzl`, `flutter_plugin.bzl`'s Apple entries, `flutter_apple_plugin_library.bzl`, the `apple_*` tools) | Root `//flutter/private/tools/...`, plugin_example's `:add_to_app_{ios,macos}_{debug,release}[_signed]_test` (layout, modules, signatures, Swift package), **and** its `manual` Xcode hosts with a booted simulator and an unlocked screen: `bazel test :add_to_app_ios_host_debug_test :add_to_app_macos_host_debug_test :add_to_app_macos_host_release_test --test_tag_filters=`, whose screenshots are in each test's `test.outputs/` |
 | Android release (`flutter_android_release`, `flutter_android_app`'s `app_bundle`/`bundle_config`/`proguard_specs`, `flutter/android_proguard_rules.pro`, `flutter/android_bundle_config.pb.json`, `release_transition.bzl`, `android_release.dart`, `flutter_android_bundle_install.bzl`, `android_bundle_install.dart`) | Root `//...` (`android_release_test`), android_example `//...` (`verify_android_release_test` signs with a key it makes), plugin_example `//...` for an R8 change, **and** "Android release (manual)" in § 4: both signed installs render on the phone |
 | `flutter_android_app`'s `android_binary` arguments (`custom_package`, `assets`), `flutter_android_bundle`'s outputs, or a bump of `rules_android` | android_example `//...` **and** "Android mobile-install (manual)" in § 4 |
-| Android add-to-app (`flutter_android_aar`, `flutter_android_aar.bzl`, `android_aar.dart`, `android_maven_repo.dart`, `maven_repo.dart`, `zip_archive.dart`, `android_aar_install.dart`, `flutter_plugin_platform.group`, and the pub spokes' reading of it in `android_plugin_maven.bzl`) | Root `//...` (`android_aar_test`, `android_maven_repo_test`, `android_aar_install_test`, `android_plugin_maven_test`), plugin_example `//...` (`verify_android_aar_test` checks the layout, POMs and AARs in release and debug, and a workspace plugin under its declared `group` (`//glass_app:glass_module_aar`); `//glass_app:no_group_aar_test` checks the failure when `group` is missing; `verify_android_aar_resolves_test` resolves every coordinate against the repository, the engine POMs MODULE.bazel pins and `@rules_flutter_maven`'s lock), plugin_example `//... --config=deep` (`gradle_host_test` builds the Gradle host app of `add_to_app_host/android` offline against the debug, profile and release repositories, with Gradle, the Android Gradle plugin and its Maven artifacts pinned by MODULE.bazel and the lock `bazel run --config=deep //:record_gradle_host_repository` writes, and checks each APK's native libraries per ABI, dexed plugin classes and merged manifest), **and** `bazel run` of `//:plugin_module_aar` in `-c dbg`, profile and `-c opt` into one repository: the three modes' `maven-metadata.xml` and the printed host steps |
+| Android add-to-app (`flutter_android_aar`, `flutter_android_aar.bzl`, `android_aar.dart`, `android_maven_repo.dart`, `maven_repo.dart`, `zip_archive.dart`, `android_aar_install.dart`, `flutter_plugin_platform.group`, and the pub spokes' reading of it in `android_plugin_maven.bzl`) | Root `//...` (`android_aar_test`, `android_maven_repo_test`, `android_aar_install_test`, `android_plugin_maven_test`), plugin_example `//...` (`verify_android_aar_test` checks the layout, POMs and AARs in release and debug, each plugin's native libraries in its own AAR and every library stripped, and a workspace plugin under its declared `group` (`//glass_app:glass_module_aar`); `//glass_app:no_group_aar_test` checks the failure when `group` is missing; custom_engine's `//:aar_carries_local_engine_test` checks that the repository carries the checkout engine's embedding and `libflutter.so` jars at the engine's version, which the module's POM names, and `//:aar_of_release_names_google_engine_test` that under the release it carries none; `verify_android_aar_resolves_test` resolves every coordinate against the repository, the engine POMs MODULE.bazel pins and `@rules_flutter_maven`'s lock), plugin_example `//... --config=deep` (`gradle_host_test` builds the Gradle host app of `add_to_app_host/android` offline against the debug, profile and release repositories, with Gradle, the Android Gradle plugin and its Maven artifacts pinned by MODULE.bazel and the lock `bazel run --config=deep //:record_gradle_host_repository` writes, and checks the repositories' AARs (every native library stripped, `libdartjni.so` in package:jni's AAR and not the module's), then each APK's native libraries per ABI, all stripped by the NDK the host is given, dexed plugin classes and merged manifest), custom_engine `//... --config=deep` (`gradle_host_test` builds a Gradle host offline against the stand-in engine's module, from a pinned repository with no `io.flutter` artifact, and checks that the APK's `libflutter.so` is the one the module's repository carries; `//:record_gradle_host_repository` writes its lock), **and** `bazel run` of `//:plugin_module_aar` in `-c dbg`, profile and `-c opt` into one repository: the three modes' `maven-metadata.xml` and the printed host steps |
 | Android ABI selection (`flutter_android_engine`, `flutter_android_bundle`, `flutter_android_build`, `AndroidDevice` ABI in `device.dart`) | Root `//...`, android_example, hello_world and plugin_example `//...` (force-run `verify_android_apk_test`), dev_tool unit **and** `flutter_bazel run` on the attached phone (arm64-v8a) and on an x86_64 emulator, which must each launch the app |
 | Toolchain / SDK, or any action's inputs from the Dart SDK | smoke, hello_world, and `//flutter/tests:sdk_inputs_test` with `//flutter/tests/sdk_sets:sdk_sets_test` (see § "SDK inputs") |
 | Reconciling several locks, or which extension makes which repository (`pub_reconcile.bzl`, the `flutter` extension in `flutter/extensions.bzl` and the `pub` extension in `flutter/pub/extensions.bzl`) | Root `//flutter/tests:pub_reconcile_test`, `bazel run //tools/dev_tool:e2e -- test/e2e/pub_versions_e2e_test.dart` (its fix-command case shows `bazel run @rules_flutter//flutter/pub` running while the locks disagree, which needs every repository the runner reaches to come from `flutter`), `e2e/dual_hub` `//...`, and `bazel run @overhead//locks:check` |
 | Naming a lock's `path` packages (`pub_resolve.bzl`, `flutter_resolved_package.bzl`, `resolved_package.bzl`, `resolve`, `build_from_pubspec` and `ignored` in `flutter/private/pub_extension.bzl`, `fetch_local_package` in `flutter_pub_package.bzl`) | Root `//flutter/tests:pub_resolve_test` and `:pub_reconcile_test`, `bazel run //tools/dev_tool:e2e -- test/e2e/pub_resolve_e2e_test.dart test/e2e/pub_path_package_e2e_test.dart test/e2e/pub_inputs_properties_e2e_test.dart`, `e2e/pub_resolve` `//...` (its `:render_test` is the render check), and plugin_example's `:verify_android_registrant_test`, `:verify_android_apk_test` and `:ignored_package_test` (a Kotlin-only `path` plugin built from its pubspec into the APK, and an ignored one) |
 | `flutter_pub.annotation` (`pub_settings.bzl`, `annotated_requirements` in `android_plugin_maven.bzl`, `android_deps` in `flutter_pub_package.bzl`) | Root `//flutter/tests:pub_settings_test`, `:android_plugin_maven_test` and `:flutter_pub_package_test`, `bazel run //tools/dev_tool:e2e -- test/e2e/pub_inputs_e2e_test.dart` (the refusals and the spoke it writes), and plugin_example `:annotated_android_build_test` (the Kotlin compiles against the annotated artifact) and `:verify_android_maven_artifacts_test` (the app's report lists it) |
 | Reading a pubspec (`flutter_pubspec.bzl`, a `read_pubspec` call in `flutter_pub_package.bzl` or `flutter_framework_package.bzl`) | Root `//flutter/tests:flutter_pubspec_test` and `:flutter_framework_package_test` (the projection of `fields`, on dict inputs), hello_world and plugin_example `//...`, **and** `bazel run //tools/dev_tool:e2e -- test/e2e/pubspec_reading_e2e_test.dart test/e2e/framework_pubspec_e2e_test.dart test/e2e/pub_inputs_e2e_test.dart test/e2e/pub_inputs_properties_e2e_test.dart test/e2e/pub_cycle_e2e_test.dart test/e2e/sdk_source_e2e_test.dart` (what the repository rules do with the pubspecs they read, which no Starlark unit test can run) |
-| Anything that downloads (`download*` in a repository rule, `ARTIFACT_CHECKSUMS` / `source_sha256` / `CHROME_FOR_TESTING` in `versions.bzl`, `flutter_pub_package`, `flutter_chrome_for_testing`, `update_flutter_version`, `update_chrome_for_testing`) | Root `//flutter/tests:download_digests_test` (every table digest is 64-hex, for every version, host, target and mode the macros iterate, and for each host's Chrome for Testing archive; `bazel run //tools/update_chrome_for_testing` reprints the Chrome entry, so it also shows the pinned digests are the ones the archives have) and `//flutter/tests:pinned_test` (what counts as a digest) and `//flutter/tests:chrome_runner_build_test` (this host's Chrome for Testing shell downloads, verifies and unpacks) and `//tools/download_guard/...` (every `download*` call in `//flutter` passes its digest through `pinned()`, which refuses a missing or malformed one before the request; a hosted pub package goes through rules_dart's `fetch_pub_archive`, which the lint accepts only when it is loaded from `@rules_dart//dart/pub:pub_lock_package.bzl` and given a `sha256`), **and** `bazel run //tools/dev_tool:e2e -- test/e2e/digest_pinned_e2e_test.dart test/e2e/digest_missing_e2e_test.dart test/e2e/pub_archive_e2e_test.dart test/e2e/sdk_source_e2e_test.dart` (what a fetch does with a good, a bad and a missing digest, and what a Flutter SDK package's fetch from the source tarball does with a package that is, and is not, in it; needs no device; the generated workspace resolves its modules from Bazel's registry or repository cache) |
+| How a pub package's files are linked in (`link_pub_files` and the BUILD file it prefixes, in `flutter_pub_package.bzl`; `flutter_source_files.bzl`), or anything `bazel vendor` would vendor differently | Root `//...`, hello_world `//...`, **and** `bazel run //tools/dev_tool:e2e -- test/e2e/pub_vendor_e2e_test.dart` (a build from the vendored directory in a new output base, after the vendoring one is deleted) |
+| Anything that downloads (`download*` in a repository rule, `ARTIFACT_CHECKSUMS` / `source_sha256` / `CHROME_FOR_TESTING` in `versions.bzl`, `flutter_source_files`, `flutter_chrome_for_testing`, `update_flutter_version`, `update_chrome_for_testing`) | Root `//flutter/tests:download_digests_test` (every table digest is 64-hex, for every version, host, target and mode the macros iterate, and for each host's Chrome for Testing archive; `bazel run //tools/update_chrome_for_testing` reprints the Chrome entry, so it also shows the pinned digests are the ones the archives have) and `//flutter/tests:pinned_test` (what counts as a digest) and `//flutter/tests:chrome_runner_build_test` (this host's Chrome for Testing shell downloads, verifies and unpacks) and `//tools/download_guard/...` (every `download*` call in `//flutter` passes its digest through `pinned()`, which refuses a missing or malformed one before the request; a hosted pub package is fetched by rules_dart's `pub_archive_files`; a call to rules_dart's `fetch_pub_archive` is accepted only when it is loaded from `@rules_dart//dart/pub:pub_lock_package.bzl` and given a `sha256`), **and** `bazel run //tools/dev_tool:e2e -- test/e2e/digest_pinned_e2e_test.dart test/e2e/digest_missing_e2e_test.dart test/e2e/pub_archive_e2e_test.dart test/e2e/sdk_source_e2e_test.dart test/e2e/pub_vendor_e2e_test.dart` (what a fetch does with a good, a bad and a missing digest, and what a Flutter SDK package's fetch from the source tarball does with a package that is, and is not, in it; needs no device; the generated workspace resolves its modules from Bazel's registry or repository cache) |
+| A `load()` in a `.bzl` under `flutter/`, or a `bzl_library` in a `BUILD` there (a new `.bzl` file, a new dependency on another module's `.bzl`) | `bazel test //tools/bzl_deps_guard/...` (every `bzl_library` lists the libraries of the files its sources load, as direct `deps`, and no others; a load of another module's file whose library is private or missing is listed in `repository_bzl_libraries_test.dart`; every package declares `bzl_library_inputs()` from `//tools/bzl_deps_guard:inputs.bzl`, so a new package that doesn't fails analysis; an untracked local package with a BUILD file fails the same way, and is left out with `--deleted_packages=<package>` in the checkout's `.bazelrc.user`) |
 | A new or removed e2e workspace, or where one runs in CI (`tools/ci_matrix/e2e_matrix.dart`, `.github/workflows/ci.yaml`) | `bazel run //tools/ci_matrix` (fails on a gap) and `bazel test //tools/ci_matrix/...` |
 | A new package with a `BUILD` that loads a repo only development has (a dev dependency of `MODULE.bazel`), or a change to `ignore_directories` in `REPO.bazel` | `bazel run //tools/consumer_archive`, then `cd e2e/external_module` and both `bazel query "@rules_flutter//..."` and `bazel build --nobuild "@rules_flutter//..."` must succeed (the archive is committed state only, and omits what `.gitattributes` trims); put such a package in `ignore_directories` |
 | The bazelrc preset (`tools/preset.bazelrc`, or a bump of overhead) | `bazel run @overhead//preset`, then `bazel run @overhead//preset -- --check` |
@@ -2168,9 +2235,9 @@ runner needs both).
 | dev_tool (unit) | `bazel test //tools/dev_tool/...` (already covered by root `//...`) |
 | dev_tool (e2e) | `bazel run //tools/dev_tool:e2e`, see § 2 |
 | dev_tool reload paths (`run_command.dart`, `vm_service_client.dart`, `hot_reload/**`, `session.dart`, `reload_pipeline.dart`) | dev_tool unit + e2e **and** manual hot reload **and** hot restart — see "Hot reload / hot restart (manual)" |
-| dev_tool native-library checks (`native_libs_watch.dart`, `native_libs_verdict.dart`, `native_libs_fingerprint.dart`, `native_libs_relauncher.dart`, `native_sources.bzl`, `flutter/android_bundle_parts.bzl`, `flutter/macos_bundle_parts.bzl`, `flutter/ios_bundle_parts.bzl`, `flutter/linux_bundle_parts.bzl`, `flutter/windows_bundle_parts.bzl`, `flutter/private/bundle_parts.bzl`, `flutter_native_library`, the `nativeLibs` / `nativeLibContracts` / `nativeLibSources` fields of `_dev_config.json`, `code_asset_libraries.bzl`, and what a moved contract does when a `hot_patch` builder covers the library) | `native_libs_reload_e2e_test.dart` (a reload delivered and a reload withheld) **and** `relaunch_e2e_test.dart` (a restart relaunching) **and** `android_restart_e2e_test.dart` (the same on Android, where a restart must also build no APK) **and** `native_hot_patch_e2e_test.dart`'s last case (an app that runs no build of its own, where only the declared sources can see a native edit) — the halves of one contract, and no unit test can reach any of them |
-| Native hot patching (`native_hot_patcher.dart`, `native_hot_patch_tool.dart`, `native_patch_delivery.dart`, `native_image_identity.dart`, `flutter/native_hot_patch.bzl`, `flutter_native_library.hot_patch`, `agent_extensions/native_patch.dart`) | dev_tool unit **and** `native_hot_patch_e2e_test.dart` (macOS) **and** `relaunch_e2e_test.dart` **and** the manual device check — a native edit patched into the app on the iOS simulator, an iOS device and Android, see "Native hot patch on devices (manual)" |
-| Keys (`key_press.dart`, `app.pressKey` in `agent_command.dart`, `pressKeyOverCdp` in `device.dart`, `ext.rules_flutter.pressKey` in `agent_extensions/agent.dart`) | dev_tool unit **and** `press_key_e2e_test.dart` (macOS, Chrome DDC, Chrome `--wasm`). Changes to the browser channel (`browser_extension_channel.dart`) or the page bridge also need `web_e2e_test.dart`. The framework route on iOS, Android, Linux and Windows has no e2e: check it by hand on the device you changed it for |
+| dev_tool native-library checks (`native_libs_watch.dart`, `native_libs_verdict.dart`, `native_libs_fingerprint.dart`, `native_libs_relauncher.dart`, `native_library_aspect.bzl`, `native_libraries.bzl`, `flutter/android_bundle_parts.bzl`, `flutter/macos_bundle_parts.bzl`, `flutter/ios_bundle_parts.bzl`, `flutter/linux_bundle_parts.bzl`, `flutter/windows_bundle_parts.bzl`, `flutter/private/bundle_parts.bzl`, `flutter_native_library`, the `nativeLibs` / `nativeLibContracts` / `nativeLibSources` fields of `_dev_config.json`, `code_asset_libraries.bzl`, and what a moved contract does when a `hot_patch` builder covers the library) | `native_libs_reload_e2e_test.dart` (a reload delivered and a reload withheld) **and** `relaunch_e2e_test.dart` (a restart relaunching) **and** `android_restart_e2e_test.dart` (the same on Android, where a restart must also build no APK) **and** `native_hot_patch_e2e_test.dart`'s last case (an app that runs no build of its own, where only the declared sources can see a native edit) — the halves of one contract, and no unit test can reach any of them |
+| Native hot patching (`native_hot_patcher.dart`, `native_hot_patch_tool.dart`, `native_patch_delivery.dart`, `native_image_identity.dart`, `flutter/native_hot_patch.bzl`, `flutter_native_library.hot_patch`, `dev_tool_support/native_patch.dart`) | dev_tool unit **and** `native_hot_patch_e2e_test.dart` (macOS) **and** `relaunch_e2e_test.dart` **and** the manual device check — a native edit patched into the app on the iOS simulator, an iOS device and Android, see "Native hot patch on devices (manual)" |
+| Keys (`key_press.dart`, `app.pressKey` in `agent_command.dart`, `pressKeyOverCdp` in `device.dart`, `ext.rules_flutter.pressKey` in `dev_tool_support/agent.dart`) | dev_tool unit **and** `press_key_e2e_test.dart` (macOS, Chrome DDC, Chrome `--wasm`). Changes to the browser channel (`browser_extension_channel.dart`) or the page bridge also need `web_e2e_test.dart`. The framework route on iOS, Android, Linux and Windows has no e2e: check it by hand on the device you changed it for |
 | dev_tool app-output forwarding (`app_log.dart`, `app_log_sink.dart`, `cdp_console.dart`, `vm_service_logs.dart`, `device.dart` launch paths) | dev_tool unit + e2e **and** the manual per-platform checks below |
 | dev_tool screens and screenshots (`screen.dart`, `devicectl_screens.dart`, `Device.screenshot`, the `screenshot/native` and `screens` endpoints) | dev_tool unit **and** `ios_simulator_e2e_test.dart` and `plugin_example_e2e_test.dart`'s iOS case on the iPhone Duo simulator **and** the manual posture check in "Multi-screen screenshots (manual)" |
 | dev_tool iOS device paths (`mdns_vm_service_discovery.dart`, `IOSDevice` in `device.dart`) | dev_tool unit **and** manual hot reload + hot restart on hardware, **wired and wireless** — see "iOS hardware (manual)" |
@@ -2189,7 +2256,7 @@ Two tests hold that, and neither replaces the other:
   SDK file outside the set for its tool. A new action that takes the whole SDK
   fails it.
 - `//flutter/tests/sdk_sets:sdk_sets_test` runs the kernel compile, the
-  front end, `dart script.dart`, `const_finder`, `dart compile js` and
+  front end, `dart script.dart`, `dart compile js` and
   `dart compile wasm` against real *copies* of exactly those files. A sandboxed
   build cannot show a set that is too small: the sandbox links its inputs, and
   `dart` finds the VM and its snapshots beside the link's target, which is the
@@ -2201,8 +2268,8 @@ by the second test, not a reason to take the whole SDK.
 
 ### Dual-hub package sharing
 
-`e2e/dual_hub` runs two pub hubs over two lock files that agree on `path`
-(1.9.1) and differ on `clock` (1.1.2 in `//hub_a`, 1.1.3 in `//hub_b`). Both
+`e2e/packages/dual_hub` runs two pub hubs over two lock files that agree on `path`
+(1.9.1) and differ on `clock` (1.1.2 in `//dual_hub/hub_a`, 1.1.3 in `//dual_hub/hub_b`). Both
 locks state the same SDK constraint, so the packages derive the same
 `language_version` and the package version is the only thing that differs.
 
@@ -2210,10 +2277,10 @@ locks state the same SDK constraint, so the packages derive the same
 at the highest version any lock records. `hub_a` is behind on `clock`, so both
 hubs' `:clock` is the 1.1.3 library, and the build warns that one of the root's
 locks was raised.
-`bazel test //...` there covers:
+`bazel test //dual_hub/...` there covers:
 
-- `:bins_test` builds `//agreeing:agreeing_bin` (`path` from both hubs) and
-  `//upgraded:upgraded_bin` (`clock` from both), each in a package of its own
+- `:bins_test` builds `//dual_hub/agreeing:agreeing_bin` (`path` from both hubs) and
+  `//dual_hub/upgraded:upgraded_bin` (`clock` from both), each in a package of its own
   directory. They are binaries because the
   duplicate-record check runs wherever a package_config is assembled
   (`collect_packages`: `dart_binary`, `dart_test`, `package_config`,
@@ -2350,7 +2417,7 @@ mode that only shows up under sustained logging.
 also signs the patch (iOS device), copies it through `simctl`'s shared
 filesystem, `devicectl` or `adb`, and loads it from the app's own container, and
 none of that is reachable from the host test. Check it by hand whenever
-`native_patch_delivery.dart`, `agent_extensions/native_patch.dart` or a device's
+`native_patch_delivery.dart`, `dev_tool_support/native_patch.dart` or a device's
 `nativePatchDelivery` changes.
 
 The fixture is `e2e/ffi_example`'s patchable `mul`: `native/mul.c`,
@@ -2426,16 +2493,18 @@ the rules, not that the real simulator behaves as recorded.
 ### iOS hardware (manual)
 
 The simulator and a physical device find the VM service by different mechanisms
-(log stream vs mDNS advertisement), and a wired device and a wireless one differ
-again in how that service is reached, so passing on one proves nothing about the
-others. All three need checking whenever `IOSDevice` or
+(log stream vs mDNS advertisement, which a wired device races against its
+console), and a wired device and a wireless one differ again in how that
+service is reached, so passing on one proves nothing about the others. Run the
+wired case with a bundle id new to the phone and leave its Local Network
+question unanswered: the launch must attach through the console regardless. All three need checking whenever `IOSDevice` or
 `mdns_vm_service_discovery.dart` changes.
 
 ```sh
 cd e2e/ios_example   # needs device/BUILD.bazel and the --//:device_profile line in .bazelrc.user — see device.example/
 
 flutter_bazel run -t //:app -d ios-simulator   # log-stream discovery
-flutter_bazel run -t //:app_device -d ios      # mDNS (+ iproxy when wired)
+flutter_bazel run -t //:app_device -d ios      # console or mDNS + iproxy wired; mDNS wireless
 ```
 
 For each: confirm the app renders, then press `r` (hot reload) and `R` (hot

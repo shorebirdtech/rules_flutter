@@ -20,6 +20,19 @@ class MachO {
     final result = Process.runSync('nm', [path]);
     return result.exitCode == 0 && result.stdout.toString().contains(name);
   }
+
+  /// How many times the binary defines the symbol [name] (`nm -U`), exactly
+  /// as named: one copy of a library linked in defines each of its symbols
+  /// once.
+  int definitionsOf(String name) {
+    final result = Process.runSync('nm', ['-U', '-j', path]);
+    if (result.exitCode != 0) return 0;
+    return result.stdout
+        .toString()
+        .split('\n')
+        .where((line) => line == name)
+        .length;
+  }
 }
 
 /// What `nm -a` lists for a Mach-O binary, counted by kind.
@@ -101,6 +114,40 @@ extension MachOInspection on MachO {
     };
   }
 
+  /// Where the line table of this `.dSYM` bundle puts the first instruction
+  /// of the function [symbol] (as the symbol table names it, `_sub` for C's
+  /// `sub`): the source file, as the compiler named it, and the line. That
+  /// is what a crash report's `file:line` is read from. Null when the line
+  /// table has no row for it, as in a dSYM holding only a symbol table.
+  ///
+  /// Throws a [StateError] if the bundle has no single DWARF file, or the
+  /// symbol table does not define [symbol].
+  ({String file, int line})? sourceLineOf(String symbol) {
+    final dwarf = Directory('$path/Contents/Resources/DWARF').listSync();
+    if (dwarf.length != 1) {
+      throw StateError('$path holds ${dwarf.length} DWARF files');
+    }
+    final nm = Process.runSync('nm', ['-U', dwarf.single.path]);
+    final address = RegExp(
+      '^([0-9a-f]+) [A-Za-z] ${RegExp.escape(symbol)}\$',
+      multiLine: true,
+    ).firstMatch(nm.stdout.toString())?.group(1);
+    if (nm.exitCode != 0 || address == null) {
+      throw StateError('$path defines no $symbol: ${nm.stderr}');
+    }
+    final lookup = Process.runSync('xcrun', [
+      'dwarfdump',
+      '--lookup=0x$address',
+      path,
+    ]);
+    final match = RegExp(
+      r"^Line info: file '([^']+)', line (\d+)",
+      multiLine: true,
+    ).firstMatch(lookup.stdout.toString());
+    if (match == null) return null;
+    return (file: match.group(1)!, line: int.parse(match.group(2)!));
+  }
+
   /// The binary's install name (`LC_ID_DYLIB`), which a binary that links the
   /// dylib records and the dynamic linker looks it up by.
   ///
@@ -123,5 +170,29 @@ extension MachOInspection on MachO {
       throw StateError('$path has no single install name: $names');
     }
     return names.single;
+  }
+
+  /// The libraries the binary links (`LC_LOAD_DYLIB` and its kin), by the
+  /// names the dynamic linker looks them up by. `otool -L` lists a dylib's own
+  /// install name among them, which is left out.
+  ///
+  /// Throws a [StateError] if `otool` cannot read the file.
+  Set<String> linkedLibraries() {
+    final result = Process.runSync('otool', ['-L', path]);
+    if (result.exitCode != 0) {
+      throw StateError('otool -L $path failed: ${result.stderr}');
+    }
+    // A line naming the file, for each architecture, ends in `:`; each other
+    // is `<name> (compatibility version …, current version …)`.
+    final listed = {
+      for (final line in result.stdout.toString().split('\n'))
+        if (line.trim().isNotEmpty && !line.endsWith(':'))
+          line.trim().split(' (compatibility').first,
+    };
+    final own = Process.runSync('otool', ['-D', path]).stdout.toString();
+    return listed.difference({
+      for (final line in own.split('\n'))
+        if (line.trim().isNotEmpty && !line.endsWith(':')) line.trim(),
+    });
   }
 }

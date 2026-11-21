@@ -1,24 +1,33 @@
 """Repositories for the fixture packages, as `flutter_pub.from_lock` makes them.
 
 Each package is the repositories `flutter_pub.from_lock` makes of a built
-package: its source and its library, and the one index over the packages.
+package: its fetched files, its source and its library, and the one index over
+the packages.
 `MODULE.bazel` names the library of each, which is what an application depends
 on.
 """
 
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "pub_archive_files", "pub_files_label", "pub_hosted_purl")
+
 # The repository rules `flutter_pub.from_lock` makes a package's repositories
-# with, loaded to make our own: there is no public name for them.
+# with, loaded to make our own: there is no public name for them, only the file
+# that exports them to rules_flutter's generated repositories.
 # buildifier: disable=bzl-visibility
-load("@rules_flutter//flutter/private:flutter_pub_index.bzl", "INDEX_REPO", "flutter_pub_index", "library_repo", "source_repo")
-
-# buildifier: disable=bzl-visibility
-load("@rules_flutter//flutter/private:flutter_pub_library_repo.bzl", "flutter_pub_library_repo")
-
-# buildifier: disable=bzl-visibility
-load("@rules_flutter//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
+load(
+    "@rules_flutter//flutter/private:generated_repos.bzl",
+    "INDEX_REPO",
+    "files_repo",
+    "flutter_pub_index",
+    "flutter_pub_library_repo",
+    "flutter_pub_package",
+    "library_repo",
+    "source_repo",
+)
 
 # The packages under `//registry`, with the version of each.
 PACKAGES = {
+    "fx_asset_borrower": "1.0.0",
+    "fx_asset_owner": "1.0.0",
     "fx_dev_only": "1.0.0",
     "fx_dirs": "1.0.0",
     "fx_extra": "1.0.0",
@@ -48,12 +57,19 @@ def _pubs_impl(mctx):
         other = [],
     )
     for name, version in PACKAGES.items():
-        flutter_pub_package(
-            name = source_repo(name),
+        base_url = "file://" + str(registry)
+        pub_archive_files(
+            name = files_repo(name),
             package_name = name,
             version = version,
             sha256 = checksums[name],
-            base_url = "file://" + str(registry),
+            base_url = base_url,
+        )
+        flutter_pub_package(
+            name = source_repo(name),
+            files = pub_files_label(files_repo(name)),
+            files_identity = pub_hosted_purl(name, version, checksums[name], base_url),
+            package_name = name,
         )
         flutter_pub_library_repo(
             name = library_repo(name),

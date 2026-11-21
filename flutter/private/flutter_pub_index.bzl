@@ -34,6 +34,8 @@ repository, over every lock of the build. A hub is only the set of aliases a
 user's own lock names.
 """
 
+visibility("//flutter/...")
+
 # What the repositories of the build are named by. No hub name is part of them,
 # so a hub cannot be named with this prefix.
 SPOKE_PREFIX = "flutter_pub"
@@ -52,11 +54,12 @@ MEMBER_FILE = "flutter_pub_member.json"
 MEMBER_DART = "dart"  # rules_dart's `pub_package_member`
 MEMBER_FLUTTER = "flutter"  # `flutter_pub_member`
 MEMBER_OVERLAY = "overlay"  # an overlay's whole BUILD file, which `:<package>` is
+MEMBER_STUB = "stub"  # a package its SDK cannot supply: `:<package>` fails, saying why
 
 _INDEX_FILE = "index.json"
 
 def source_repo(package, prefix = SPOKE_PREFIX):
-    """The name of the repository holding a package's files.
+    """The name of a package's source repository: its files and the build it states.
 
     Args:
         package: The package.
@@ -68,13 +71,29 @@ def source_repo(package, prefix = SPOKE_PREFIX):
     """
     return "{}__{}".format(prefix, package)
 
+def files_repo(package, prefix = SPOKE_PREFIX):
+    """The name of the repository holding a hosted, git or Flutter SDK package's fetched files."""
+    return "{}_files__{}".format(prefix, package)
+
 def library_repo(package, prefix = SPOKE_PREFIX):
     """The name of the repository holding a built package's library."""
     return "{}_lib__{}".format(prefix, package)
 
+def pubspec_repo(package, prefix = SPOKE_PREFIX):
+    """The name of the repository holding what a `resolve`-mapped package's pubspec says it depends on."""
+    return "{}_pubspec__{}".format(prefix, package)
+
 def index_repo(prefix = SPOKE_PREFIX):
     """The name of the index repository of a prefix."""
     return prefix + "_index"
+
+def android_maven_requirements_repo(prefix = SPOKE_PREFIX):
+    """The name of the repository of the Android plugins' Maven requirements, with a prefix's Flutter SDK packages."""
+    return prefix + "_android_maven_requirements"
+
+def apple_app_libraries_repo(prefix = SPOKE_PREFIX):
+    """The name of the repository of the Apple libraries that read the app, with a prefix's Flutter SDK packages."""
+    return prefix + "_apple_app_libraries"
 
 def sdk_prefix(sdk):
     """What the Flutter SDK packages of the framework of another SDK are named by.
@@ -88,6 +107,21 @@ def _canonical_prefix(ctx):
     """What canonical names of the extension's repositories start with, seen from `ctx`."""
     return ctx.name[:len(ctx.name) - len(ctx.original_name)]
 
+def sibling_label(ctx, repo, path = "BUILD.bazel"):
+    """The label of a file at the root of another repository of the same module extension.
+
+    Naming a repository fetches nothing; reading the file does.
+
+    Args:
+      ctx: The reading repository's `repository_ctx`.
+      repo: The other repository's name, as the extension gave it.
+      path: A file at its root.
+
+    Returns:
+      Its `Label`.
+    """
+    return Label("@@{}{}//:{}".format(_canonical_prefix(ctx), repo, path))
+
 def sibling_path(ctx, repo, path):
     """The path of a file at the root of another repository of the same module extension.
 
@@ -99,7 +133,7 @@ def sibling_path(ctx, repo, path):
     Returns:
       Its path.
     """
-    return ctx.path(Label("@@{}{}//:{}".format(_canonical_prefix(ctx), repo, path)))
+    return ctx.path(sibling_label(ctx, repo, path))
 
 def read_sibling_file(ctx, repo, path):
     """Reads a file of another repository of the same module extension.
@@ -122,7 +156,7 @@ def read_index(ctx, prefix = SPOKE_PREFIX):
       prefix: The prefix of the index to read.
 
     Returns:
-      `struct(built, other, sdk_packages, main_prefix, sdk_prefix, via_hub, versions, locks, flutter_constraints, cycles, advisory_cycles)`:
+      `struct(built, other, sdk_packages, main_prefix, sdk_prefix, via_hub, versions, version_locks, locks, flutter_constraints, cycles, advisory_cycles)`:
       `built`, a dict of the names of the built
       packages (hosted ones and Flutter SDK ones built from the Flutter
       source; each has a library repository); `other`, a dict of the names of
@@ -134,8 +168,11 @@ def read_index(ctx, prefix = SPOKE_PREFIX):
       of another SDK's framework. `via_hub` says that a package depending on an
       SDK package reaches it through the main hub's alias, which follows the
       selected SDK (`sdk_hubs`: a hub that lists each). `versions` is the version the build uses of
-      each package the locks list, `locks` their labels, and
+      each package the locks list, `version_locks` the locks that record it,
+      `locks` the labels of all of them, and
       `flutter_constraints` the `sdks: flutter` constraint of each.
+      `served` are the `resolve`-mapped packages whose pubspec is read
+      (`pubspec_repo`), each to the target that builds it.
       `cycles` are the root module's `flutter_pub.cycle()` declarations and
       `advisory_cycles` every other declaration that may apply (`pub_cycles.bzl`),
       each a list of packages.
@@ -150,10 +187,12 @@ def read_index(ctx, prefix = SPOKE_PREFIX):
         via_hub = index.get("via_hub", False),
         sdk_hubs = index.get("sdk_hubs", {}),
         versions = index.get("versions", {}),
+        version_locks = index.get("version_locks", {}),
         locks = index.get("locks", []),
         flutter_constraints = index.get("flutter_constraints", {}),
         cycles = index.get("cycles", []),
         advisory_cycles = index.get("advisory_cycles", []),
+        served = index.get("served", {}),
     )
 
 def owner_prefix(index, package):
@@ -187,10 +226,12 @@ def _flutter_pub_index_impl(ctx):
         "via_hub": ctx.attr.via_hub,
         "sdk_hubs": ctx.attr.sdk_hubs,
         "versions": ctx.attr.versions,
+        "version_locks": ctx.attr.version_locks,
         "locks": ctx.attr.locks,
         "flutter_constraints": ctx.attr.flutter_constraints,
         "cycles": [c.split(" ") for c in ctx.attr.cycles],
         "advisory_cycles": [c.split(" ") for c in ctx.attr.advisory_cycles],
+        "served": ctx.attr.served,
     }))
     return ctx.repo_metadata(reproducible = True)
 
@@ -205,10 +246,12 @@ flutter_pub_index = repository_rule(
         "via_hub": attr.bool(doc = "Whether a dependency on an SDK package reaches it through the main hub's alias."),
         "sdk_hubs": attr.string_dict(doc = "For each SDK package, a hub that lists it, whose alias follows the selected SDK, for `via_hub`."),
         "versions": attr.string_dict(doc = "The version the build uses of each package the locks list."),
+        "version_locks": attr.string_list_dict(doc = "For each package of `versions`, the labels of the locks that record that version, for messages."),
         "locks": attr.string_list(doc = "The locks' labels, for messages."),
         "flutter_constraints": attr.string_dict(doc = "The `sdks: flutter` constraint of each lock, by its label."),
         "cycles": attr.string_list(doc = "The root module's `flutter_pub.cycle()` declarations, each its packages joined by spaces: each must be exactly a cycle."),
         "advisory_cycles": attr.string_list(doc = "Other modules' and rules_dart's curated cycle declarations whose packages are all built, each its packages joined by spaces: each applies where it is exactly a cycle."),
+        "served": attr.string_dict(doc = "The `resolve`-mapped packages whose pubspec is read, each to the target that builds it: a cycle through one is refused, naming the target."),
     },
     doc = "The packages the repositories of every `flutter_pub.from_lock()` lock plan against.",
 )

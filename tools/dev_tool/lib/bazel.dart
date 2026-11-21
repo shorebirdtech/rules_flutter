@@ -3,10 +3,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'child_processes.dart';
 import 'dev_tool_exception.dart';
 import 'launch_bundle_parts.dart';
+import 'local_packages.dart';
 import 'logging.dart';
 import 'phase_log.dart';
+import 'process_group.dart';
 import 'runfiles_helper.dart';
 import 'web_bundle_facts.dart';
 
@@ -72,11 +75,17 @@ class BazelBuildResult {
   /// [Bazel.build]'s `parts`), by group name; empty when it was asked for none.
   final Map<String, List<String>> partsFiles;
 
+  /// The options that decided the build's module graph (see
+  /// [moduleGraphFlagsFromBuildEvents]), when [Bazel.build] was asked to
+  /// record them; empty otherwise.
+  final List<String> moduleGraphFlags;
+
   BazelBuildResult({
     required this.exitCode,
     required this.outputFiles,
     required this.stderr,
     this.partsFiles = const {},
+    this.moduleGraphFlags = const [],
   });
 
   bool get success => exitCode == 0;
@@ -92,11 +101,6 @@ class BazelBuildResult {
   }
 }
 
-/// A [SubprocessOutput] that also keeps the last few lines it emitted.
-///
-/// Bounded, and deliberately small: the whole stream already reaches the user
-/// (text mode) and a machine client (`subprocess_output` records) line by line
-/// as it arrives. This exists only so a failure record can name its own cause.
 /// What [Bazel.buildAspectOutputs] built.
 class BazelAspectOutputs {
   final int exitCode;
@@ -115,12 +119,17 @@ class BazelAspectOutputs {
   /// The tail of the build's output when it failed.
   final String stderr;
 
+  /// The options that decided this build's module graph (see
+  /// [moduleGraphFlagsFromBuildEvents]). Empty when the build failed.
+  final List<String> moduleGraphFlags;
+
   const BazelAspectOutputs({
     required this.exitCode,
     required this.files,
     required this.executionRoot,
     required this.stderr,
     this.filesByGroup = const {},
+    this.moduleGraphFlags = const [],
   });
 
   bool get success => exitCode == 0;
@@ -235,6 +244,65 @@ BazelAspectOutputs aspectOutputsFromBuildEvents(
   );
 }
 
+/// The options that change which repository a module or repository name
+/// resolves to, and that `bazel mod` takes.
+const _moduleGraphOptions = {
+  'allow_yanked_versions',
+  'enable_bzlmod',
+  'ignore_dev_dependency',
+  'inject_repository',
+  'lockfile_mode',
+  'override_module',
+  'override_repository',
+  'registry',
+  'repo_env',
+  'vendor_dir',
+};
+
+/// Of the options a build ran with, those that decided its module graph, in
+/// order, from its JSON event stream (`--build_event_json_file`).
+///
+/// Read from the `canonical` command line, which is the build's options after
+/// Bazel expanded every `--config` and read every rc file: an override a
+/// `build:<name>` line turns on is there as the `--override_module` it is.
+/// Passed to `bazel mod` as they are, they make it resolve the graph that
+/// build resolved, which no `--config` can, since `bazel mod` reads only a
+/// config's `common` and `mod` lines and refuses one that has neither.
+///
+/// Throws [DevToolException] when the stream has no canonical command line.
+List<String> moduleGraphFlagsFromBuildEvents(String events) {
+  for (final line in LineSplitter.split(events)) {
+    if (line.trim().isEmpty) continue;
+    final event = jsonDecode(line) as Map<String, Object?>;
+    final commandLine = event['structuredCommandLine'] as Map<String, Object?>?;
+    if (commandLine == null || commandLine['commandLineLabel'] != 'canonical') {
+      continue;
+    }
+    return [
+      for (final section in (commandLine['sections'] as List? ?? const []))
+        if ((section as Map<String, Object?>)['sectionLabel'] ==
+            'command options')
+          for (final option
+              in ((section['optionList'] as Map<String, Object?>?)?['option']
+                      as List? ??
+                  const []))
+            if (_moduleGraphOptions.contains(
+              (option as Map<String, Object?>)['optionName'],
+            ))
+              option['combinedForm'] as String,
+    ];
+  }
+  throw DevToolException(
+    'The build event stream has no canonical command line, so the options '
+    'that decided the build\'s module graph are unknown.',
+  );
+}
+
+/// A [SubprocessOutput] that also keeps the last few lines it emitted.
+///
+/// Bounded, and deliberately small: the whole stream already reaches the user
+/// (text mode) and a machine client (`subprocess_output` records) line by line
+/// as it arrives. This exists only so a failure record can name its own cause.
 class _TailedOutput extends SubprocessOutput {
   static const _maxLines = 40;
 
@@ -266,9 +334,9 @@ List<String> dartDefineFlags(List<String> dartDefines) => [
 /// The cquery [Bazel.cqueryExtraDartDefines] runs, but for the options.
 ///
 /// `config(…, target)` keeps the answer to the top-level configuration, the one
-/// a build's own flags make. Starlark flags are keyed by their canonical label in
-/// `build_options`, which is the setting's own `str(target.label)`; one that is
-/// at its default is not there at all.
+/// a build's own flags make. Starlark flags are keyed by their canonical label
+/// in `build_options`, which is the setting's own `str(target.label)`; one that
+/// is at its default is not there at all.
 const extraDartDefinesQuery = [
   'cquery',
   'config(@rules_dart//dart:extra_dart_defines, target)',
@@ -301,13 +369,26 @@ List<String> bazelConfigFlags(List<String> configs) => [
   for (final config in configs) '--config=$config',
 ];
 
-/// Every bazel flag the user typed for the build: their `--config`s, then
-/// their `--build-arg`s. The configs come first so an explicit `--build-arg`
-/// overrides what a config sets, as it would on a bazel command line.
-List<String> userBazelFlags({
+/// Compiles into a debug app what this tool needs to drive it: the service
+/// extensions, native hot patching and `rules_flutter.build_info`.
+///
+/// On by default, but a `.bazelrc` can turn it off for builds no dev tool runs,
+/// and an app built without it cannot be driven, reloaded or attached to.
+const devToolSupportFlag = '--@rules_flutter//flutter:dev_tool_support=true';
+
+/// The flags every bazel command this tool runs for the app carries: the
+/// user's `--config`s, then their `--build-arg`s, then [devToolSupportFlag].
+///
+/// The configs come first so an explicit `--build-arg` overrides what a config
+/// sets, as it would on a bazel command line. [devToolSupportFlag] comes last
+/// so that nothing the user passes, and no `.bazelrc`, turns it off. It is on
+/// every command, not only the builds: a query of the build's outputs has to
+/// ask about the configuration the build made, and a setting at its default
+/// leaves that configuration as it was.
+List<String> devToolBazelFlags({
   required List<String> configs,
   required List<String> buildArgs,
-}) => [...bazelConfigFlags(configs), ...buildArgs];
+}) => [...bazelConfigFlags(configs), ...buildArgs, devToolSupportFlag];
 
 /// Requests the build outputs this tool reads off disk.
 ///
@@ -320,9 +401,16 @@ List<String> userBazelFlags({
 ///
 /// Web needs none of this: `flutter_web_application` declares its own dev
 /// outputs and the tool names that target directly.
+const devFilesAspect =
+    '@rules_flutter//flutter:dev_files.bzl%flutter_dev_files_aspect';
+
+/// The output group [devFilesAspect] fills: the `flutter_application`'s own
+/// outputs, in each configuration the launch target reaches it in.
+const devFilesGroup = 'flutter_dev_files';
+
 const _devFilesAspect = [
-  '--aspects=@rules_flutter//flutter:dev_files.bzl%flutter_dev_files_aspect',
-  '--output_groups=+flutter_dev_files',
+  '--aspects=$devFilesAspect',
+  '--output_groups=+$devFilesGroup',
 ];
 
 /// The argv for a `bazel build` this dev tool runs.
@@ -396,14 +484,15 @@ class _BazelCommand {
 /// Every bazel command this tool runs, and the one way to stop them.
 ///
 /// A dev-loop command runs bazel before it launches anything — `bazel info`,
-/// a first `bazel fetch` of the toolchain, the launch build — and again on
-/// reloads that regenerate code or rebuild assets. Any of those can be running
-/// when the run is stopped, and a bazel command is not stopped by the tool that
-/// started it exiting: measured, a build ran on for five seconds after the
-/// tool had gone, to "Processing and signing app", and a `bazel` command issued
-/// meanwhile printed `Another command (pid=…) is running` and waited behind it.
-/// On a real project that is minutes of a build nobody wants, holding the
-/// output base's lock against the rerun the user stopped the old run to make.
+/// the first analysis, which fetches the toolchain, the launch build — and
+/// again on reloads that regenerate code or rebuild assets. Any of those can be
+/// running when the run is stopped, and a bazel command is not stopped by the
+/// tool that started it exiting: measured, a build ran on for five seconds
+/// after the tool had gone, to "Processing and signing app", and a `bazel`
+/// command issued meanwhile printed `Another command (pid=…) is running` and
+/// waited behind it. On a real project that is minutes of a build nobody wants,
+/// holding the output base's lock against the rerun the user stopped the old
+/// run to make.
 ///
 /// So every bazel command goes through here, and [close] — reached from the
 /// run's [Teardown], and so from a signal and from `daemon.shutdown` alike —
@@ -563,6 +652,9 @@ class Bazel {
   /// transition, that is the transitioned instance as well, listed first and
   /// on disk, and its files are ones this build never rewrites.
   ///
+  /// [recordModuleGraph] reads [BazelBuildResult.moduleGraphFlags] off the
+  /// build's event stream.
+  ///
   /// Throws [BazelCancelled] if [close] stopped it.
   Future<BazelBuildResult> build(
     String target, {
@@ -570,10 +662,11 @@ class Bazel {
     String? compilationMode,
     List<String> extraArgs = const [],
     LaunchBundleParts? parts,
+    bool recordModuleGraph = false,
   }) async {
     // The parts are an aspect's outputs, which no cquery lists, so they are
-    // read from the build's own event stream.
-    final events = parts == null
+    // read from the build's own event stream, as the options are.
+    final events = parts == null && !recordModuleGraph
         ? null
         : await Directory.systemTemp.createTemp('flutter_bep_');
     try {
@@ -583,6 +676,7 @@ class Bazel {
         compilationMode: compilationMode,
         extraArgs: extraArgs,
         parts: parts,
+        recordModuleGraph: recordModuleGraph,
         eventFile: events == null ? null : '${events.path}/events.json',
       );
     } finally {
@@ -596,6 +690,7 @@ class Bazel {
     required String? compilationMode,
     required List<String> extraArgs,
     required LaunchBundleParts? parts,
+    required bool recordModuleGraph,
     required String? eventFile,
   }) async {
     final args = [
@@ -652,18 +747,24 @@ class Bazel {
       workspace,
     );
 
+    final stream = eventFile == null
+        ? null
+        : await File(eventFile).readAsString();
     return BazelBuildResult(
       exitCode: built.exitCode,
       outputFiles: outputFiles,
       stderr: cqueryResult.stderr as String,
-      partsFiles: parts == null || eventFile == null
+      partsFiles: parts == null || stream == null
           ? const {}
           : aspectOutputsFromBuildEvents(
-              await File(eventFile).readAsString(),
+              stream,
               aspect: parts.aspect,
               outputGroup: parts.assetsGroup,
               otherGroups: [parts.nativeLibsGroup],
             ).filesByGroup,
+      moduleGraphFlags: recordModuleGraph
+          ? moduleGraphFlagsFromBuildEvents(stream!)
+          : const [],
     );
   }
 
@@ -730,11 +831,20 @@ class Bazel {
           stderr: built.tail,
         );
       }
-      return aspectOutputsFromBuildEvents(
-        await File(eventFile).readAsString(),
+      final stream = await File(eventFile).readAsString();
+      final outputs = aspectOutputsFromBuildEvents(
+        stream,
         aspect: aspect,
         outputGroup: outputGroup,
         otherGroups: otherGroups,
+      );
+      return BazelAspectOutputs(
+        exitCode: outputs.exitCode,
+        files: outputs.files,
+        filesByGroup: outputs.filesByGroup,
+        executionRoot: outputs.executionRoot,
+        stderr: outputs.stderr,
+        moduleGraphFlags: moduleGraphFlagsFromBuildEvents(stream),
       );
     } finally {
       await events.delete(recursive: true);
@@ -1005,6 +1115,34 @@ class Bazel {
     return parseWebBundlesOver(result.stdout as String);
   }
 
+  /// Which of [repos] (canonical names) are local repositories, and the
+  /// directory each one is: see `local_packages.dart`.
+  ///
+  /// [moduleGraphFlags] are the options that decided the module graph of the
+  /// build the app came from, read off its event stream; see [showRepoArgs].
+  ///
+  /// Throws [BazelInvocationFailure] when Bazel cannot say: the answer decides
+  /// which edits a reload can see, and guessing it would drop some silently.
+  Future<Map<String, String>> localRepositories(
+    Iterable<String> repos, {
+    required String workspace,
+    required List<String> moduleGraphFlags,
+  }) async {
+    if (repos.isEmpty) return const {};
+    final args = showRepoArgs(repos, moduleGraphFlags: moduleGraphFlags);
+    final result = await run(args, workingDirectory: workspace);
+    if (result.exitCode != 0) {
+      throw BazelInvocationFailure(
+        command: args.take(2).join(' '),
+        diagnostics: result.stderr as String,
+      );
+    }
+    return parseLocalRepositories(
+      result.stdout as String,
+      workspace: workspace,
+    );
+  }
+
   /// Locate the Bazel workspace root.
   ///
   /// Two sources, in priority order:
@@ -1122,48 +1260,24 @@ class Bazel {
   }
 }
 
-/// Where `process_group_exec` is, once asked for.
-String? _processGroupExec;
-
 Future<Process> _spawnInGroup(
   List<String> args, {
   required String workingDirectory,
-}) {
-  final exec = _processGroupExec ??= _resolveProcessGroupExec();
-  return Process.start(exec, [
-    'bazel',
-    ...args,
-  ], workingDirectory: workingDirectory);
-}
-
-String _resolveProcessGroupExec() {
-  const key = 'rules_flutter/tools/dev_tool/process_group_exec';
-  final path = resolveRunfile(key);
-  if (path == null) {
-    // A runfiles tree exists (see [Bazel.new]), so this is not the tool
-    // running from source: a declared `data` dependency did not make it in.
-    throw DevToolException(
-      'flutter_bazel starts every bazel command through the process_group_exec '
-      'it bundles ($key), and its runfiles do not have it. The build that '
-      'produced this flutter_bazel dropped a declared data dependency; rebuild '
-      'it with `bazel build @rules_flutter//tools/dev_tool:flutter_bazel`.',
-    );
-  }
-  return path;
-}
+}) => startInProcessGroup(
+  'bazel',
+  args,
+  binary: '@rules_flutter//tools/dev_tool:flutter_bazel',
+  workingDirectory: workingDirectory,
+);
 
 Future<Process> _spawnDirectly(
   List<String> args, {
   required String workingDirectory,
-}) => Process.start('bazel', args, workingDirectory: workingDirectory);
+}) => startChildProcess('bazel', args, workingDirectory: workingDirectory);
 
-/// Signal the command's whole process group. The pid is the group's id,
-/// because `process_group_exec` made the program the leader of its own group.
-///
-/// The result is not read: `false` means the group has already gone, which is
-/// the outcome being asked for, and the wait that follows sees the exit.
+/// Signal the command's whole process group.
 void _interruptGroup(Process process) =>
-    Process.killPid(-process.pid, ProcessSignal.sigterm);
+    signalProcessGroup(process, ProcessSignal.sigterm);
 
 /// Parse `bazel cquery --output=files` stdout into absolute paths.
 ///

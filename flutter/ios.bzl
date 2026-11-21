@@ -58,9 +58,9 @@ Two tiers of API:
 
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@build_bazel_rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
-load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application")
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
+load("@rules_apple//apple:ios.bzl", "ios_application")
+load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:app_version.bzl", "version_arg", "version_target_conflict")
 load("//flutter/private:apple_app.bzl", "flutter_apple_app")
 load("//flutter/private:apple_engine.bzl", _IOS_ENGINE_XCFRAMEWORK = "IOS_ENGINE_XCFRAMEWORK")
@@ -77,10 +77,11 @@ load("//flutter/private:flutter_apple_registrant.bzl", _flutter_apple_swift_pack
 load("//flutter/private:flutter_apple_xcframeworks.bzl", _flutter_ios_app_xcframework = "flutter_ios_app_xcframework", _flutter_ios_engine_xcframework = "flutter_ios_engine_xcframework")
 load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_app_framework_rule = "flutter_ios_app_framework", _flutter_ios_application = "flutter_ios_application", _flutter_ios_dropped_frameworks_rule = "flutter_ios_dropped_frameworks", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
-load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
+load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge", _flutter_signing_entitlements = "flutter_signing_entitlements")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
 load("//flutter/private:ios_signing_check.bzl", "flutter_ios_signing_check")
 load("//flutter/private:runner_module.bzl", "runner_module_name")
+load("//flutter/private:swiftpm_app_settings.bzl", _flutter_apple_app_runner = "flutter_apple_app_runner")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 
 # Re-export constants for user BUILD files.
@@ -225,8 +226,18 @@ def flutter_ios_app_framework_gen(name, application, minimum_os_version = IOS_MI
         tags = tags,
     )
 
+    # The dSYM of the stripped release App binary, for rules_apple to carry
+    # in the `dsyms` output group of the app (`--apple_generate_dsym`).
+    native.filegroup(
+        name = "__%s_dsym" % name,
+        srcs = ["__%s_framework" % name],
+        output_group = "dsym",
+        tags = tags,
+    )
+
     apple_dynamic_framework_import(
         name = name,
+        dsym_imports = ["__%s_dsym" % name],
         framework_imports = ["__%s_framework" % name],
         bundle_only = select({
             Label("@rules_flutter//flutter/private:dbg"): True,
@@ -317,7 +328,18 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
     When `application` is set, an internal flutter_apple_plugins_aggregator
     target is created and added to the runner's `swift_library.deps` so the
     generated registrant's `import <PluginModule>` lines resolve and the
-    linker pulls in each transitive plugin's static archive.
+    linker pulls in each transitive plugin's static archive. `name` is then
+    that library built in the app's configuration, with its plugins
+    (`flutter_apple_app_runner`).
+
+    The app's configuration differs from the ios_application's only when the
+    lock has a plugin whose Package.swift reads the app and `info_plist` or
+    `swift_package_environment` is set. Then what else in the ios_application
+    names `application` (the App.framework, the native frameworks, the
+    version) builds it in the ios_application's own configuration, and the
+    application is analysed and built twice, once there and once under
+    `name`. The tier-1 app macro builds the whole bundle in the app's
+    configuration, and so builds its application once.
 
     Args:
         name: Target name. Add to ios_application deps.
@@ -337,6 +359,7 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
     tags = kwargs.pop("tags", ["manual"])
 
     deps = [engine]
+    library = name
     if application:
         aggregator_name = "_%s__apple_plugins_aggregator" % name
         _flutter_apple_plugins_aggregator(
@@ -350,8 +373,21 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
         )
         deps.append(":" + aggregator_name)
 
+        # `name` is the library in the app's configuration, with its plugins
+        # (`flutter_apple_app_runner`).
+        library = "_%s__library" % name
+        _flutter_apple_app_runner(
+            name = name,
+            deps = [":" + library],
+            info_plist = info_plist,
+            swift_package_environment = swift_package_environment,
+            tags = tags,
+            testonly = kwargs.get("testonly"),
+            visibility = kwargs.get("visibility"),
+        )
+
     swift_library(
-        name = name,
+        name = library,
         srcs = [
             registrant,
             "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
@@ -474,9 +510,14 @@ def flutter_ios_app(
             it to `ios_application`. Unlike macOS (where flutter create
             always emits the entitlements files), iOS only ships
             Runner.entitlements when capabilities are enabled in Xcode;
-            its absence is a valid, capability-less app and the macro
-            ships nothing rather than synthesizing a default. Pass `False`
-            to ship none although the file exists — a device build is
+            its absence is a valid, capability-less app. Either way a
+            signed app is signed as Xcode signs it: with its own
+            entitlements, its `application-identifier` (the profile's
+            prefix and the bundle id), the profile's
+            `com.apple.developer.team-identifier`, `beta-reports-active`
+            and `get-task-allow` where the profile grants them, and
+            nothing else the profile grants. Pass `False` to ship none of
+            the app's own although the file exists — a device build is
             signed against a profile, and an entitlement the profile does
             not grant fails it: `aps-environment`, which Xcode writes when
             Push is enabled, cannot be granted by a team wildcard profile
@@ -602,6 +643,23 @@ def flutter_ios_app(
             testonly = testonly,
         )
         entitlements = "__%s_entitlements" % name
+
+    # A signed app gets the entitlements Xcode signs it with: its own, its
+    # `application-identifier`, and the profile's team identifier and
+    # `beta-reports-active`. Given none, rules_apple would sign it with all the
+    # profile grants, a wildcard profile's keychain group `<team>.*` among
+    # them, shared with every app signed that way; given some, without the
+    # team identifier. A `select()` of a profile is resolved by the rule, which
+    # passes the app's own entitlements through where it gives `None`.
+    if provisioning_profile != None:
+        _flutter_signing_entitlements(
+            name = "__%s_signing_entitlements" % name,
+            entitlements = entitlements,
+            provisioning_profile = provisioning_profile,
+            tags = tags,
+            testonly = testonly,
+        )
+        entitlements = "__%s_signing_entitlements" % name
 
     # The app icon: the conventional catalog `flutter create` writes, unless
     # the caller named something else. Discovered for the same reason the
@@ -748,6 +806,17 @@ def flutter_ios_app(
         ] + runner_deps,
     )
 
+    # The runner in the app's configuration, with its plugins
+    # (`flutter_apple_app_runner`).
+    _flutter_apple_app_runner(
+        name = "__%s_app_runner" % name,
+        deps = ["__%s_runner" % name],
+        info_plist = actual_info_plist,
+        swift_package_environment = swift_package_environment,
+        tags = tags,
+        testonly = testonly,
+    )
+
     # 8. Info.plist — preprocess to resolve Xcode variables that rules_apple
     #    doesn't handle, in the conventional plist or the one the app names.
     #    A merge rather than a text template: the app's plist may be saved in
@@ -838,7 +907,7 @@ def flutter_ios_app(
     flutter_ios_signing_check(
         name = "__%s_signing_check" % name,
         app_label = str(native.package_relative_label(name)),
-        provisioning_profile_set = provisioning_profile != None,
+        provisioning_profile = provisioning_profile,
         tags = tags,
         testonly = testonly,
     )
@@ -868,10 +937,14 @@ def flutter_ios_app(
             "//conditions:default": "@rules_flutter//flutter:ios_code_asset_post_processor",
         }),
         deps = [
-            "__%s_runner" % name,
+            "__%s_app_runner" % name,
             "__%s_app_bundle" % name,
             "__%s_native_frameworks" % name,
             "__%s_signing_check" % name,
+            # Under the bundle, as its application is, so that it reads the
+            # application in the bundle's configuration; at the target in
+            # front, it would analyse and build it again in the top-level one.
+            "__%s_version_check" % name,
         ],
         tags = tags,
         testonly = testonly,
@@ -884,7 +957,10 @@ def flutter_ios_app(
     flutter_apple_app(
         name = name,
         app = "__%s_app" % name,
-        validations = ["__%s_version_check" % name],
+        # In the configuration of the app's plugins, as its runner is
+        # (`flutter_apple_app`).
+        info_plist = str(native.package_relative_label(actual_info_plist)),
+        swift_package_environment = swift_package_environment,
         tags = tags,
         target_compatible_with = target_compatible_with + select({
             "@platforms//os:ios": [],
@@ -949,6 +1025,8 @@ def flutter_ios_xcframeworks(
         static_plugins = False,
         codesign_identity = None,
         minimum_os_version = IOS_MINIMUM_OS_VERSION,
+        info_plist = None,
+        swift_package_environment = {},
         **kwargs):
     """The xcframeworks a host app built by Xcode embeds Flutter with, as `flutter build ios-framework` makes them.
 
@@ -976,6 +1054,21 @@ def flutter_ios_xcframeworks(
             (upstream's `--codesign-identity`), or `-` for ad hoc. Unset, they
             are unsigned, and Xcode signs them when it embeds them.
         minimum_os_version: The minimum iOS version of the frameworks.
+        info_plist: The Info.plist that a plugin whose Package.swift decides
+            its defines from the app reads, as `flutter_ios_app`'s
+            (`swift_package_environment`). The module has no Info.plist of
+            its own and the host's is not known here: name the one whose
+            usage descriptions the plugins should see. Unset, such a manifest
+            sees an empty one.
+        swift_package_environment: The environment in which the
+            `Package.swift` of each plugin that decides its defines from the
+            app is evaluated, as the shell's environment is under `flutter
+            build`: `{"AUDIO_SESSION_MICROPHONE": "1"}` for what
+            audio_session's README says to export. Such a manifest is
+            evaluated for this module, also seeing `info_plist` (see the
+            README's "Plugins whose Package.swift reads the app"). Nothing
+            else reads it, and the shell's environment does not reach the
+            manifests.
         **kwargs: `visibility`, `tags` and the like, for `name`.
     """
     internal_tags = kwargs.get("tags", []) + ["manual"]
@@ -983,6 +1076,8 @@ def flutter_ios_xcframeworks(
         name = "_%s_app" % name,
         application = application,
         minimum_os_version = minimum_os_version,
+        info_plist = info_plist,
+        swift_package_environment = swift_package_environment,
         tags = internal_tags,
     )
     _flutter_ios_engine_xcframework(
@@ -993,6 +1088,8 @@ def flutter_ios_xcframeworks(
         name = "_%s_code_assets" % name,
         application = application,
         minimum_os_version = minimum_os_version,
+        info_plist = info_plist,
+        swift_package_environment = swift_package_environment,
         tags = internal_tags,
     )
     xcframeworks = [
@@ -1005,6 +1102,8 @@ def flutter_ios_xcframeworks(
             name = "_%s_plugins" % name,
             application = application,
             minimum_os_version = minimum_os_version,
+            info_plist = info_plist,
+            swift_package_environment = swift_package_environment,
             static = static_plugins,
             tags = internal_tags,
         )
@@ -1013,6 +1112,8 @@ def flutter_ios_xcframeworks(
             application = application,
             plugins = "_%s_plugins" % name,
             minimum_os_version = minimum_os_version,
+            info_plist = info_plist,
+            swift_package_environment = swift_package_environment,
             tags = internal_tags,
         )
         xcframeworks += ["_%s_plugins" % name, "_%s_registrant" % name]

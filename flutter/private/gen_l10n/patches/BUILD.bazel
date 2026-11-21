@@ -1,3 +1,5 @@
+load("//tools/bzl_deps_guard:inputs.bzl", "bzl_library_inputs")
+
 # The seven cuts that carve `flutter gen-l10n` out of flutter_tools, applied by
 # `flutter_gen_l10n_repo` at fetch time. See
 # //flutter/private:flutter_gen_l10n_repo.bzl for what each one removes and what
@@ -18,9 +20,9 @@ exports_files(
         "process.patch",
         "features.patch",
         "io.patch",
-        # Flutter 3.50 moved the context of these two cuts; the cuts are the same.
-        "localizations_utils_3_50.patch",
-        "io_3_50.patch",
     ],
     visibility = ["//visibility:public"],
 )
+
+# What //tools/bzl_deps_guard reads of this package and those below it.
+bzl_library_inputs()

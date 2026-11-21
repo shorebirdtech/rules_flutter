@@ -10,9 +10,12 @@ Produces a `flutter_assets/` tree artifact containing:
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "program_assets_action_args")
 load("//flutter/private:asset_variants.bzl", "variant_scale")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load("//flutter/private:flutter_info_forwarding.bzl", "flutter_info_forwarding_aspect")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "package_root_of", "path_in_package")
 load("//flutter/private:notices.bzl", "NOTICES_ATTRS", "additional_licenses_of", "flutter_notices_action", "notices_asset_key", "package_licenses_of")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
+
+visibility("//flutter/...")
 
 _TOOL = Label("//flutter/private/tools:generate_asset_manifest.dart")
 
@@ -80,10 +83,8 @@ def flutter_asset_bundle_action(
         assets = [],
         fonts = [],
         output_dir = None,
-        const_finder = None,
         font_subset = None,
-        kernel_dill = None,
-        recorded_uses = None,
+        recorded_uses = [],
         optional_code_points = [],
         extra_asset_copies = [],
         unlisted_asset_copies = [],
@@ -95,8 +96,7 @@ def flutter_asset_bundle_action(
         ctx: Rule context.
         dart: The `dart` executable File from the Flutter SDK.
         dart_files: The files `dart` needs to run `generate_asset_manifest.dart`
-            from source, and to start `const_finder`'s snapshot: the `run` set
-            of the SDK (`DartSdkFilesInfo.run`).
+            from source: the `run` set of the SDK (`DartSdkFilesInfo.run`).
         assets: list of File objects of the target's package to include in the
             bundle, each under its path from that package's root
             (`assets/a.png`).
@@ -109,14 +109,11 @@ def flutter_asset_bundle_action(
             against the tree it watches and rebuilds. Declaring an output and
             registering the action that fills it are separate steps in
             Starlark, so hoisting the declaration introduces no cycle even
-            though icon tree shaking makes this action depend on the kernel.
-        const_finder: File for const_finder.dart.snapshot (enables icon tree shaking).
+            though icon tree shaking makes this action depend on the compile.
         font_subset: File for font-subset binary (enables icon tree shaking).
-        kernel_dill: File for the compiled kernel .dill (needed for icon tree shaking).
-        recorded_uses: File the compile wrote with `--recorded-uses`. With
-            `font_subset` and no `const_finder` (Flutter 3.50 on), icon tree
-            shaking reads the `IconData` instances from it instead of
-            running const_finder over the kernel.
+        recorded_uses: The recorded-uses JSON Files of the program's
+            compiles, whose `IconData` instances are the icons it uses
+            (enables icon tree shaking).
         optional_code_points: Code points every subset icon font keeps if the
             font has a glyph for them, used or not (`optional:<n>` to
             font-subset).
@@ -179,22 +176,13 @@ def flutter_asset_bundle_action(
 
     # Icon tree shaking config.
     extra_inputs = []
-    if font_subset and recorded_uses and not const_finder:
+    if font_subset and recorded_uses:
         config["icon_tree_shaking"] = {
             "font_subset": file_ref(refs, font_subset),
-            "recorded_uses": file_ref(refs, recorded_uses),
+            "recorded_uses": [file_ref(refs, f) for f in recorded_uses],
             "optional_code_points": optional_code_points,
         }
-        extra_inputs.extend([font_subset, recorded_uses])
-    elif const_finder and font_subset and kernel_dill:
-        config["icon_tree_shaking"] = {
-            "dart": file_ref(refs, dart),
-            "const_finder": file_ref(refs, const_finder),
-            "font_subset": file_ref(refs, font_subset),
-            "kernel_dill": file_ref(refs, kernel_dill),
-            "optional_code_points": optional_code_points,
-        }
-        extra_inputs.extend([const_finder, font_subset, kernel_dill])
+        extra_inputs.extend([font_subset] + recorded_uses)
 
     args = ctx.actions.args()
     args.add(tool)
@@ -263,6 +251,7 @@ flutter_asset_bundle = rule(
         ),
         "deps": attr.label_list(
             doc = "Flutter library dependencies whose assets to include.",
+            aspects = [flutter_info_forwarding_aspect],
         ),
         "flavor": attr.string(
             doc = "The flavor the bundle is for: a pub package's `flavors:` entries naming it are bundled, other `flavors:` entries are not. Empty is no flavor.",

@@ -1,24 +1,24 @@
 @Tags(['e2e'])
 /// What a hot reload does when its own rebuild moved a native library, in both
-/// directions: delivered when the bindings are unchanged, withheld when they are
-/// not.
+/// directions: delivered when the bindings are unchanged, withheld when they
+/// are not.
 ///
 /// The gap this covers is silent by construction, which is why it needs a real
 /// app. A codegen app's hot reload runs a `bazel build` of the
 /// `flutter_application` to regenerate its sources, and that build also
 /// recompiles the app's loose native libraries (`native_deps`) — the images the
-/// running process has already `dlopen`ed and can never replace. Nothing stopped
-/// the increment from being injected on top of them, and nothing said so: the edit
-/// went in, the reply said success, and the machine code the app ran was from
-/// before the edit.
+/// running process has already `dlopen`ed and can never replace. Nothing
+/// stopped the increment from being injected on top of them, and nothing said
+/// so: the edit went in, the reply said success, and the machine code the app
+/// ran was from before the edit.
 ///
 /// `codegen` is the only workspace where both halves are true at once — it is
 /// source-assembled (so a reload rebuilds through bazel) and `//:app` bundles
 /// `//native_add:native_add_shared` through a `flutter_native_library` wrapper
-/// that declares the C header as its binding contract. A header *is* the contract
-/// of a C library: the signatures live there, so editing the `.c` moves the
-/// library alone and editing the `.h` moves both. That is what makes both
-/// directions drivable from one fixture.
+/// that declares the C header as its binding contract. A header *is* the
+/// contract of a C library: the signatures live there, so editing the `.c`
+/// moves the library alone and editing the `.h` moves both. That is what makes
+/// both directions drivable from one fixture.
 ///
 /// ## What each assertion is for
 ///
@@ -40,178 +40,188 @@
 ///     unchanged` is a claim about the whole command, and an app showing the new
 ///     string would prove the increment went in after all.
 ///
-/// The web case covers the same two verdicts over Chrome, where the same physics
-/// hold for a different reason: `initBridge()`-style code instantiates a module
-/// once, a hot reload does not re-run `main()`, and the instance outlives the
-/// increment. `codegen`'s web bundle declares an eight-byte module and a text
-/// contract through `native_modules` — the tool compares bytes and parses
-/// neither, so a fixture needs only files that move when the right thing moves.
+/// The web case covers the same two verdicts over Chrome, where the same
+/// physics hold for a different reason: `initBridge()`-style code instantiates
+/// a module once, a hot reload does not re-run `main()`, and the instance
+/// outlives the increment. `codegen`'s web bundle declares an eight-byte module
+/// and a text contract through `native_modules` — the tool compares bytes and
+/// parses neither, so a fixture needs only files that move when the right thing
+/// moves.
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
 import 'editable_workspace.dart';
 
+/// The app under test.
+const _app = E2eApp('codegen');
+
 void main() {
   group('native library rebuilt under a hot reload', () {
-    test('delivered when the bindings hold, withheld when they move', () async {
-      final ws = await editableWorkspace('codegen');
-      final appMain = ws.file('lib/main.dart');
-      final nativeSource = ws.file('native_add/native/native_add.c');
-      final nativeHeader = ws.file('native_add/native/native_add.h');
-      final mainOriginal = appMain.readAsStringSync();
-      final sourceOriginal = nativeSource.readAsStringSync();
-      final headerOriginal = nativeHeader.readAsStringSync();
-      const dartAnchor = "'fields:";
-      const bodyAnchor = '(int32_t)((uint32_t)a + (uint32_t)b)';
-      const signature = 'int32_t native_add(int32_t a, int32_t b);';
-      expect(
-        mainOriginal.contains(dartAnchor),
-        isTrue,
-        reason: 'fixture marker present in codegen lib/main.dart',
-      );
-      expect(
-        sourceOriginal.contains(bodyAnchor),
-        isTrue,
-        reason: 'fixture marker present in native_add/native/native_add.c',
-      );
-      expect(
-        headerOriginal.contains(signature),
-        isTrue,
-        reason: 'fixture marker present in native_add/native/native_add.h',
-      );
+    test(
+      'delivered when the bindings hold, withheld when they move',
+      () async {
+        final ws = await editableWorkspace(_app);
+        final appMain = ws.file('lib/main.dart');
+        final nativeSource = ws.file('native_add/native/native_add.c');
+        final nativeHeader = ws.file('native_add/native/native_add.h');
+        final mainOriginal = appMain.readAsStringSync();
+        final sourceOriginal = nativeSource.readAsStringSync();
+        final headerOriginal = nativeHeader.readAsStringSync();
+        const dartAnchor = "'fields:";
+        const bodyAnchor = '(int32_t)((uint32_t)a + (uint32_t)b)';
+        const signature = 'int32_t native_add(int32_t a, int32_t b);';
+        expect(
+          mainOriginal.contains(dartAnchor),
+          isTrue,
+          reason: 'fixture marker present in codegen lib/main.dart',
+        );
+        expect(
+          sourceOriginal.contains(bodyAnchor),
+          isTrue,
+          reason: 'fixture marker present in native_add/native/native_add.c',
+        );
+        expect(
+          headerOriginal.contains(signature),
+          isTrue,
+          reason: 'fixture marker present in native_add/native/native_add.h',
+        );
 
-      final dt = await startDevTool(
-        workspace: ws.root,
-        target: ':app_macos',
-        device: 'macos',
-      );
-      try {
-        await dt.waitForEvent(
-          'app.started',
+        final dt = await startDevTool(
+          workspace: ws.root,
+          target: ':app_macos',
+          device: 'macos',
+        );
+        try {
+          await dt.waitForEvent(
+            'app.started',
+            timeout: const Duration(minutes: 6),
+          );
+        } on TimeoutException {
+          fail(
+            'no app.started within 6m.\nstderr:\n${dt.stderrLines.join('\n')}\n'
+            'stdout (non-protocol):\n${dt.nonProtocolStdoutLines.join('\n')}',
+          );
+        }
+        final appId = dt.appId!;
+        await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
+        // Edit only once the pipeline has assembled, which is what a user doing
+        // this does and what the check's baseline depends on. The assembler
+        // runs its own `bazel build` of the app target, and the libraries that
+        // build writes are what the watch records as the ones the process has.
+        // An edit landing *inside* that window is picked up by that very build,
+        // so the baseline moves to code the process never loaded and the reload
+        // after it sees nothing changed — the startup window documented on
+        // `NativeLibsWatch.of`, which a restart recovers from because the
+        // relauncher compares the launched bundle itself.
+        await dt.waitForStderr(
+          'frontend_server_ready',
           timeout: const Duration(minutes: 6),
         );
-      } on TimeoutException {
-        fail(
-          'no app.started within 6m.\nstderr:\n${dt.stderrLines.join('\n')}\n'
-          'stdout (non-protocol):\n${dt.nonProtocolStdoutLines.join('\n')}',
+        await _expectRendered(dt, appId, 'fields:name');
+
+        // ---- Case A: the library's code moved, its contract did not --------
+        appMain.writeAsStringSync(
+          mainOriginal.replaceFirst(dartAnchor, "'DELIVERED:"),
         );
-      }
-      final appId = dt.appId!;
-      await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
-      // Edit only once the pipeline has assembled, which is what a user doing this
-      // does and what the check's baseline depends on. The assembler runs its own
-      // `bazel build` of the app target, and the libraries that build writes are
-      // what the watch records as the ones the process has. An edit landing
-      // *inside* that window is picked up by that very build, so the baseline
-      // moves to code the process never loaded and the reload after it sees
-      // nothing changed — the startup window documented on `NativeLibsWatch.of`,
-      // which a restart recovers from because the relauncher compares the launched
-      // bundle itself.
-      await dt.waitForStderr(
-        'frontend_server_ready',
-        timeout: const Duration(minutes: 6),
-      );
-      await _expectRendered(dt, appId, 'fields:name');
+        nativeSource.writeAsStringSync(
+          sourceOriginal.replaceFirst(bodyAnchor, '$bodyAnchor + 1'),
+        );
 
-      // ---- Case A: the library's code moved, its contract did not ----------
-      appMain.writeAsStringSync(
-        mainOriginal.replaceFirst(dartAnchor, "'DELIVERED:"),
-      );
-      nativeSource.writeAsStringSync(
-        sourceOriginal.replaceFirst(bodyAnchor, '$bodyAnchor + 1'),
-      );
+        final delivered = await _command(dt, 'app.hotReload', appId);
+        expect(
+          delivered['succeeded'],
+          isTrue,
+          reason:
+              'the bindings are unchanged, so the increment is safe over the '
+              'library the process has: ${delivered['error']}',
+        );
+        expect(
+          delivered['nativeLibsStale'],
+          contains(contains('libnative_add.dylib')),
+          reason:
+              'the app is running old machine code, and a reply that did not say '
+              'so is the silence this whole check exists to break',
+        );
+        expect(delivered['runningCode'], 'updated');
+        await _expectRendered(dt, appId, 'DELIVERED:name');
 
-      final delivered = await _command(dt, 'app.hotReload', appId);
-      expect(
-        delivered['succeeded'],
-        isTrue,
-        reason:
-            'the bindings are unchanged, so the increment is safe over the '
-            'library the process has: ${delivered['error']}',
-      );
-      expect(
-        delivered['nativeLibsStale'],
-        contains(contains('libnative_add.dylib')),
-        reason:
-            'the app is running old machine code, and a reply that did not say '
-            'so is the silence this whole check exists to break',
-      );
-      expect(delivered['runningCode'], 'updated');
-      await _expectRendered(dt, appId, 'DELIVERED:name');
+        // The way out, which the reply names. The relauncher rebuilds the
+        // launch bundle, finds the library moved, and replaces the process.
+        final relaunched = await _command(dt, 'app.restart', appId);
+        expect(
+          relaunched['relaunched'],
+          isTrue,
+          reason:
+              'a hot restart keeps the process and its mapped images; only a '
+              'relaunch can deliver the library',
+        );
+        expect(relaunched['succeeded'], isTrue);
+        await _expectRendered(dt, appId, 'DELIVERED:name');
 
-      // The way out, which the reply names. The relauncher rebuilds the launch
-      // bundle, finds the library moved, and replaces the process.
-      final relaunched = await _command(dt, 'app.restart', appId);
-      expect(
-        relaunched['relaunched'],
-        isTrue,
-        reason:
-            'a hot restart keeps the process and its mapped images; only a '
-            'relaunch can deliver the library',
-      );
-      expect(relaunched['succeeded'], isTrue);
-      await _expectRendered(dt, appId, 'DELIVERED:name');
+        // And the run keeps working: the relaunch re-baselined what the process
+        // has, so an ordinary Dart edit reloads with nothing reported stale.
+        appMain.writeAsStringSync(
+          mainOriginal.replaceFirst(dartAnchor, "'RELOADED:"),
+        );
+        final ordinary = await _command(dt, 'app.hotReload', appId);
+        expect(
+          ordinary['succeeded'],
+          isTrue,
+          reason: 'nothing is stale after the relaunch: ${ordinary['error']}',
+        );
+        expect(ordinary.containsKey('nativeLibsStale'), isFalse);
+        await _expectRendered(dt, appId, 'RELOADED:name');
 
-      // And the run keeps working: the relaunch re-baselined what the process
-      // has, so an ordinary Dart edit reloads with nothing reported stale.
-      appMain.writeAsStringSync(
-        mainOriginal.replaceFirst(dartAnchor, "'RELOADED:"),
-      );
-      final ordinary = await _command(dt, 'app.hotReload', appId);
-      expect(
-        ordinary['succeeded'],
-        isTrue,
-        reason: 'nothing is stale after the relaunch: ${ordinary['error']}',
-      );
-      expect(ordinary.containsKey('nativeLibsStale'), isFalse);
-      await _expectRendered(dt, appId, 'RELOADED:name');
+        // ---- Case B: the contract moved with the library -------------------
+        // A signature change: the header is the declared contract, so this is
+        // the case where new bindings over the old image would encode a call it
+        // cannot decode.
+        appMain.writeAsStringSync(
+          mainOriginal.replaceFirst(dartAnchor, "'BLOCKED:"),
+        );
+        nativeHeader.writeAsStringSync(
+          headerOriginal.replaceFirst(
+            signature,
+            'int32_t native_add(int32_t a, int32_t b, int32_t c);',
+          ),
+        );
+        nativeSource.writeAsStringSync(
+          sourceOriginal
+              .replaceFirst(
+                'int32_t native_add(int32_t a, int32_t b) {',
+                'int32_t native_add(int32_t a, int32_t b, int32_t c) {',
+              )
+              .replaceFirst(bodyAnchor, '$bodyAnchor + c'),
+        );
 
-      // ---- Case B: the contract moved with the library ---------------------
-      // A signature change: the header is the declared contract, so this is the
-      // case where new bindings over the old image would encode a call it cannot
-      // decode.
-      appMain.writeAsStringSync(
-        mainOriginal.replaceFirst(dartAnchor, "'BLOCKED:"),
-      );
-      nativeHeader.writeAsStringSync(
-        headerOriginal.replaceFirst(
-          signature,
-          'int32_t native_add(int32_t a, int32_t b, int32_t c);',
-        ),
-      );
-      nativeSource.writeAsStringSync(
-        sourceOriginal
-            .replaceFirst(
-              'int32_t native_add(int32_t a, int32_t b) {',
-              'int32_t native_add(int32_t a, int32_t b, int32_t c) {',
-            )
-            .replaceFirst(bodyAnchor, '$bodyAnchor + c'),
-      );
-
-      final withheld = await _command(dt, 'app.hotReload', appId);
-      expect(
-        withheld['succeeded'],
-        isFalse,
-        reason: 'the bindings moved, so the edit may not be injected',
-      );
-      expect(
-        withheld['nativeLibsStale'],
-        contains(contains('libnative_add.dylib')),
-      );
-      expect(withheld['runningCode'], 'unchanged');
-      // The promise `unchanged` makes, against the screen: the Dart half of the
-      // same edit was not delivered either.
-      await _expectRendered(dt, appId, 'RELOADED:name');
-    }, timeout: const Timeout(Duration(minutes: 15)));
+        final withheld = await _command(dt, 'app.hotReload', appId);
+        expect(
+          withheld['succeeded'],
+          isFalse,
+          reason: 'the bindings moved, so the edit may not be injected',
+        );
+        expect(
+          withheld['nativeLibsStale'],
+          contains(contains('libnative_add.dylib')),
+        );
+        expect(withheld['runningCode'], 'unchanged');
+        // The promise `unchanged` makes, against the screen: the Dart half of
+        // the same edit was not delivered either.
+        await _expectRendered(dt, appId, 'RELOADED:name');
+      },
+      timeout: const Timeout(Duration(minutes: 15)),
+      skip: !Platform.isMacOS ? 'macOS only' : null,
+    );
   }, tags: 'macos');
 
   group('native module rebuilt under a web hot reload', () {
     test('delivered when the contract holds, withheld when it moves', () async {
-      final ws = await editableWorkspace('codegen');
+      final ws = await editableWorkspace(_app);
       final appMain = ws.file('lib/main.dart');
       final module = ws.file('web/demo_module.wasm');
       final contract = ws.file('web/demo_module.api');
@@ -327,9 +337,10 @@ Future<Map<String, dynamic>> _command(
 
 /// Require the running app to be displaying [text].
 ///
-/// `app.waitFor`'s `text` selector is exact equality on the widget's own string,
-/// and a miss answers with a top-level `error` and no `result` — so this is a real
-/// assertion about what is on screen, not a poll that can pass by finding nothing.
+/// `app.waitFor`'s `text` selector is exact equality on the widget's own
+/// string, and a miss answers with a top-level `error` and no `result` — so
+/// this is a real assertion about what is on screen, not a poll that can pass
+/// by finding nothing.
 Future<void> _expectRendered(
   DevToolProcess dt,
   String appId,

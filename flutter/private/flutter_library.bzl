@@ -1,10 +1,13 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartInfo", "DartUsedWithoutImportInfo")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "LIBRARY_IMPORT_CHECKER_ATTRS", "PORTABLE_EXEC_GROUPS", "RUNTIME_INDEPENDENT_ATTR", "SUMMARY_ATTRS", "dart_analyzable_info", "dart_info", "derive_package_root", "library_import_check", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "LIBRARY_IMPORT_CHECKER_ATTRS", "PORTABLE_EXEC_GROUPS", "RUNTIME_INDEPENDENT_ATTR", "SUMMARY_ATTRS", "dart_analyzable_info", "dart_info", "dart_info_no_package", "data_runfiles", "derive_package_root", "library_import_check", "library_package", "package_identity_attrs", "runtime_reset_when_independent")
 load("//flutter:providers.bzl", "FlutterFontFamilyInfo", "FlutterInfo")
 load("//flutter/private:flutter_font.bzl", "FONTS_ATTR")
-load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "direct_package_names", "flutter_info")
+load("//flutter/private:flutter_info_forwarding.bzl", "flutter_info_forwarding_aspect")
+
+visibility("//flutter/...")
 
 def package_root_of(owner):
     """The root of the Dart package `owner` is in: the directory above `lib/`.
@@ -20,7 +23,7 @@ def package_root_of(owner):
     """
     if type(owner) == "struct" and hasattr(owner, "package_root"):
         return owner.package_root
-    return derive_package_root(owner.label.workspace_root, owner.label.package)
+    return derive_package_root(owner.label.repo_root, owner.label.package)
 
 def path_in_package(label, root, f):
     """The path of `f` from the root of its Dart package.
@@ -67,6 +70,14 @@ def asset_key(entry, path, program_root):
         return path
     return "packages/{}/{}".format(entry.package_name, path)
 
+def bundle_key(entry, path, program_root):
+    """The key of an asset or shader contribution `path`: `asset_key`, or `path` itself for a file of another package.
+
+    A `pub_assets` or `pub_shaders` struct with `of_other_package` is a file
+    its package lists as `packages/<other>/<path>`; `path` is that, and the key.
+    """
+    return path if getattr(entry, "of_other_package", False) else asset_key(entry, path, program_root)
+
 ADDITIONAL_LICENSES_ATTR = attr.label_list(
     doc = "Licence files beyond the package's `LICENSE`: what its pubspec's `flutter: licenses:` lists. " +
           "An application that depends on the package appends them to its `NOTICES` as they are.",
@@ -96,7 +107,7 @@ def build_pub_contributions(ctx, package_name, package_root):
     Args:
         ctx: The rule context of a `flutter_library`, `flutter_plugin` or
             `flutter_pub_member`. Reads `fonts`, `assets`,
-            `shaders`, `shader_includes`, and the platforms and flavors the
+            `shaders`, `shader_includes`, a `flutter_pub_member`'s `bundle_paths` and `other_package_files`, and the platforms and flavors the
             assets and shaders are restricted to.
         package_name: str — the Dart package the contributions are of.
         package_root: str — that package's root, from `derive_package_root`. A
@@ -129,9 +140,14 @@ def build_pub_contributions(ctx, package_name, package_root):
             ]),
         ))
 
-    # Only a generated pub package's member has `bundle_paths`: the files its
-    # pubspec names `packages/<the package>/x`, which are its `lib/x`.
+    # Only a pub package's member has `bundle_paths`: the files its pubspec
+    # lists as `packages/<the package>/<path>`, which are its `lib/<path>`,
+    # each bundled by every path it is listed by.
     bundle_paths = getattr(ctx.attr, "bundle_paths", {})
+
+    # Likewise `other_package_files`: the files of another package it links,
+    # which are bundled at the key as listed.
+    other_package_files = getattr(ctx.attr, "other_package_files", [])
 
     asset_platforms = ctx.attr.asset_platforms
     asset_flavors = ctx.attr.asset_flavors
@@ -140,14 +156,16 @@ def build_pub_contributions(ctx, package_name, package_root):
     for f in ctx.files.assets:
         path = path_in_package(ctx.label, package_root, f)
         asset_paths.append(path)
-        extra_pub_assets.append(struct(
-            package_name = package_name,
-            package_root = package_root,
-            asset_path = bundle_paths.get(path, path),
-            file = f,
-            platforms = tuple(asset_platforms.get(path, [])),
-            flavors = tuple(asset_flavors.get(path, [])),
-        ))
+        for asset_path in bundle_paths.get(path, [path]):
+            extra_pub_assets.append(struct(
+                package_name = package_name,
+                package_root = package_root,
+                asset_path = asset_path,
+                of_other_package = path in other_package_files,
+                file = f,
+                platforms = tuple(asset_platforms.get(path, [])),
+                flavors = tuple(asset_flavors.get(path, [])),
+            ))
 
     shader_platforms = ctx.attr.shader_platforms
     shader_flavors = ctx.attr.shader_flavors
@@ -156,15 +174,17 @@ def build_pub_contributions(ctx, package_name, package_root):
     for f in ctx.files.shaders:
         path = path_in_package(ctx.label, package_root, f)
         shader_paths.append(path)
-        extra_pub_shaders.append(struct(
-            package_name = package_name,
-            package_root = package_root,
-            shader_path = bundle_paths.get(path, path),
-            file = f,
-            includes = tuple(ctx.files.shader_includes),
-            platforms = tuple(shader_platforms.get(path, [])),
-            flavors = tuple(shader_flavors.get(path, [])),
-        ))
+        for shader_path in bundle_paths.get(path, [path]):
+            extra_pub_shaders.append(struct(
+                package_name = package_name,
+                package_root = package_root,
+                shader_path = shader_path,
+                of_other_package = path in other_package_files,
+                file = f,
+                includes = tuple(ctx.files.shader_includes),
+                platforms = tuple(shader_platforms.get(path, [])),
+                flavors = tuple(shader_flavors.get(path, [])),
+            ))
 
     # A restriction of a path the target does not list would restrict
     # nothing: a misspelt path would ship everywhere, silently.
@@ -174,6 +194,7 @@ def build_pub_contributions(ctx, package_name, package_root):
         ("shader_platforms", shader_platforms, shader_paths, "shaders"),
         ("shader_flavors", shader_flavors, shader_paths, "shaders"),
         ("bundle_paths", bundle_paths, asset_paths + shader_paths, "assets` or `shaders"),
+        ("other_package_files", {p: True for p in other_package_files}, asset_paths + shader_paths, "assets` or `shaders"),
     ]:
         for path in restricted:
             if path not in paths:
@@ -239,7 +260,7 @@ def aggregate_pub_contributions(deps, target_platform = None, flavor = "", progr
     it is of the program's own package (`program_root`) or of no package (the
     Material icon font), under `packages/<package_name>/` otherwise, the font
     family included. A font naming another package's file keeps that path.
-    This matches Flutter's CLI behavior and the const finder's tree-shaking
+    This matches Flutter's CLI behavior and icon tree shaking's
     key shape (`packages/<pkg>/<family>` only when the IconData has a non-null
     `fontPackage`).
 
@@ -267,14 +288,12 @@ def aggregate_pub_contributions(deps, target_platform = None, flavor = "", progr
             icon font. Two entries may name one path; telling whether that is
             one file reached twice or a conflict is for the bundle action.
     """
-    pub_fonts = []
-    pub_assets = []
-    for dep in deps:
-        if FlutterInfo not in dep:
-            continue
-        info = dep[FlutterInfo]
-        pub_fonts.extend(info.pub_fonts.to_list())
-        pub_assets.extend(info.pub_assets.to_list())
+
+    # One depset over every dep: a package reached through two deps is one
+    # contribution, not two manifest entries.
+    infos = [dep[FlutterInfo] for dep in deps if FlutterInfo in dep]
+    pub_fonts = depset(transitive = [info.pub_fonts for info in infos]).to_list()
+    pub_assets = depset(transitive = [info.pub_assets for info in infos]).to_list()
 
     fonts = []
     copies = []
@@ -296,7 +315,7 @@ def aggregate_pub_contributions(deps, target_platform = None, flavor = "", progr
     for entry in pub_assets:
         if not ships_in(entry, target_platform, flavor):
             continue
-        copies.append((asset_key(entry, entry.asset_path, program_root), entry.file))
+        copies.append((bundle_key(entry, entry.asset_path, program_root), entry.file))
 
     return (fonts, copies, unlisted_copies)
 
@@ -365,7 +384,43 @@ def flutter_analyzable_info_of_packages(ctx, packages, srcs, resources):
         resources = resources,
     )
 
+def _has_package_contents(ctx):
+    """Whether the library has anything of a package: a file, or a say in which one it is."""
+    return bool(
+        ctx.attr.package or
+        ctx.files.srcs or
+        ctx.files.resources or
+        ctx.files.assets or
+        ctx.files.shaders or
+        ctx.attr.fonts or
+        ctx.files.additional_licenses or
+        getattr(ctx.files, "framework_shaders", []),
+    )
+
+def _flutter_facade_impl(ctx):
+    """A library of only `deps` (and `data`): it passes them on and is no package."""
+    info = dart_info_no_package(
+        deps = ctx.attr.deps,
+        runfiles = data_runfiles(ctx, ctx.attr.data) if ctx.attr.data else None,
+    )
+    return [
+        DefaultInfo(runfiles = info.runfiles),
+        info,
+        flutter_info(
+            deps = ctx.attr.deps,
+            app_dependencies = [] if ctx.label.repo_name else direct_package_names(ctx.attr.deps),
+        ),
+        # It has no sources, but what it passes on is still what `bazel
+        # coverage` reports on for a test that reaches it, as `dart_library`'s.
+        coverage_common.instrumented_files_info(ctx, dependency_attributes = ["deps"]),
+    ] + library_import_check(ctx, [])
+
 def _flutter_library_impl(ctx):
+    # A library of only `deps` has no file of any package and names none, so
+    # it is no package, whatever its directory is called: a wrapper of pub's
+    # `collection` in `third_party/collection` is not a second `collection`.
+    if not _has_package_contents(ctx):
+        return _flutter_facade_impl(ctx)
     declared = library_package(ctx, ctx.files.srcs, ctx.files.resources)
     package_name = declared.package_name
     package_root = declared.package_root
@@ -431,6 +486,11 @@ def _flutter_library_impl(ctx):
             pub_assets = extra_pub_assets,
             pub_shaders = extra_pub_shaders,
             additional_licenses = own_additional_licenses(ctx, package_name),
+            # A library of the main repository is the application's own code,
+            # so what it depends on the application depends on directly, as
+            # on the `dependencies` of an app's pubspec. A library of another
+            # repository is a dependency's, whose own dependencies are not.
+            app_dependencies = [] if ctx.label.repo_name else direct_package_names(ctx.attr.deps),
         ),
         # The sources `bazel coverage` may report of this package, as
         # `dart_library`'s.
@@ -461,13 +521,13 @@ LIBRARY_DATA_ATTR = attr.label_list(
 
 _LIBRARY_ATTRS = package_identity_attrs() | {
     "srcs": attr.label_list(
-        doc = "Dart source files for this library.",
+        doc = "Dart source files for this library. A library of only `fonts`, `assets` or `shaders` has none.",
         allow_files = [".dart"],
-        mandatory = True,
     ),
     "deps": attr.label_list(
         doc = "Other `dart_library` or `flutter_library` targets this library depends on.",
         providers = [DartInfo],
+        aspects = [flutter_info_forwarding_aspect],
     ),
     "resources": attr.label_list(
         doc = "Non-Dart files this package ships inside `lib/` — part of its published surface, but never compiled. Anything under `lib/` is addressable as `package:<name>/<path>` whatever its extension, so these are members of the package: they ride `DartInfo.transitive_resources` and are staged wherever the whole package is staged (the analyzer's project tree, `dart_test`/`dart_binary` runfiles), mirroring `dart_library`. Orthogonal to `assets`/`shaders`/`fonts`, which name flutter_assets bundle contributions — a `lib/` shader is legitimately both. `.dart` files belong in `srcs`.",
@@ -507,7 +567,7 @@ flutter_library = rule(
     attrs = _LIBRARY_ATTRS,
     exec_groups = PORTABLE_EXEC_GROUPS,
     toolchains = COPY_TO_DIRECTORY_TOOLCHAINS,
-    doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile.",
+    doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile. A target with no files and no `package` passes its `deps` on and is no package, whatever its directory is called.",
 )
 
 flutter_framework_library = rule(

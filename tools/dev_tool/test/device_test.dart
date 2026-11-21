@@ -148,6 +148,7 @@ void main() {
 
     test('AndroidDevice name includes deviceId when provided', () {
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         adbPath: 'adb',
         aapt2Path: 'aapt2',
         deviceId: 'emulator-5554',
@@ -157,6 +158,7 @@ void main() {
 
     test('AndroidDevice name is "Android" when no deviceId', () {
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         adbPath: 'adb',
         aapt2Path: 'aapt2',
       );
@@ -199,6 +201,7 @@ void main() {
     test('AndroidDevice builds for the ABI it was told', () {
       expect(
         AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           adbPath: 'adb',
           aapt2Path: 'aapt2',
           abi: 'arm64-v8a',
@@ -209,6 +212,7 @@ void main() {
       );
       expect(
         AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           adbPath: 'adb',
           aapt2Path: 'aapt2',
           abi: 'x86_64',
@@ -225,6 +229,7 @@ void main() {
     // those without building the artifact.
     test('AndroidDevice names the bundle parts a restart reads', () {
       final parts = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         adbPath: 'adb',
         aapt2Path: 'aapt2',
         abi: 'x86_64',
@@ -272,6 +277,7 @@ void main() {
     test('AndroidDevice does not guess an ABI it has not been told', () {
       expect(
         () => AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           adbPath: 'adb',
           aapt2Path: 'aapt2',
         ).buildArgs,
@@ -286,6 +292,7 @@ void main() {
       }) async {
         final calls = <String>[];
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           deviceId: deviceId,
           adbPath: 'adb',
@@ -349,6 +356,7 @@ void main() {
       test('a told ABI is not asked again', () async {
         final calls = <String>[];
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           abi: 'x86_64',
           adbPath: 'adb',
@@ -363,6 +371,7 @@ void main() {
 
       test('an adb failure is reported with the device it asked', () async {
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           deviceId: 'PIXEL',
           adbPath: 'adb',
@@ -1001,11 +1010,122 @@ void main() {
   });
 
   group('AndroidDevice.launch', () {
+    // As `flutter run` does (flutter_tools' `AndroidDevice.startApp`).
+    test('stops the app before it installs and starts it', () async {
+      final calls = <List<String>>[];
+      final fakeLogcat = FakeProcess();
+      Future<ProcessResult> adb(String exe, List<String> args) async {
+        calls.add(args);
+        return ProcessResult(0, 0, '', '');
+      }
+
+      final device = AndroidDevice(
+        startForceStopProcess: answeringAs(adb),
+        aapt2Path: 'aapt2',
+        packageName: 'com.example.app',
+        adbPath: 'adb',
+        runProcess: adb,
+        startProcess: (exe, args) async => fakeLogcat,
+      );
+      unawaited(fakeLogcat.outputAttached.then((_) => fakeLogcat.complete(0)));
+
+      await device.launch('/path/to/app.apk');
+
+      final stop = calls.indexWhere(
+        (c) => c.join(' ') == 'shell am force-stop com.example.app',
+      );
+      expect(stop, isNot(-1), reason: '$calls');
+      expect(stop, lessThan(calls.indexWhere((c) => c.contains('install'))));
+      expect(
+        stop,
+        lessThan(
+          calls.indexWhere((c) => c.contains('am') && c.contains('start')),
+        ),
+      );
+    });
+
+    // flutter_tools' `stopApp` logs a failed stop and goes on, and so does
+    // this: the install stops a running copy itself, so the stop is never what
+    // a launch depends on.
+    group('a stop that does not work', () {
+      AndroidDevice deviceWhoseStop(
+        Future<Process> Function() onStop,
+        List<List<String>> calls,
+        FakeProcess logcat,
+      ) => AndroidDevice(
+        startForceStopProcess: (exe, args) {
+          calls.add(args);
+          return onStop();
+        },
+        aapt2Path: 'aapt2',
+        packageName: 'com.example.app',
+        adbPath: 'adb',
+        runProcess: (exe, args) async {
+          calls.add(args);
+          return ProcessResult(0, 0, '', '');
+        },
+        startProcess: (exe, args) async => logcat,
+      );
+
+      test('is reported, and the launch goes on', () async {
+        final records = <LogRecord>[];
+        final sub = Logger.root.onRecord.listen(records.add);
+        addTearDown(sub.cancel);
+        final calls = <List<String>>[];
+        final logcat = FakeProcess();
+        unawaited(logcat.outputAttached.then((_) => logcat.complete(0)));
+        final device = deviceWhoseStop(
+          () => answeringAs(
+            (_, _) async => ProcessResult(0, 1, '', 'Error: device offline'),
+          )('adb', const []),
+          calls,
+          logcat,
+        );
+
+        await device.launch('/path/to/app.apk');
+
+        expect(calls.any((c) => c.contains('install')), isTrue);
+        expect(
+          records.map((r) => '${(r.object as Map)['text']}'),
+          contains(contains('device offline')),
+        );
+      });
+
+      test('that never answers is given up on after 30 s', () {
+        fakeAsync((async) {
+          final calls = <List<String>>[];
+          final logcat = FakeProcess();
+          unawaited(logcat.outputAttached.then((_) => logcat.complete(0)));
+          final wedged = FakeProcess();
+          final device = deviceWhoseStop(() async => wedged, calls, logcat);
+
+          // What follows the install reads real files, which fake time does
+          // not reach; that the install is reached is what this asks.
+          unawaited(
+            device
+                .launch('/path/to/app.apk')
+                .then((_) {}, onError: (Object _) {}),
+          );
+          async.elapse(const Duration(seconds: 29));
+          expect(calls.any((c) => c.contains('install')), isFalse);
+
+          async.elapse(const Duration(seconds: 2));
+          expect(calls.any((c) => c.contains('install')), isTrue);
+          expect(
+            wedged.signals,
+            [ProcessSignal.sigkill],
+            reason: 'an adb left running holds the tool open after the run',
+          );
+        });
+      });
+    });
+
     test('calls adb install with -r and device flag', () async {
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         deviceId: 'emulator-5554',
         packageName: 'com.example.app',
@@ -1042,6 +1162,7 @@ void main() {
         final calls = <(String, List<String>)>[];
         final fakeLogcat = FakeProcess();
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           activityName: '.FlutterActivity',
@@ -1058,7 +1179,9 @@ void main() {
 
         await device.launch('/path/to/app.apk');
 
-        final startCall = calls.firstWhere((c) => c.$2.contains('am'));
+        final startCall = calls.firstWhere(
+          (c) => c.$2.contains('am') && c.$2.contains('start'),
+        );
         expect(
           startCall.$2,
           containsAllInOrder(['--ez', 'start-paused', 'true']),
@@ -1070,6 +1193,7 @@ void main() {
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1083,7 +1207,9 @@ void main() {
 
       await device.launch('/path/to/app.apk');
 
-      final startCall = calls.firstWhere((c) => c.$2.contains('am'));
+      final startCall = calls.firstWhere(
+        (c) => c.$2.contains('am') && c.$2.contains('start'),
+      );
       expect(startCall.$2, isNot(contains('start-paused')));
     });
 
@@ -1092,6 +1218,7 @@ void main() {
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         activityName: '.FlutterActivity',
@@ -1107,7 +1234,9 @@ void main() {
 
       await device.launch('/path/to/app.apk');
 
-      final startCall = calls.firstWhere((c) => c.$2.contains('am'));
+      final startCall = calls.firstWhere(
+        (c) => c.$2.contains('am') && c.$2.contains('start'),
+      );
       expect(startCall.$2, contains('shell'));
       expect(startCall.$2, contains('am'));
       expect(startCall.$2, contains('start'));
@@ -1120,6 +1249,7 @@ void main() {
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1134,12 +1264,15 @@ void main() {
 
       await device.launch('/path/to/app.apk');
 
-      final startCall = calls.firstWhere((c) => c.$2.contains('am'));
+      final startCall = calls.firstWhere(
+        (c) => c.$2.contains('am') && c.$2.contains('start'),
+      );
       expect(startCall.$2, contains('com.example.app/.MainActivity'));
     });
 
     test('throws on adb install failure', () async {
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1169,6 +1302,7 @@ void main() {
       // A reader who cannot see the serial the tool used has nothing to compare
       // against the one they would have typed.
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         packageName: 'com.example.app',
@@ -1198,6 +1332,7 @@ void main() {
       // `-d android` lets adb choose, and its message says which it chose or
       // why it would not. Quoting a serial we never passed would be a fiction.
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1243,6 +1378,7 @@ void main() {
         required int availableKb,
         bool alreadyInstalled = false,
       }) => AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1335,12 +1471,15 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         // else — a bad signature, an ABI mismatch — is passed through
         // unembellished rather than dressed up as a storage problem.
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
-          runProcess: (exe, args) async => args.contains('install')
+          runProcess: (exe, args) async => args.contains('force-stop')
+              ? ProcessResult(0, 0, '', '')
+              : args.contains('install')
               ? ProcessResult(0, 1, '', 'Failure [INSTALL_FAILED_INVALID_APK]')
-              : fail('nothing else should be asked of adb'),
+              : fail('nothing but the stop and the install is asked of adb'),
           startProcess: (exe, args) async => FakeProcess(),
         );
         await expectLater(
@@ -1365,6 +1504,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       FakeProcess logcat,
       ProcessResult Function() onForward,
     ) => AndroidDevice(
+      startForceStopProcess: exitsAtOnce,
       aapt2Path: 'aapt2',
       packageName: 'com.example.app',
       adbPath: 'adb',
@@ -1420,6 +1560,58 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
     });
 
+    // A launch that fails returns no AppInstance, so nothing would ever stop
+    // its logcat: an `adb logcat` left running after the tool has gone.
+    test('stops its logcat when the launch fails', () async {
+      final fakeLogcat = FakeProcess();
+      final device = launchableDevice(
+        fakeLogcat,
+        () => ProcessResult(0, 1, '', 'error: device offline'),
+      );
+      announceVmService(fakeLogcat);
+
+      await expectLater(
+        device.launch('/path/to/app.apk'),
+        throwsA(isA<StateError>()),
+      );
+      expect(fakeLogcat.killed, isTrue);
+    });
+
+    test('abandoning a launch in flight stops its logcat', () async {
+      final fakeLogcat = FakeProcess();
+      final device = launchableDevice(
+        fakeLogcat,
+        () => ProcessResult(0, 0, '41234\n', ''),
+      );
+      // No announcement: the launch waits for the VM service, which is where
+      // a teardown finds it.
+      final launched = device.launch('/path/to/app.apk');
+      await fakeLogcat.outputAttached;
+
+      await device.abandonLaunch();
+      expect(fakeLogcat.killed, isTrue);
+      // What the kill does to a real logcat's pipes, and the launch's cue to
+      // stop waiting.
+      fakeLogcat.complete(-1);
+      expect((await launched).vmServiceUri, isNull);
+    });
+
+    test(
+      'abandoning a launch that returned leaves its logcat to stop',
+      () async {
+        final fakeLogcat = FakeProcess();
+        final device = launchableDevice(
+          fakeLogcat,
+          () => ProcessResult(0, 0, '41234\n', ''),
+        );
+        announceVmService(fakeLogcat);
+        await device.launch('/path/to/app.apk');
+
+        await device.abandonLaunch();
+        expect(fakeLogcat.killed, isFalse);
+      },
+    );
+
     test(
       'throws when the forward reports success but allocates no port',
       () async {
@@ -1471,6 +1663,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         final calls = <List<String>>[];
         var asked = 0;
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
@@ -1824,6 +2017,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final fakeLogcat = FakeProcess();
 
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1853,6 +2047,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     }) {
       final calls = <List<String>>[];
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -1952,7 +2147,11 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('an Android run needs nothing installed', () async {
       expect(
         await namesFor(
-          AndroidDevice(adbPath: '/sdk/adb', aapt2Path: '/sdk/aapt2'),
+          AndroidDevice(
+            startForceStopProcess: exitsAtOnce,
+            adbPath: '/sdk/adb',
+            aapt2Path: '/sdk/aapt2',
+          ),
         ),
         isEmpty,
       );
@@ -2013,7 +2212,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         File(out).writeAsStringSync(devicesJson(transportType));
         return ProcessResult(0, 0, '', '');
       },
-      startProcess: (exe, args) async => FakeProcess(),
+      startProcess: (exe, args, env) async => FakeProcess(),
     );
 
     Future<List<String>> namesFor(Device device) async => [
@@ -2050,7 +2249,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           File(out).writeAsStringSync(devicesJson('wired'));
           return ProcessResult(0, 0, '', '');
         },
-        startProcess: (exe, args) async => FakeProcess(),
+        startProcess: (exe, args, env) async => FakeProcess(),
       );
 
       await expectLater(
@@ -2072,6 +2271,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         final calls = <String>[];
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           adbPath: 'adb',
           aapt2Path: 'aapt2',
           runProcess: (exe, args) async {
@@ -2104,6 +2304,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       'fails when the artifact is not an APK and no package was given',
       () async {
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           adbPath: 'adb',
           aapt2Path: 'aapt2',
           runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
@@ -2129,6 +2330,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         final calls = <(String, List<String>)>[];
         final fakeLogcat = FakeProcess();
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           adbPath: 'adb',
           aapt2Path: 'aapt2',
           runProcess: (exe, args) async {
@@ -2152,7 +2354,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         );
         await device.launch('/path/to/app.apk');
 
-        final start = calls.firstWhere((c) => c.$2.contains('am'));
+        final start = calls.firstWhere(
+          (c) => c.$2.contains('am') && c.$2.contains('start'),
+        );
         expect(start.$2, contains('com.example.myapp/com.example.myapp.Main'));
       },
     );
@@ -2189,6 +2393,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       required FakeProcess logcat,
     }) {
       return AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -2245,7 +2450,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         containsAllInOrder(['shell', 'dumpsys', 'package', 'com.example.app']),
       );
       // The activity was started (check passed, launch proceeded).
-      expect(calls.any((c) => c.$2.contains('am')), isTrue);
+      expect(
+        calls.any((c) => c.$2.contains('am') && c.$2.contains('start')),
+        isTrue,
+      );
     });
 
     test('fails fast with diagnostic when INTERNET is missing', () async {
@@ -2282,7 +2490,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(message, contains('debug_manifest'));
 
       // Failed before starting the activity or tailing logcat.
-      expect(calls.any((c) => c.$2.contains('am')), isFalse);
+      expect(
+        calls.any((c) => c.$2.contains('am') && c.$2.contains('start')),
+        isFalse,
+      );
       expect(calls.any((c) => c.$2.contains('logcat')), isFalse);
     });
 
@@ -2357,6 +2568,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -2373,7 +2585,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       await device.launch('/path/to/app.apk');
 
       expect(calls.any((c) => c.$2.contains('dumpsys')), isFalse);
-      expect(calls.any((c) => c.$2.contains('am')), isTrue);
+      expect(
+        calls.any((c) => c.$2.contains('am') && c.$2.contains('start')),
+        isTrue,
+      );
     });
   });
 
@@ -3174,6 +3389,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final logcat = FakeProcess();
       final forwards = <String>[];
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -3212,6 +3428,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         final calls = <List<String>>[];
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
@@ -3251,6 +3468,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('an Android launch on an empty log reads all of it', () async {
       final calls = <List<String>>[];
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         packageName: 'com.example.app',
         adbPath: 'adb',
@@ -3274,6 +3492,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       'an Android launch that cannot read the log fails, saying so',
       () async {
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           packageName: 'com.example.app',
           adbPath: 'adb',
@@ -3882,6 +4101,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final calls = <(String, List<String>)>[];
 
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         adbPath: 'adb',
@@ -3913,6 +4133,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         final wedged = FakeProcess();
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           deviceId: '58051JEBF01271',
           adbPath: 'adb',
@@ -3953,6 +4174,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       /// it is handed — the emulator names the file itself, so a caller can
       /// only look for what turned up.
       AndroidDevice emulator(List<String> files) => AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         deviceId: 'emulator-5554',
         adbPath: 'adb',
@@ -3981,6 +4203,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       test('passes the console command a directory of its own', () async {
         final calls = <List<String>>[];
         final device = AndroidDevice(
+          startForceStopProcess: exitsAtOnce,
           aapt2Path: 'aapt2',
           deviceId: 'emulator-5554',
           adbPath: 'adb',
@@ -4053,6 +4276,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       const budget = Duration(milliseconds: 500);
       final started = <FakeProcess>[];
       final device = AndroidDevice(
+        startForceStopProcess: exitsAtOnce,
         aapt2Path: 'aapt2',
         deviceId: '58051JEBF01271',
         adbPath: 'adb',
@@ -4506,6 +4730,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         FakeProcess devicectl,
         FakeProcess lldb,
         List<List<String>> starts,
+        List<Map<String, String>> environments,
         List<List<String>> runs,
       })
     >
@@ -4527,11 +4752,17 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       void Function(String exe, List<String> args)? onRun,
       BuildMode buildMode = BuildMode.debug,
       List<String>? bonjourServices,
+      List<String> consoleLines = const [],
+      int silentMdnsAttempts = 0,
+      AppLogListener? onLog,
+      bool advertise = true,
+      bool announceOnConsole = false,
     }) async {
       final devicectl = devicectlProcess ?? FakeProcess();
       final lldb = lldbProcess ?? FakeProcess();
       final iproxy = iproxyProcess ?? FakeProcess();
       final starts = <List<String>>[];
+      final environments = <Map<String, String>>[];
       final runs = runsLog ?? <List<String>>[];
 
       // A wired launch port-forwards the advertised VM-service port through
@@ -4549,14 +4780,17 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       final mdns = MdnsVmServiceDiscovery(
         clientFactory: FakeMDnsClientFactory(
-          records: dartVmServiceRecords(
-            instance: 'com.example.test',
-            host: 'Test-iPhone.local',
-            port: forwardPort,
-            authCode: 'test=',
-            addresses: deviceAddresses,
-          ),
+          records: advertise
+              ? dartVmServiceRecords(
+                  instance: 'com.example.test',
+                  host: 'Test-iPhone.local',
+                  port: forwardPort,
+                  authCode: 'test=',
+                  addresses: deviceAddresses,
+                )
+              : const {},
           startError: mdnsStartError,
+          silentAttempts: silentMdnsAttempts,
         ).call,
       );
 
@@ -4565,6 +4799,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         bundleId: 'com.example.test',
         mdns: mdns,
         forwardProbe: forwardProbe,
+        locateIproxy: () => (executable: 'iproxy', environment: const {}),
         runProcess: (exe, args) async {
           runs.add([exe, ...args.cast<String>()]);
           onRun?.call(exe, args.cast<String>());
@@ -4596,8 +4831,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           }
           return ProcessResult(0, 0, '', '');
         },
-        startProcess: (exe, args) async {
+        startProcess: (exe, args, env) async {
           starts.add([exe, ...args.cast<String>()]);
+          environments.add(env);
           // A distinct fake per helper: a launch owns three of them at once,
           // and one shared fake cannot say which of them a teardown reached.
           return switch (exe) {
@@ -4625,7 +4861,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         }
       });
 
-      final pending = device.launch(appPath, onLog: null);
+      final pending = device.launch(appPath, onLog: onLog);
       // A launch that fails at the install step never starts devicectl at all,
       // so waiting on its output alone would hang out the test timeout on
       // exactly the failures these tests assert. Whichever settles first wins,
@@ -4639,6 +4875,18 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       } else {
         // devicectl's banner releases the launch gate.
         devicectl.emitStdout('Launched application with com.example.test');
+        if (announceOnConsole) {
+          // The engine's announcement as the device's console carries it: the
+          // device's loopback, at the port the forward listens on here.
+          devicectl.emitStdout(
+            '2026-11-20 02:00:19.690272-0800 app_device[68971:4421669] '
+            'flutter: The Dart VM service is listening on '
+            'http://127.0.0.1:$forwardPort/logged=/',
+          );
+        }
+        // After the announcement, as the engine logs a refusal: it registers
+        // the service only once the service is up.
+        consoleLines.forEach(devicectl.emitStdout);
       }
 
       return (
@@ -4647,6 +4895,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         devicectl: devicectl,
         lldb: lldb,
         starts: starts,
+        environments: environments,
         runs: runs,
       );
     }
@@ -4875,6 +5124,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final runs = <List<String>>[];
       await expectLater(
         launchFaked(
+          transportType: 'localNetwork',
+          deviceAddresses: ['192.168.1.244'],
           mdnsStartError: const SocketException('No route to host'),
           runsLog: runs,
         ),
@@ -4886,6 +5137,169 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           containsAllInOrder(['process', 'terminate', '--pid', '4242']),
         ),
       );
+    });
+
+    // Over a cable the console announces the VM service as soon as it starts,
+    // whether or not iOS lets the app advertise it: the first launch of a
+    // bundle id waits on a Local Network question only a person can answer.
+    group('over a cable, the console announcement', () {
+      test('is taken without an advertisement, through a forward', () async {
+        final r = await launchFaked(advertise: false, announceOnConsole: true);
+        final uri = r.instance.vmServiceUri!;
+        expect(uri.host, '127.0.0.1');
+        expect(uri.path, '/logged=/');
+        final iproxy = r.starts.singleWhere((a) => a.first == 'iproxy');
+        expect(iproxy, containsAllInOrder(['${uri.port}:${uri.port}', '-u']));
+      });
+
+      // A console that never prints the address leaves the advertisement.
+      test('is not needed when the advertisement comes alone', () async {
+        final r = await launchFaked();
+        expect(r.instance.vmServiceUri!.path, '/test=/');
+      });
+
+      // Over a cable mDNS is not needed, so a host that cannot run it at all
+      // (its own Local Network permission) still attaches.
+      test('attaches when mDNS cannot run on this host', () async {
+        final r = await launchFaked(
+          mdnsStartError: const SocketException('Operation not permitted'),
+          announceOnConsole: true,
+        );
+        expect(r.instance.vmServiceUri!.path, '/logged=/');
+      });
+
+      // The same host with a console that never prints the address: said at
+      // once, and at the end the failure names what to grant on this Mac.
+      test('ends a launch mDNS cannot help with the host\'s reason', () async {
+        final lines = <String>[];
+        await expectLater(
+          launchFaked(
+            mdnsStartError: const SocketException('Operation not permitted'),
+            onDevice: (d) => d.wiredVmServiceBudget = const Duration(
+              milliseconds: 300,
+            ),
+            onLog: (line) => lines.add(line.text),
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('printed no Dart VM service address'),
+                contains(
+                  'System Settings > Privacy & Security > Local Network',
+                ),
+              ),
+            ),
+          ),
+        );
+        expect(lines, contains(startsWith('mDNS cannot run on this Mac')));
+      });
+
+      // Nothing says the refusal costs the run anything once the console has
+      // given the address.
+      test('silences the Local Network message', () async {
+        final lines = <String>[];
+        await launchFaked(
+          advertise: false,
+          announceOnConsole: true,
+          consoleLines: [
+            'app_device[1:2] Could not register as server for '
+                'FlutterDartVMServicePublisher, permission denied.',
+          ],
+          onLog: (line) => lines.add(line.text),
+        );
+        expect(lines, isNot(contains(contains('tap Allow'))));
+      });
+
+      // A wireless device's service listens on all interfaces and is dialed
+      // at the device's address, which only the advertisement gives.
+      test('is ignored wirelessly', () async {
+        final r = await launchFaked(
+          transportType: 'localNetwork',
+          deviceAddresses: ['192.168.1.244'],
+          announceOnConsole: true,
+          silentMdnsAttempts: 1,
+        );
+        expect(r.instance.vmServiceUri!.host, '192.168.1.244');
+        expect(r.starts.where((a) => a.first == 'iproxy'), isEmpty);
+      });
+
+      test('forwards for the session, ended by stop', () async {
+        final iproxy = FakeProcess();
+        final r = await launchFaked(
+          advertise: false,
+          announceOnConsole: true,
+          iproxyProcess: iproxy,
+          onDevice: (d) => d.teardownBound = const Duration(milliseconds: 20),
+        );
+        expect(iproxy.killed, isFalse);
+        await r.device.stop(r.instance);
+        expect(iproxy.killed, isTrue);
+      });
+
+      test(
+        'forwards, and a launch failing after it ends the forward',
+        () async {
+          final iproxy = FakeProcess();
+          var now = DateTime(2026);
+          await expectLater(
+            withClock(
+              Clock(() => now),
+              () => launchFaked(
+                advertise: false,
+                announceOnConsole: true,
+                iproxyProcess: iproxy,
+                onDevice: (d) =>
+                    d.teardownBound = const Duration(milliseconds: 20),
+                forwardProbe: (port) async {
+                  now = now.add(const Duration(seconds: 11));
+                  throw const SocketException('Connection refused');
+                },
+              ),
+            ),
+            throwsA(isA<StateError>()),
+          );
+          expect(iproxy.killed, isTrue);
+        },
+      );
+    });
+
+    // Nothing answers in time: the failure is mDNS's own, which says what it
+    // saw and what to check, not a generic one from a timer of the same
+    // length.
+    group('a launch nothing answers in time', () {
+      Matcher sayingMdnsSawNothing() => isA<StateError>().having(
+        (e) => e.message,
+        'message',
+        contains('No Dart VM service advertised for com.example.test'),
+      );
+
+      test('over a cable', () async {
+        await expectLater(
+          launchFaked(
+            advertise: false,
+            onDevice: (d) => d.wiredVmServiceBudget = const Duration(
+              milliseconds: 300,
+            ),
+          ),
+          throwsA(sayingMdnsSawNothing()),
+        );
+      });
+
+      test('over the network', () async {
+        await expectLater(
+          launchFaked(
+            transportType: 'localNetwork',
+            deviceAddresses: ['192.168.1.244'],
+            advertise: false,
+            onDevice: (d) => d.wirelessVmServiceBudget = const Duration(
+              milliseconds: 300,
+            ),
+          ),
+          throwsA(sayingMdnsSawNothing()),
+        );
+      });
     });
 
     // Wired: the VM service binds to the device's loopback, so it is only
@@ -4913,6 +5327,62 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         r.starts.firstWhere((a) => a.first == 'iproxy'),
         isNot(contains('TEST-COREDEVICE-ID')),
       );
+    });
+
+    // devicectl lets `--environment-variables` replace the `DEVICECTL_CHILD_*`
+    // variables of its own environment, so passing it would cut off every
+    // variable a caller sets that way. The launch's own variable goes in the
+    // same way instead, added to the environment the caller's come from.
+    test(
+      'sets the app environment through DEVICECTL_CHILD_ variables',
+      () async {
+        final r = await launchFaked();
+        final i = r.starts.indexWhere((a) => a.contains('launch'));
+        expect(r.starts[i], isNot(contains('--environment-variables')));
+        expect(r.environments[i], {
+          'DEVICECTL_CHILD_OS_ACTIVITY_DT_MODE': 'enable',
+        });
+      },
+    );
+
+    // iOS refuses an app the local network until someone answers the Local
+    // Network question on the phone, and the engine says so in the app's
+    // console. Without that said plainly the launch only times out.
+    group('an app refused the local network', () {
+      Future<List<String>> launchLogging(List<String> consoleLines) async {
+        final lines = <String>[];
+        await launchFaked(
+          consoleLines: consoleLines,
+          // Long enough for the console to be read before discovery succeeds.
+          silentMdnsAttempts: 1,
+          onLog: (line) => lines.add(line.text),
+        );
+        return lines;
+      }
+
+      test('is said to need a tap on Allow', () async {
+        final lines = await launchLogging([
+          '2026-11-20 02:00:22.410632-0800 app_device[68971:4421414] Could '
+              'not register as server for FlutterDartVMServicePublisher, '
+              'permission denied. Check your \'Local Network\' permissions '
+              'for this app in the Privacy section of the system Settings.',
+        ]);
+        expect(
+          lines,
+          contains(
+            allOf(
+              contains('com.example.test is running'),
+              contains('tap Allow'),
+              contains('Settings > Privacy & Security > Local Network'),
+            ),
+          ),
+        );
+      });
+
+      test('is not suspected of an app that was not refused', () async {
+        final lines = await launchLogging(const []);
+        expect(lines, isNot(contains(contains('tap Allow'))));
+      });
     });
 
     test('does not bind the VM service to all interfaces when wired', () async {
@@ -5460,6 +5930,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         await expectLater(
           launchFaked(
             appPath: '/path/to/app.ipa',
+            transportType: 'localNetwork',
+            deviceAddresses: ['192.168.1.244'],
             mdnsStartError: const SocketException('No route to host'),
             onRun: unpackInto((dir) => unpacked = dir),
           ),
@@ -5511,6 +5983,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('a discovery failure fails the launch as a StateError', () async {
       await expectLater(
         launchFaked(
+          transportType: 'localNetwork',
+          deviceAddresses: ['192.168.1.244'],
           mdnsStartError: const SocketException('No route to host'),
         ),
         throwsA(
@@ -5634,7 +6108,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         // the next step rather than driving the whole device dance.
         return ProcessResult(0, 1, '', 'INSTALL_FAILED');
       },
-      startProcess: (exe, args) async => FakeProcess(),
+      startProcess: (exe, args, env) async => FakeProcess(),
     );
 
     test(
@@ -5776,7 +6250,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           }
           return ProcessResult(0, 0, '', '');
         },
-        startProcess: (exe, args) async => FakeProcess(),
+        startProcess: (exe, args, env) async => FakeProcess(),
       );
 
       expect(() => device.launch('/path/to/MyApp.app'), throwsStateError);
@@ -5789,7 +6263,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         udid: 'TEST-UDID',
         bundleId: 'com.example.test',
         runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
-        startProcess: (exe, args) async => fakeDevicectl,
+        startProcess: (exe, args, env) async => fakeDevicectl,
       );
 
       final instance = AppInstance(process: fakeDevicectl);
@@ -5825,7 +6299,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           }
           return ProcessResult(0, 1, '', 'INSTALL_FAILED');
         },
-        startProcess: (exe, args) async => FakeProcess(),
+        startProcess: (exe, args, env) async => FakeProcess(),
       );
       // Resolution happens on the way to the faked install failure.
       await expectLater(device.launch('/path/to/MyApp.app'), throwsStateError);
@@ -5881,7 +6355,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
             }
             return ProcessResult(0, 1, '', 'INSTALL_FAILED');
           },
-          startProcess: (exe, args) async => FakeProcess(),
+          startProcess: (exe, args, env) async => FakeProcess(),
         );
 
         expect(device.udid, 'CORE-1', reason: 'nothing resolved yet');

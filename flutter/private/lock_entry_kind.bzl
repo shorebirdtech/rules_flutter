@@ -12,6 +12,8 @@ not (`ignored`). A `git`
 package is fetched at the commit the lock records and built like a hosted one.
 """
 
+visibility("//flutter/...")
+
 # A package fetched from a pub registry.
 HOSTED = "hosted"
 
@@ -21,6 +23,9 @@ FLUTTER_FRAMEWORK = "flutter_framework"
 
 # The engine provides `sky_engine`'s `dart:ui`; it needs no repository.
 ENGINE_PROVIDED = "engine_provided"
+
+# The one package of that kind.
+ENGINE_PACKAGE = "sky_engine"
 
 # Any other `sdk: flutter` package: built from the pinned Flutter source by the
 # pub-package writer, as a hosted package is built from its archive.
@@ -53,7 +58,7 @@ def lock_entry_kind(name, source):
     if source == "sdk":
         if name == "flutter":
             return FLUTTER_FRAMEWORK
-        if name == "sky_engine":
+        if name == ENGINE_PACKAGE:
             return ENGINE_PROVIDED
         return FLUTTER_SOURCE
     if source == "path":

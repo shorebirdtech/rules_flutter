@@ -381,6 +381,9 @@ class RunCommand {
     host.registerReloadCommands(pipeline);
     host.registerLifecycleCommands();
 
+    // Held from before the first command can arrive until startup has settled
+    // the gate: see [ReloadPipeline.holdForStartup].
+    final endStartup = pipeline.holdForStartup();
     protocol.startListening();
 
     // Assigned part-way through the run and released in its `finally`, so
@@ -492,6 +495,7 @@ class RunCommand {
           accepts: (path) => isDartSource(path) || pipeline.watchesAsset(path),
         );
         await sourceWatcher.start();
+        pipeline.watcher = sourceWatcher;
         // A dead watcher does not end the run — an explicit `app.hotReload`
         // still works — but it silently ends `--watch`, so it has to be said.
         // package:watcher closes itself permanently on a post-ready end or any
@@ -522,7 +526,10 @@ class RunCommand {
           fail: host.fail,
           builtBefore: builtBefore,
         );
-        await web.assemble(outputFiles);
+        await web.assemble(
+          outputFiles,
+          moduleGraphFlags: build.moduleGraphFlags,
+        );
       }
 
       // Step 3b: Launch on each device and create sessions.
@@ -633,6 +640,7 @@ class RunCommand {
           plan.hotReloadOff ?? 'Hot reload is not available for this run.',
         );
       }
+      endStartup();
 
       // Profile mode enters an interactive session (without hot reload).
       // This allows DevTools connection, performance overlay, and key handlers.
@@ -645,9 +653,10 @@ class RunCommand {
         if (sessions.isNotEmpty) {
           await runInteractiveSession(
             sessions: sessions,
-            frontendServer: pipeline.frontendServer,
+            endRun: host.performCleanup,
             protocol: protocol,
             commandRunner: commandRunner,
+            onFailure: host.fail,
             devToolsEnabled: plan.devToolsEnabled,
             dartExecutable: toolchain.dart,
             hotReloadUnavailable: plan.hotReloadOff,
@@ -668,9 +677,10 @@ class RunCommand {
       else if (hasVmClient || isWebDevice) {
         await runInteractiveSession(
           sessions: sessions,
-          frontendServer: pipeline.frontendServer,
+          endRun: host.performCleanup,
           protocol: protocol,
           commandRunner: commandRunner,
+          onFailure: host.fail,
           devToolsEnabled: plan.devToolsEnabled,
           dartExecutable: toolchain.dart,
           hotReloadUnavailable: plan.hotReloadOff,
@@ -703,6 +713,7 @@ class RunCommand {
       // the build send its answer before the transports close under it.
       await host.shutdownRequested.future;
     } finally {
+      endStartup();
       await sourceWatcher?.stop();
       // Whatever route the run ended by — 'q', an app.stop, the app exiting,
       // a failure, a shutdown — everything it owns goes here. Nothing is shut

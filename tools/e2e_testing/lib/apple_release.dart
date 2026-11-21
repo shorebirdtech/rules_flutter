@@ -99,9 +99,10 @@ String runfilesAppBinary() {
 }
 
 /// Every `.dSYM` bundle among the test's runfiles, whatever the target that
-/// produced it.
+/// produced it or the repository it came from (an imported framework's dSYM
+/// is a file of the repository that holds the framework).
 List<String> runfilesDsyms() {
-  final root = Directory(Runfiles.create().rlocation('_main'));
+  final root = Directory(Runfiles.create().rlocation('_main')).parent;
   if (!root.existsSync()) return const [];
   return [
     for (final entity in root.listSync(recursive: true, followLinks: false))
@@ -109,7 +110,7 @@ List<String> runfilesDsyms() {
   ];
 }
 
-/// Checks that one of [dsyms] holds debug info for the `App` binary at [path]:
+/// Checks that one of [dsyms] holds debug info for the binary at [path]:
 /// its UUID is the binary's. A crash report names the UUID of the binary that
 /// crashed, and a dSYM of another UUID does not symbolicate it.
 void checkDsymMatches(BundleCheck check, String path, List<String> dsyms) {
@@ -121,7 +122,7 @@ void checkDsymMatches(BundleCheck check, String path, List<String> dsyms) {
     return;
   }
   if (binaryUuids.isEmpty) {
-    check.fail('App binary carries no LC_UUID, so no dSYM can match it');
+    check.fail('$path carries no LC_UUID, so no dSYM can match it');
     return;
   }
   final found = <String, Set<String>>{};
@@ -133,10 +134,47 @@ void checkDsymMatches(BundleCheck check, String path, List<String> dsyms) {
     }
   }
   check.expect(
-    'a dSYM matches the App binary (UUID ${binaryUuids.join(', ')})',
+    'a dSYM matches ${path.split('/').last} (UUID ${binaryUuids.join(', ')})',
     condition: found.values.any((uuids) => uuids.containsAll(binaryUuids)),
     detail: dsyms.isEmpty
         ? 'the build produced no dSYM'
         : 'dSYMs found: $found',
   );
+}
+
+/// Checks that each dSYM of the binary at [path] among [dsyms], matched by
+/// UUID, has the line table of [symbol]: its first instruction is at one of
+/// [lines] of a file named [file] (an optimized function has no prologue, so
+/// its first instruction can be a line of its body). A dSYM read from the binary alone has its symbol
+/// table and no lines; the lines are in the object files it was linked from.
+void checkDsymSourceLine(
+  BundleCheck check,
+  String path,
+  List<String> dsyms, {
+  required String symbol,
+  required String file,
+  required Set<int> lines,
+}) {
+  final binaryUuids = MachO(path).uuids();
+  final matching = [
+    for (final dsym in dsyms)
+      if (MachO(dsym).uuids().containsAll(binaryUuids)) dsym,
+  ];
+  if (matching.isEmpty) {
+    check.fail('no dSYM of $path among $dsyms');
+    return;
+  }
+  for (final dsym in matching) {
+    final found = MachO(dsym).sourceLineOf(symbol);
+    check.expect(
+      '${dsym.split('/').last} puts $symbol at $file:${lines.join('|')}',
+      condition:
+          found != null &&
+          found.file.split('/').last == file &&
+          lines.contains(found.line),
+      detail: found == null
+          ? '$dsym has no line table row for $symbol'
+          : 'it puts it at ${found.file}:${found.line}',
+    );
+  }
 }

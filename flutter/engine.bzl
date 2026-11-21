@@ -16,7 +16,7 @@ load("@rules_dart//dart:toolchain.bzl", "DartSdkFilesInfo")
 
 FlutterHostToolsInfo = provider(
     doc = "The tools that run on one host and whose output does not depend on the target: the Dart SDK, " +
-          "frontend_server, flutter_tester, impellerc, const_finder and font-subset.",
+          "frontend_server, flutter_tester, impellerc and font-subset.",
     fields = {
         "host_os": "str: The OS the tools run on (`macos`, `linux`, `windows`).",
         "host_arch": "str: The CPU the tools run on (`arm64`, `x64`).",
@@ -34,7 +34,6 @@ FlutterHostToolsInfo = provider(
         "impellerc": "File: The `impellerc` shader compiler.",
         "shader_lib": "list[File]: The files impellerc includes from.",
         "shader_include_dir": "str: The execution path of the directory holding `shader_lib`.",
-        "const_finder": "File or None: `const_finder.dart.snapshot`. None from Flutter 3.50 on, which shakes icons from the uses the AOT compile records.",
         "font_subset": "File: The `font-subset` binary.",
         "provenance": "dict[str, str]: Where the files came from.",
     },
@@ -61,6 +60,7 @@ FlutterEngineInfo = provider(
         "binary_entry": "str: When `binary` is an archive (Android's `flutter.jar`), the entry of it that holds the engine library; otherwise empty.",
         "xcframework_slices": "list[str]: iOS only: the xcframework slices present.",
         "cpp_client_wrapper": "depset[File] or None: Windows only.",
+        "embedding_pom": "File or None: Android only: `flutter_embedding_<mode>.pom`, the POM of the engine's embedding classes, which names the Maven artifacts they need. A module's Maven repository (`flutter_android_aar`) carries it as it is for an engine that is not the release's, as `flutter build aar --local-engine` does; such a build fails without it.",
         "provenance": "dict[str, str]: Where the files came from.",
     },
 )
@@ -92,7 +92,8 @@ flutter_missing_slice = rule(
         ),
     },
     doc = "A slice the engine source does not provide. A build that needs it fails at analysis with `message`; " +
-          "one that does not is unaffected.",
+          "one that does not is unaffected. rules_flutter declares one wherever a build could ask for " +
+          "something it cannot provide: a package it cannot build, a toolchain for a target it does not support.",
 )
 
 def _shader_include_dir(ctx):
@@ -135,7 +136,6 @@ def _flutter_host_tools_impl(ctx):
         impellerc = ctx.file.impellerc,
         shader_lib = ctx.files.shader_lib,
         shader_include_dir = _shader_include_dir(ctx),
-        const_finder = ctx.file.const_finder,
         font_subset = ctx.file.font_subset,
         provenance = ctx.attr.provenance,
     )
@@ -172,10 +172,6 @@ flutter_host_tools = rule(
             doc = "The directory impellerc searches for `shader_lib`'s files, relative to " +
                   "the package of the `shader_lib` files.",
             mandatory = True,
-        ),
-        "const_finder": attr.label(
-            doc = "`const_finder.dart.snapshot`. " + "Absent from Flutter 3.50 on, which shakes icons from the uses the AOT compile records.",
-            allow_single_file = True,
         ),
         "font_subset": _file("The `font-subset` binary."),
         "provenance": attr.string_dict(doc = "Where the files came from."),
@@ -214,6 +210,7 @@ def _engine_impl(ctx):
         binary_entry = ctx.attr.binary_entry,
         xcframework_slices = ctx.attr.xcframework_slices,
         cpp_client_wrapper = None,
+        embedding_pom = ctx.file.embedding_pom,
         provenance = ctx.attr.provenance,
     )
     return [info, DefaultInfo(files = files)]
@@ -232,6 +229,10 @@ _ENGINE_ATTRS = {
         allow_single_file = True,
     ),
     "binary_entry": attr.string(doc = "When `binary` is an archive, the entry of it that holds the engine library. Android only: `lib/<abi>/libflutter.so` of `flutter.jar`."),
+    "embedding_pom": attr.label(
+        doc = "Android only: the out dir's `flutter_embedding_<mode>.pom`, which a module's Maven repository carries for an engine that is not the release's. Optional; a module AAR of an engine without it fails, naming it.",
+        allow_single_file = [".pom"],
+    ),
     "xcframework_slices": attr.string_list(doc = "iOS only: the xcframework's platform directories (`ios-arm64`, `ios-arm64-simulator`, `ios-arm64_x86_64-simulator`, ...)."),
     "provenance": attr.string_dict(doc = "Where the files came from."),
 }

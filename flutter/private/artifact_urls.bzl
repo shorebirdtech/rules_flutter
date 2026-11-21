@@ -32,6 +32,8 @@ of this file:
     revision; unrelated to the Flutter version.
 """
 
+visibility("//flutter/...")
+
 _GCS_BASE = "https://storage.googleapis.com/flutter_infra_release/flutter"
 
 _SOURCE_TARBALL_TEMPLATE = "https://github.com/flutter/flutter/archive/refs/tags/{version}.tar.gz"
@@ -53,6 +55,24 @@ def chrome_for_testing_url(version, platform):
     return _CHROME_FOR_TESTING_TEMPLATE.format(version = version, platform = platform)
 
 _ANDROID_REPOSITORY = "https://dl.google.com/android/repository/"
+
+_IOS_USB_DEPENDENCY_TEMPLATE = "https://storage.googleapis.com/flutter_infra_release/ios-usb-dependencies/arm64_x86_64/{name}/{version}/{name}.zip"
+
+def ios_usb_dependency_url(name, version):
+    """Constructs the download URL of one of Flutter's iOS USB dependencies.
+
+    These are the libimobiledevice builds flutter_tools downloads into its cache
+    (`IosUsbArtifacts`), each a universal macOS archive.
+
+    Args:
+        name: The dependency, as Flutter's `bin/internal/<name>.version` names
+            it: `libusbmuxd`, `libplist` or `libimobiledeviceglue`.
+        version: The revision that file holds.
+
+    Returns:
+        The full HTTPS URL of the archive.
+    """
+    return _IOS_USB_DEPENDENCY_TEMPLATE.format(name = name, version = version)
 
 def android_emulator_url(build_id, host):
     """Constructs the download URL for the Android emulator of a host.
@@ -92,7 +112,7 @@ def flutter_source_tarball_url(flutter_version):
     mismatch is a loud, intended failure rather than something to work around.
 
     Args:
-        flutter_version: Flutter release tag (e.g. "3.47.9").
+        flutter_version: Flutter release tag (e.g. "3.50.0").
 
     Returns:
         The full HTTPS URL of the source tarball. Extracting it yields a

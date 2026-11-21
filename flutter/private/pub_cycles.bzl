@@ -14,8 +14,13 @@ known before: its form, and that the root's name packages the build builds.
 load("@rules_dart//dart/ext:registry.bzl", "curated_cycles")
 load("@rules_dart//dart/pub:pub_graph.bzl", "cycle_declaration", "cycle_declarations_error")
 
+visibility("//flutter/...")
+
 # The tag that declares a cycle, as a user writes it, for messages.
 DECLARE = "flutter_pub.cycle"
+
+# The tag that fetches a lock, as rules_dart's messages name it.
+FROM_LOCK = "flutter_pub.from_lock"
 
 def module_cycles(module):
     """One module's `flutter_pub.cycle()` declarations, for `plan_cycles`.

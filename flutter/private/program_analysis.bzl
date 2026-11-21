@@ -10,6 +10,8 @@ that stages copies of source files into a program names the sources.
 load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_analyzable_info", "package_info_from_metadata", "package_lib_prefix")
 
+visibility("//flutter/...")
+
 StagedSourcesInfo = provider(
     doc = "The source files a target's Dart outputs are copies of. A program " +
           "compiles the copies, and analysis checks these in their place: " +
@@ -21,25 +23,31 @@ StagedSourcesInfo = provider(
 
 BundledProgramInfo = provider(
     doc = "The program a part of a platform's app bundle is built from, for " +
-          "the app to pass on to rules_dart's analysis when the bundle rule " +
-          "(rules_apple's) passes on nothing of its contents'.",
+          "the app to pass on what the bundle rule (rules_apple's, " +
+          "rules_android's `android_binary`) passes on " +
+          "nothing of: the program's Dart files, for rules_dart's analysis, " +
+          "and the split debug info of the snapshot it ships.",
     fields = {
-        "info": "The program's `DartAnalyzableInfo`.",
+        "info": "The program's `DartAnalyzableInfo`, or None.",
+        "debug_info": "Depset of the program's `debug_info` output group: " +
+                      "its `.symbols`, built in the bundle's configuration.",
     },
 )
 
 def bundled_program_info(application):
-    """The `BundledProgramInfo` of a bundle part built from `application`, if it is a program.
+    """The `BundledProgramInfo` of a bundle part built from `application`.
 
     Args:
       application: The part's `flutter_application` (or variant) Target.
 
     Returns:
-      A list of one `BundledProgramInfo`, or none.
+      A list of one `BundledProgramInfo`.
     """
-    if DartAnalyzableInfo not in application:
-        return []
-    return [BundledProgramInfo(info = application[DartAnalyzableInfo])]
+    groups = application[OutputGroupInfo] if OutputGroupInfo in application else None
+    return [BundledProgramInfo(
+        info = application[DartAnalyzableInfo] if DartAnalyzableInfo in application else None,
+        debug_info = groups.debug_info if groups and "debug_info" in groups else depset(),
+    )]
 
 def _bundled_program_aspect_impl(_target, ctx):
     # The parts of the bundle, as the bundle rule configured them, so the
@@ -52,8 +60,8 @@ def _bundled_program_aspect_impl(_target, ctx):
             return [part[BundledProgramInfo]]
     return []
 
-# Applied to an Apple bundle alone, without propagating: it reads the
-# `BundledProgramInfo` of the bundle's direct parts.
+# Applied to an Apple bundle or an `android_binary` alone, without
+# propagating: it reads the `BundledProgramInfo` of the bundle's direct parts.
 bundled_program_aspect = aspect(
     implementation = _bundled_program_aspect_impl,
     doc = "Finds the program among an app bundle's direct parts (`deps`, `additional_contents`).",

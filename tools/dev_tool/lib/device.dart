@@ -36,13 +36,13 @@
 /// announcement counts only when this launch's app process made it
 /// ([discoverOwnVmServiceUri]).
 ///
-/// A physical iOS device is the one exception, and it is out-of-band rather
-/// than a second in-band source: a wirelessly attached device has no console
-/// channel at all, and the one a wired device has belongs to the `devicectl`
-/// invocation that launched the app. The URI is taken from the app's
-/// `_dartVmService._tcp` mDNS advertisement instead
-/// ([MdnsVmServiceDiscovery]). That is the single mechanism for iOS hardware,
-/// wired and wireless alike; nothing races it.
+/// A physical iOS device is the one exception. A wirelessly attached device
+/// takes the URI from the app's `_dartVmService._tcp` mDNS advertisement
+/// ([MdnsVmServiceDiscovery]), the only channel it has. A wired one races the
+/// announcement in its console against the advertisement, as flutter_tools
+/// does, and forwards the device port over USB: the announcement does not
+/// wait on iOS letting the app onto the local network, and the advertisement
+/// does.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -55,6 +55,7 @@ import 'browser_extension_channel.dart';
 import 'build_mode.dart';
 import 'cdp_app_page.dart';
 import 'cdp_console.dart';
+import 'child_processes.dart';
 import 'chrome_profile.dart';
 import 'compiler_config.dart';
 import 'devicectl_screens.dart';
@@ -83,12 +84,6 @@ export 'host_tools.dart' show HostTool, MissingHostToolException;
 
 final _logger = Logger('dev_tool.device');
 
-/// Report a process the OS would not let us kill.
-///
-/// Every `stop` implementation kills the process it launched; a refused kill
-/// leaves an app (or a log tailer) running that the next run will collide with,
-/// so it must be said out loud rather than swallowed by the `await exitCode`
-/// that follows.
 /// Stop [process], escalating past a SIGTERM it refuses.
 ///
 /// SIGTERM is a request: a wedged process can take it and keep running, so
@@ -171,7 +166,7 @@ Future<ProcessResult> runProcessBounded(
     exitCode = await process.exitCode.timeout(bound);
   } on TimeoutException {
     process.kill(ProcessSignal.sigkill);
-    throw StateError(
+    throw HelperTimedOut(
       '$what (pid ${process.pid}) did not answer within '
       '${bound.inMilliseconds}ms and was killed. What it had written by then, '
       'on stderr: ${err.isEmpty ? '(nothing)' : err}',
@@ -179,6 +174,14 @@ Future<ProcessResult> runProcessBounded(
   }
   await drained;
   return ProcessResult(process.pid, exitCode, out.toString(), err.toString());
+}
+
+/// What [runProcessBounded] throws for a helper it killed at its bound.
+///
+/// A [StateError], as it always was to the callers that report any failure
+/// alike; its own type for a caller that answers a timeout differently.
+class HelperTimedOut extends StateError {
+  HelperTimedOut(super.message);
 }
 
 /// Called for each line of a running app's console output.
@@ -656,11 +659,12 @@ class MacOSDevice extends Device {
   /// injected [_startProcess] bypasses this entirely, which is why the
   /// environment it builds lives in [desktopLaunchEnvironment] where a test
   /// can reach it.
-  Future<Process> _defaultStart(String exe, List<String> args) => Process.start(
-    exe,
-    args,
-    environment: desktopLaunchEnvironment(startPaused: startPaused),
-  );
+  Future<Process> _defaultStart(String exe, List<String> args) =>
+      startChildProcess(
+        exe,
+        args,
+        environment: desktopLaunchEnvironment(startPaused: startPaused),
+      );
 
   @override
   NativePatchDelivery? get nativePatchDelivery => const MacOSPatchDelivery();
@@ -788,7 +792,7 @@ class MacOSDevice extends Device {
     try {
       final result = await runProcessBounded(
         (exe, args, _) =>
-            (_injectedActivationStart ?? Process.start)(exe, args),
+            (_injectedActivationStart ?? startChildProcess)(exe, args),
         'osascript',
         [
           '-e',
@@ -901,7 +905,7 @@ class MacOSDevice extends Device {
     Map<String, String> environment,
   ) => _injectedScreenshotStart != null
       ? _injectedScreenshotStart(exe, args)
-      : Process.start(exe, args, environment: environment);
+      : startChildProcess(exe, args, environment: environment);
 
   /// Extract .app bundle from a .zip archive.
   ///
@@ -970,12 +974,13 @@ class LinuxDevice extends Device {
   Map<String, String> get launchEnvironment =>
       desktopLaunchEnvironment(startPaused: startPaused, base: environment);
 
-  Future<Process> _defaultStart(String exe, List<String> args) => Process.start(
-    exe,
-    args,
-    environment: launchEnvironment,
-    includeParentEnvironment: environment == null,
-  );
+  Future<Process> _defaultStart(String exe, List<String> args) =>
+      startChildProcess(
+        exe,
+        args,
+        environment: launchEnvironment,
+        includeParentEnvironment: environment == null,
+      );
 
   @override
   LaunchBundleParts? get launchBundleParts => const LaunchBundleParts(
@@ -1111,11 +1116,12 @@ class WindowsDevice extends Device {
   /// injected [_startProcess] bypasses this entirely, which is why the
   /// environment it builds lives in [desktopLaunchEnvironment] where a test
   /// can reach it.
-  Future<Process> _defaultStart(String exe, List<String> args) => Process.start(
-    exe,
-    args,
-    environment: desktopLaunchEnvironment(startPaused: startPaused),
-  );
+  Future<Process> _defaultStart(String exe, List<String> args) =>
+      startChildProcess(
+        exe,
+        args,
+        environment: desktopLaunchEnvironment(startPaused: startPaused),
+      );
 
   @override
   bool get usesWindowsPaths => true;
@@ -1321,7 +1327,7 @@ class WindowsDevice extends Device {
     Map<String, String> environment,
   ) => _injectedScreenshotStart != null
       ? _injectedScreenshotStart(exe, args)
-      : Process.start(exe, args, environment: environment);
+      : startChildProcess(exe, args, environment: environment);
 }
 
 /// Signature for running a process and returning its result (allows test injection).
@@ -1457,6 +1463,15 @@ class AndroidDevice extends Device {
   /// that fakes a launch must not thereby fake every capture too.
   final ProcessStarter? _injectedScreenshotStart;
 
+  /// Starts the `adb shell am force-stop` before a launch, when a test
+  /// supplies one. Separate from [_startProcess] for the same reason
+  /// [_injectedScreenshotStart] is.
+  final ProcessStarter? _injectedForceStopStart;
+
+  /// How long the stop before a launch may take: flutter_tools' `stopApp`
+  /// bound. A parameter so tests can drive the expiry.
+  final Duration forceStopBound;
+
   /// The host port `adb forward tcp:0` allocated for this launch, if any.
   ///
   /// Held so [stop] can remove exactly the forward this launch created. The
@@ -1465,6 +1480,11 @@ class AndroidDevice extends Device {
   /// reclaims it on its own. Clearing all forwards instead would take out
   /// another session's on the same host.
   int? _forwardedHostPort;
+
+  /// The logcat [launch] started, until [launch] returns it in its
+  /// [AppInstance]. A child process, so a launch that fails or is abandoned
+  /// part way has to stop it: nothing else would.
+  Process? _launchLogcat;
 
   /// Whether the upcoming launch expects the app to host a Dart VM service
   /// (debug/JIT builds). Set by the run command before [launch]; enables the
@@ -1481,12 +1501,15 @@ class AndroidDevice extends Device {
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
     ProcessStarter? startScreenshotProcess,
+    ProcessStarter? startForceStopProcess,
+    this.forceStopBound = const Duration(seconds: 30),
   }) : _packageName = packageName,
        _activityName = activityName,
        _abi = abi,
        _runProcess = runProcess ?? Process.run,
-       _startProcess = startProcess ?? Process.start,
-       _injectedScreenshotStart = startScreenshotProcess;
+       _startProcess = startProcess ?? startChildProcess,
+       _injectedScreenshotStart = startScreenshotProcess,
+       _injectedForceStopStart = startForceStopProcess;
 
   @override
   NativePatchDelivery? get nativePatchDelivery {
@@ -1601,9 +1624,54 @@ class AndroidDevice extends Device {
       ? 'adb $what failed: $stderr'
       : 'adb $what failed (adb -s $deviceId): $stderr';
 
+  /// `am force-stop` [packageName], reporting rather than throwing when it
+  /// fails or does not answer within [forceStopBound]. See [launch].
+  ///
+  /// Started rather than run, so that an `adb` that does not answer is killed
+  /// at the bound: one left running holds the tool open after the run ends.
+  Future<void> _forceStopBeforeLaunch(String packageName) async {
+    String? failure;
+    try {
+      final stopped = await runProcessBounded(
+        (exe, args, environment) => _injectedForceStopStart != null
+            ? _injectedForceStopStart(exe, args)
+            : startChildProcess(exe, args, environment: environment),
+        adbPath,
+        _adbArgs(['shell', 'am', 'force-stop', packageName]),
+        environment: const {},
+        bound: forceStopBound,
+        what: 'adb shell am force-stop',
+      );
+      if (stopped.exitCode != 0) {
+        failure = _adbFailure('am force-stop', '${stopped.stderr}'.trim());
+      }
+    } on HelperTimedOut catch (e) {
+      failure = e.message;
+    } on ProcessException catch (e) {
+      failure = _adbFailure('am force-stop', e.message);
+    }
+    if (failure == null) return;
+    _logger.warning({
+      'message': 'android_force_stop_failed',
+      'text':
+          'Could not stop $packageName on $name before launching it '
+          '($failure). Launching anyway: the install stops a running copy.',
+      'device': name,
+      'error': failure,
+    });
+  }
+
   @override
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
     final packageName = _packageName ?? await _readPackageName(appPath);
+
+    // Step 0: Stop the app first, as `flutter run` does (flutter_tools'
+    // `AndroidDevice.startApp`), and the way it does: within 30 s, and a stop
+    // that fails or does not answer is reported and the launch goes on. The
+    // install below stops a running copy of the app itself (the package
+    // manager kills it on a package update), so nothing here depends on this
+    // step, and a launch is not held up or ended by it.
+    await _forceStopBeforeLaunch(packageName);
 
     // Step 1: Install the APK.
     final installResult = await _runProcess(
@@ -1643,7 +1711,7 @@ class AndroidDevice extends Device {
     // The device keeps its log, so every record after that one is read
     // whenever logcat gets to it. flutter_tools' AdbLogReader does the same.
     final since = await _lastLogcatTimestamp();
-    final logcat = await _startProcess(
+    final logcat = _launchLogcat = await _startProcess(
       adbPath,
       _adbArgs([
         'logcat',
@@ -1661,7 +1729,26 @@ class AndroidDevice extends Device {
       stderrIsError: false,
       transform: androidLogFilter,
     );
+    try {
+      final instance = await _launchWithLogcat(packageName, logcat, logs);
+      _launchLogcat = null;
+      return instance;
+    } catch (_) {
+      // Nothing else holds this logcat: the [AppInstance] that [stop] would
+      // end it through is never made.
+      await _stopLaunchLogcat();
+      await logs.close();
+      rethrow;
+    }
+  }
 
+  /// The rest of [launch], once its logcat is reading: start the activity,
+  /// wait for its VM service and forward it.
+  Future<AppInstance> _launchWithLogcat(
+    String packageName,
+    Process logcat,
+    AppLogStream logs,
+  ) async {
     // Step 3: Launch the activity. `-W` makes `am` wait for the launch to
     // complete and say how it went (`Status`, `LaunchState`), which is what
     // tells a process that started from one that never did. It is not awaited
@@ -2104,10 +2191,22 @@ class AndroidDevice extends Device {
     await instance.logs.close();
   }
 
-  /// The launch's logcat ends with this process; the app and the forward,
-  /// which live on the device and in the adb server, do not.
+  /// A logcat started by a launch still in flight: the app, the forward and
+  /// that logcat are all this run's to release.
   @override
-  Future<void> abandonLaunch() => _releaseApp();
+  Future<void> abandonLaunch() async {
+    await _releaseApp();
+    await _stopLaunchLogcat();
+  }
+
+  /// Stop the logcat of a launch that has not returned, if there is one.
+  Future<void> _stopLaunchLogcat() async {
+    final logcat = _launchLogcat;
+    _launchLogcat = null;
+    if (logcat != null) {
+      await _stopProcess('Android logcat', logcat, teardownBound);
+    }
+  }
 
   /// Stop the app and remove the forward this launch created.
   Future<void> _releaseApp() async {
@@ -2292,7 +2391,32 @@ class AndroidDevice extends Device {
     Map<String, String> environment,
   ) => _injectedScreenshotStart != null
       ? _injectedScreenshotStart(exe, args)
-      : Process.start(exe, args, environment: environment);
+      : startChildProcess(exe, args, environment: environment);
+}
+
+/// Where a wired iOS launch finds iproxy, and the environment it runs it with.
+typedef IproxyLocator =
+    ({String executable, Map<String, String> environment}) Function();
+
+/// The iproxy the dev tool carries, located when a launch needs it.
+({String executable, Map<String, String> environment}) _carriedIproxy() {
+  final executable = iproxyTool().require();
+  return (executable: executable, environment: iproxyEnvironment(executable));
+}
+
+/// How an iOS device launch found the app's VM service.
+sealed class _FoundVmService {}
+
+/// From the app's own announcement on its console: the device-side address.
+final class _LoggedVmService extends _FoundVmService {
+  final Uri uri;
+  _LoggedVmService(this.uri);
+}
+
+/// From the app's mDNS advertisement.
+final class _AdvertisedVmService extends _FoundVmService {
+  final MdnsVmServiceRecord record;
+  _AdvertisedVmService(this.record);
 }
 
 /// One attempt to reach a local TCP listener: completes when it accepts,
@@ -2880,7 +3004,7 @@ class IOSSimulatorDevice extends Device {
   }) : _udid = udid,
        _bundleId = bundleId,
        _runProcess = runProcess ?? Process.run,
-       _startProcess = startProcess ?? Process.start;
+       _startProcess = startProcess ?? startChildProcess;
 
   /// Create a device targeting the first booted simulator.
   factory IOSSimulatorDevice.booted({
@@ -2890,7 +3014,7 @@ class IOSSimulatorDevice extends Device {
     final run = runProcess ?? Process.run;
     return _IOSSimulatorDeviceBooted(
       runProcess: run,
-      startProcess: startProcess ?? Process.start,
+      startProcess: startProcess ?? startChildProcess,
     );
   }
 
@@ -3449,9 +3573,14 @@ class IOSDevice extends Device {
   final String? requestedUdid;
   final String? _bundleId;
   final ProcessRunSync _runProcess;
-  final ProcessStarter _startProcess;
+
+  /// Starts every launch helper. The environment is added to this process's
+  /// own, which is how the caller's `DEVICECTL_CHILD_*` variables still reach
+  /// `devicectl` alongside the one the launch sets.
+  final ProcessStarterWithEnvironment _startProcess;
   final MdnsVmServiceDiscovery _mdns;
   final TcpProbe _forwardProbe;
+  final IproxyLocator _locateIproxy;
 
   /// Filled in by the first [_resolveInfo].
   IOSDeviceInfo? _info;
@@ -3481,22 +3610,36 @@ class IOSDevice extends Device {
   /// Set by [abandonLaunch]: the launch in flight must start nothing more.
   bool _launchAbandoned = false;
 
+  /// How long a launch looks for the VM service, over a cable and over the
+  /// network. A backstop for a launch that will never succeed, not an
+  /// estimate: see [applyTimeout] for why a debug launch here is this slow.
+  /// Settable so a test can drive the expiry.
+  Duration wiredVmServiceBudget = const Duration(minutes: 5);
+  Duration wirelessVmServiceBudget = const Duration(minutes: 15);
+
   IOSDevice({
     String? udid,
     String? bundleId,
     ProcessRunSync? runProcess,
-    ProcessStarter? startProcess,
+    ProcessStarterWithEnvironment? startProcess,
     MdnsVmServiceDiscovery? mdns,
 
     /// How a wired launch checks that the iproxy forward accepts connections;
     /// a real connect by default.
     TcpProbe? forwardProbe,
+
+    /// Where a wired launch's iproxy is, and its environment; the one the dev
+    /// tool carries by default.
+    IproxyLocator? locateIproxy,
   }) : requestedUdid = udid,
        _bundleId = bundleId,
        _runProcess = runProcess ?? Process.run,
-       _startProcess = startProcess ?? Process.start,
+       _startProcess =
+           startProcess ??
+           ((exe, args, env) => startChildProcess(exe, args, environment: env)),
        _mdns = mdns ?? MdnsVmServiceDiscovery(),
-       _forwardProbe = forwardProbe ?? _connectToLocalPort;
+       _forwardProbe = forwardProbe ?? _connectToLocalPort,
+       _locateIproxy = locateIproxy ?? _carriedIproxy;
 
   /// The UDID in play.
   ///
@@ -3708,9 +3851,13 @@ class IOSDevice extends Device {
 
   /// Start a launch helper, unless the launch has been abandoned; one started
   /// just as it was abandoned is killed rather than left to outlive the run.
-  Future<Process> _startHelper(String executable, List<String> args) async {
+  Future<Process> _startHelper(
+    String executable,
+    List<String> args, {
+    Map<String, String> environment = const {},
+  }) async {
     _throwIfAbandoned();
-    final process = await _startProcess(executable, args);
+    final process = await _startProcess(executable, args, environment);
     if (_launchAbandoned) {
       process.kill(ProcessSignal.sigkill);
       _throwIfAbandoned();
@@ -3786,7 +3933,9 @@ class IOSDevice extends Device {
     //   2. Get PID from process list
     //   3. In debug only: attach lldb (which starts debugserver / ptrace), set
     //      the JIT page notification breakpoint, and resume
-    //   4. Discover the VM service by its mDNS advertisement, if there is one
+    //   4. Find the VM service, if there is one: over a cable by what the app
+    //      logs or its mDNS advertisement, whichever comes first; wirelessly
+    //      by the advertisement
     final debug = buildMode == BuildMode.debug;
 
     final logs = _newAppLogs(onLog);
@@ -3797,6 +3946,12 @@ class IOSDevice extends Device {
     // devicectl it has a terminal attached in order to redirect stdout"
     // (`ios/core_devices.dart`). That is unnecessary here: devicectl writes
     // the app's console output to these pipes without a pty.
+    //
+    // The app's environment goes in as `DEVICECTL_CHILD_*` variables, which
+    // devicectl passes on with the prefix removed, rather than as
+    // `--environment-variables`: devicectl lets that flag replace them, so
+    // using it would drop every variable the caller set the same way, the
+    // device's counterpart of the simulator's `SIMCTL_CHILD_*`.
     _consoleLauncherProcess = await _startHelper('xcrun', [
       'devicectl',
       'device',
@@ -3806,8 +3961,6 @@ class IOSDevice extends Device {
       info.udid,
       if (debug) '--start-stopped',
       '--console',
-      '--environment-variables',
-      '{"OS_ACTIVITY_DT_MODE": "enable"}',
       bundleId,
       '--enable-dart-profiling',
       // flutter_tools passes this whenever debugging is enabled, which is
@@ -3820,7 +3973,7 @@ class IOSDevice extends Device {
       // exactly when the connection interface is wireless.
       if (info.transport == IOSDeviceTransport.wireless)
         '--vm-service-host=0.0.0.0',
-    ]);
+    ], environment: _launchEnvironment);
 
     // devicectl sends its own progress banners on one channel and the app's
     // console output on the other, so both feed the app log stream.
@@ -3885,7 +4038,7 @@ class IOSDevice extends Device {
       process = _consoleLauncherProcess!;
     }
 
-    // Step 4: Find the VM service by its mDNS advertisement.
+    // Step 4: Find the VM service.
     final vmServiceUri = await _findVmService(
       info: info,
       bundleId: bundleId,
@@ -3973,8 +4126,8 @@ class IOSDevice extends Device {
     return lldb;
   }
 
-  /// The app's VM service, found by its mDNS advertisement and made reachable
-  /// from here; or null for an AOT app that has none.
+  /// The app's VM service, found and made reachable from here; or null for an
+  /// AOT app that has none.
   ///
   /// A release app never has one, and flutter_tools does not look. A profile
   /// app has one only if it was built on the profile engine, and then its
@@ -4008,87 +4161,157 @@ class IOSDevice extends Device {
         }
     }
 
-    // Not by reading the log stream, the way every other platform does. A
-    // wirelessly attached device has no console channel at all, and the one a
-    // wired device has is `devicectl --console`, which dies with the launch it
-    // reports on. The advertisement is the one channel both connections share,
-    // and it is already provisioned: the debug/profile Info.plist declares
-    // `_dartVmService._tcp` under NSBonjourServices
-    // (`flutter/private/runners/ios/DartVmServiceMdns.plist`).
+    // Two channels, and the first to answer wins, as in flutter_tools
+    // (`_discoverDartVMForCoreDevice` in `ios/devices.dart`):
+    //
+    //  * The app's own output, over a cable only. The engine logs where the
+    //    VM service listens, on the device's loopback, and `devicectl
+    //    --console` and lldb carry that here; iproxy forwards the port over
+    //    USB. This needs nothing from the local network, so it is what
+    //    attaches to an app iOS has not yet let onto it: the first debug
+    //    launch of a bundle id, whose Local Network question nobody has
+    //    answered.
+    //  * The app's mDNS advertisement (`_dartVmService._tcp`, which the
+    //    debug/profile Info.plist declares under NSBonjourServices,
+    //    `flutter/private/runners/ios/DartVmServiceMdns.plist`). The only
+    //    channel a wireless device has: it gives the address to dial as well.
+    //
+    // The app still advertises over a cable, so nothing anyone else can see
+    // of it changes; this only stops waiting on the advertisement.
     //
     // Minutes, not seconds — see [applyTimeout] for why a debug launch here is
     // this slow. The budget is a backstop for a run that will never succeed,
-    // not an estimate; [onSlow] is what tells the user a long wait is expected
+    // not an estimate; the "still waiting" note tells the user a long wait is expected
     // rather than a hang. flutter_tools splits the same two concerns, warning
     // at 60s/75s while its mDNS query runs for ten minutes
     // (`ios/devices.dart`).
-    final record = await _mdns.discover(
-      bundleId: bundleId,
-      hostnames: info.hostnames,
-      resolveAddress: info.transport == IOSDeviceTransport.wireless,
-      timeout: switch (info.transport) {
-        IOSDeviceTransport.wired => const Duration(minutes: 5),
-        IOSDeviceTransport.wireless => const Duration(minutes: 15),
-      },
-      // Sized well above a healthy host's launch: the trigger exists to
-      // reassure someone on a slow host that the wait is expected, and one
-      // sized for a fast host would fire on every ordinary launch. The message
-      // says what is outstanding and what is worth checking, and quotes no
-      // duration — the cost varies by host by more than an order of magnitude,
-      // so any figure here would be wrong for most readers.
-      slowAfter: const Duration(seconds: 45),
-      onSlow: (elapsed) => logs.add(
-        'Still waiting (${elapsed.inSeconds}s) for the app to advertise its '
-        'Dart VM service over mDNS — the only channel an iOS device has for '
-        'it.${buildMode == BuildMode.debug ? _slowJitStart : ''}\n'
-        'If this is the first launch of $bundleId on this device, look at '
-        'the phone instead. iOS asks once, per app, before it lets one onto '
-        'the local network, and the prompt appears over the app: until it is '
-        'answered the advertisement never goes out, and no amount of waiting '
-        'here will change that. Settings > Privacy & Security > Local '
-        'Network lists the app once it has been asked.',
-      ),
+    final wired = info.transport == IOSDeviceTransport.wired;
+    final budget = wired ? wiredVmServiceBudget : wirelessVmServiceBudget;
+    final elapsed = clock.stopwatch()..start();
+    final found = Completer<_FoundVmService>();
+    final stopAsking = Completer<void>();
+
+    // The app's output also says what neither channel can: that iOS refused
+    // the advertisement. The engine logs it when the app has not been allowed
+    // onto the local network, whether the question went unanswered or was
+    // answered Don't Allow, and only a person at the phone can change that.
+    // Said plainly rather than left to the timeout, unless the log has already
+    // found the service, when the refusal costs this run nothing.
+    var refused = false;
+    final watch = logs.lines.listen((line) {
+      if (found.isCompleted) return;
+      if (wired) {
+        final match = vmServiceUriPattern.firstMatch(line.text);
+        if (match != null) {
+          found.complete(_LoggedVmService(Uri.parse(match.group(1)!)));
+          return;
+        }
+      }
+      if (!refused && line.text.contains(_registrationRefused)) {
+        refused = true;
+        logs.add(_localNetworkRefused(bundleId));
+      }
+    });
+
+    // Over a cable an mDNS failure on this host does not end the wait: the
+    // console and the forward go through devicectl, lldb and usbmuxd, none of
+    // which the failure touches. It is said at once, and the wait goes on to
+    // the end of the budget, which only then reports it. A failure after the
+    // race is decided is moot, like the result.
+    //
+    // Only that case has a timer of its own. Otherwise mDNS's own deadline,
+    // the same budget, ends the wait, with the explanation its failure gives.
+    Timer? outOfTime;
+    Timer? stillWaiting;
+    void slow() {
+      if (refused || found.isCompleted) return;
+      logs.add(
+        'Still waiting (${elapsed.elapsed.inSeconds}s) for the app\'s Dart VM '
+        'service to appear.${buildMode == BuildMode.debug ? _slowJitStart : ''}'
+        '${wired ? '' : _wirelessLocalNetwork(bundleId)}',
+      );
+    }
+
+    void consoleOnly(MdnsDiscoveryException failure, StackTrace trace) {
+      logs.add(
+        'mDNS cannot run on this Mac, so this launch waits for the app to '
+        'print its Dart VM service address on its console instead.\n'
+        '${failure.message}',
+      );
+      final left = budget - elapsed.elapsed;
+      outOfTime = Timer(left.isNegative ? Duration.zero : left, () {
+        if (found.isCompleted) return;
+        found.completeError(
+          MdnsDiscoveryException(
+            failure.failure,
+            'The app printed no Dart VM service address within '
+            '${budget.inSeconds}s, and mDNS could not look for it.\n'
+            '${failure.message}',
+          ),
+          trace,
+        );
+      });
+      final toSlow = _vmServiceSlowAfter - elapsed.elapsed;
+      if (!toSlow.isNegative) stillWaiting = Timer(toSlow, slow);
+    }
+
+    unawaited(
+      _mdns
+          .discover(
+            bundleId: bundleId,
+            hostnames: info.hostnames,
+            resolveAddress: !wired,
+            timeout: budget,
+            until: stopAsking.future,
+            slowAfter: _vmServiceSlowAfter,
+            onSlow: (_) => slow(),
+          )
+          .then(
+            (record) {
+              if (record != null && !found.isCompleted) {
+                found.complete(_AdvertisedVmService(record));
+              }
+            },
+            onError: (Object e, StackTrace trace) {
+              if (found.isCompleted) return;
+              if (wired &&
+                  e is MdnsDiscoveryException &&
+                  e.failure != MdnsDiscoveryFailure.notFound) {
+                consoleOnly(e, trace);
+              } else {
+                found.completeError(e, trace);
+              }
+            },
+          ),
     );
 
-    switch (info.transport) {
-      case IOSDeviceTransport.wired:
+    final _FoundVmService service;
+    try {
+      service = await found.future;
+    } on MdnsDiscoveryException catch (e) {
+      if (!refused || e.failure != MdnsDiscoveryFailure.notFound) rethrow;
+      throw MdnsDiscoveryException(
+        e.failure,
+        '${_localNetworkRefused(bundleId)}\n${e.message}',
+      );
+    } finally {
+      outOfTime?.cancel();
+      stillWaiting?.cancel();
+      stopAsking.complete();
+      await watch.cancel();
+    }
+
+    switch (service) {
+      case _LoggedVmService(:final uri):
+        // The logged address is the device's loopback: the port is the
+        // device's, and the path carries the auth code.
+        await _forward(info, uri.port);
+        return uri.replace(host: '127.0.0.1');
+      case _AdvertisedVmService(:final record) when wired:
         // The advertised port is a device-side port on the device's loopback.
-        final iproxy = await _startHelper('iproxy', [
-          '${record.port}:${record.port}',
-          '-u',
-          info.udid,
-        ]);
-        _iproxyProcess = iproxy;
-
-        // iproxy runs for the whole session and reports what it is doing on
-        // both channels, so both have to be drained — an unread pipe blocks
-        // the writer, and here the writer is the only route to the device.
-        final iproxyOutput = AppLogStream();
-        iproxyOutput.closeWhen([pumpProcessLines(iproxy, iproxyOutput).done]);
-
-        // Process.start returns at spawn time, before iproxy has bound its
-        // local listener. DDS dials this forward immediately after launch()
-        // returns; an unbound listener means ECONNREFUSED and the session
-        // loses its VM service. Return only once the forward actually accepts.
-        try {
-          await waitForLocalTcpPort(
-            record.port,
-            what: 'iproxy forward for the iOS VM service',
-            probe: _forwardProbe,
-          );
-        } on StateError catch (e) {
-          final said = iproxyOutput
-              .read(0)
-              .lines
-              .map((l) => l.text)
-              .where((t) => t.trim().isNotEmpty);
-          throw StateError(
-            '${e.message}\n'
-            'iproxy said: ${said.isEmpty ? '(nothing)' : said.join('; ')}',
-          );
-        }
+        await _forward(info, record.port);
         return record.uriFor(host: '127.0.0.1', port: record.port);
-      case IOSDeviceTransport.wireless:
+      case _AdvertisedVmService(:final record):
         // No cable to forward through. `discover(resolveAddress: true)` throws
         // rather than returning a record without an address, so this is set.
         return record.uriFor(
@@ -4097,6 +4320,82 @@ class IOSDevice extends Device {
         );
     }
   }
+
+  /// Forward [port] on this host to the same port on the device's loopback,
+  /// through iproxy over USB, for the rest of the session: [stop], or a launch
+  /// that fails after this, ends it (see [_reapLaunchHelpers]).
+  Future<void> _forward(IOSDeviceInfo info, int port) async {
+    final iproxyCommand = _locateIproxy();
+    final iproxy = await _startHelper(
+      iproxyCommand.executable,
+      ['$port:$port', '-u', info.udid],
+      environment: iproxyCommand.environment,
+    );
+    _iproxyProcess = iproxy;
+
+    // iproxy runs for the whole session and reports what it is doing on
+    // both channels, so both have to be drained — an unread pipe blocks
+    // the writer, and here the writer is the only route to the device.
+    final iproxyOutput = AppLogStream();
+    iproxyOutput.closeWhen([pumpProcessLines(iproxy, iproxyOutput).done]);
+
+    // Process.start returns at spawn time, before iproxy has bound its
+    // local listener. DDS dials this forward immediately after launch()
+    // returns; an unbound listener means ECONNREFUSED and the session
+    // loses its VM service. Return only once the forward actually accepts.
+    try {
+      await waitForLocalTcpPort(
+        port,
+        what: 'iproxy forward for the iOS VM service',
+        probe: _forwardProbe,
+      );
+    } on StateError catch (e) {
+      final said = iproxyOutput
+          .read(0)
+          .lines
+          .map((l) => l.text)
+          .where((t) => t.trim().isNotEmpty);
+      throw StateError(
+        '${e.message}\n'
+        'iproxy said: ${said.isEmpty ? '(nothing)' : said.join('; ')}',
+      );
+    }
+  }
+
+  /// Sized well above a healthy host's launch: the "still waiting" note
+  /// exists to reassure someone on a slow host that the wait is expected, and
+  /// one sized for a fast host would fire on every ordinary launch. The note
+  /// says what is outstanding and what is worth checking, and quotes no
+  /// duration — the cost varies by host by more than an order of magnitude,
+  /// so any figure would be wrong for most readers.
+  static const _vmServiceSlowAfter = Duration(seconds: 45);
+
+  /// What the engine logs when iOS refuses to let it advertise the VM service
+  /// (`kDNSServiceErr_PolicyDenied`, in `FlutterDartVMServicePublisher.mm`).
+  static const _registrationRefused =
+      'Could not register as server for FlutterDartVMServicePublisher, '
+      'permission denied';
+
+  /// What a launch says when iOS has refused the app the local network.
+  static String _localNetworkRefused(String bundleId) =>
+      '$bundleId is running, but iOS has not let it onto the local network, '
+      'where it announces the Dart VM service this tool connects to. iOS '
+      'asks once per app, with "Allow ... to find devices on local '
+      'networks?" on the phone. Someone has to tap Allow there; this run '
+      'keeps waiting. If it was answered Don\'t Allow, or the run still '
+      'waits after the tap, turn the app on in Settings > Privacy & Security '
+      '> Local Network and run again.';
+
+  /// The Local Network question, for a wireless launch's "still waiting" note.
+  ///
+  /// Over a cable the app's console carries the engine's report of the
+  /// refusal, which is how [_localNetworkRefused] knows to speak, and a cabled
+  /// launch does not wait on the advertisement anyway. Without one that
+  /// report may never arrive, so a slow start and a refusal look alike.
+  static String _wirelessLocalNetwork(String bundleId) =>
+      '\nIf this is the first launch of $bundleId on this device, look at the '
+      'phone too: iOS asks once per app, with "Allow ... to find devices on '
+      'local networks?", and nothing is announced until someone taps Allow.';
 
   /// Why a debug launch can be slow to advertise, for the "still waiting"
   /// note. An AOT app has no JIT trapping to the debugger.
@@ -4108,6 +4407,15 @@ class IOSDevice extends Device {
       'device: a copy stranded part-way leaves lldb without the on-disk '
       'shared cache, and every one of those traps then costs a read off '
       'the device.';
+
+  /// What the launch adds to devicectl's environment for the app.
+  ///
+  /// `OS_ACTIVITY_DT_MODE` sends the app's NSLog and os_log output to stderr,
+  /// where `--console` picks it up; flutter_tools sets it for the same reason
+  /// (`ios/core_devices.dart`).
+  static const _launchEnvironment = {
+    'DEVICECTL_CHILD_OS_ACTIVITY_DT_MODE': 'enable',
+  };
 
   /// The Bonjour service type the engine advertises its VM service as.
   static const _vmServiceBonjourType = '_dartVmService._tcp';
@@ -5101,7 +5409,7 @@ class WebDevice extends Device {
     ProcessStarter? startProcess,
     ChromeProfiles? profiles,
     String? chromePath,
-  }) : _startProcess = startProcess ?? Process.start,
+  }) : _startProcess = startProcess ?? startChildProcess,
        _profiles = profiles ?? ChromeProfiles(),
        _chromePath = chromePath;
 

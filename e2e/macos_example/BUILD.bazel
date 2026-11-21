@@ -19,7 +19,7 @@ load(
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
 )
-load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "program_test", "skipped_test")
+load("@rules_flutter//tools/e2e_testing:apple_analysis_test.bzl", "analyses_test", "dev_config_test", "one_application_configuration_test", "program_test", "skipped_test", "split_debug_info_test")
 load("@rules_flutter//tools/e2e_testing:apple_release_build.bzl", "apple_release_build")
 load("@rules_flutter//tools/e2e_testing:device_profile.bzl", "device_flag", "device_profile")
 load("@rules_flutter//tools/e2e_testing:version_build.bzl", "version_build")
@@ -75,6 +75,7 @@ copy_file(
 _APP_DEPS = [
     "//packages/add_plugin",
     "@deps//:flutter",
+    "@deps//:material_ui",
     "@rules_flutter//flutter:material_icons",
 ]
 
@@ -158,6 +159,14 @@ flutter_macos_app(
     application = ":driver_flutter",
     bundle_id = "com.example.flutterapp.driver",
     target_compatible_with = ["@platforms//os:macos"],
+)
+
+# The dev tool reads the dev config of the application the app runs: the
+# variant's, though the app reaches the application it varies as well.
+dev_config_test(
+    name = "driver_app_dev_config_test",
+    dev_config = "driver_flutter_dev_config.json",
+    target = ":driver_app",
 )
 
 # =============================================================================
@@ -312,6 +321,66 @@ flutter_macos_app(
     provisioning_profile = ":device_profile",
     target_compatible_with = ["@platforms//os:macos"],
     version = ":app_version",
+)
+
+# What a signed app's entitlements say, as rules_apple hands them to codesign,
+# against a Mac team wildcard development profile (profiles/) and a Mac App
+# Store profile that lists no devices. Against the first, one app has no
+# entitlements of its own and the other the sandbox, as `flutter create`
+# leaves Release.entitlements.
+flutter_macos_app(
+    name = "signing_plain_app",
+    app_name = "Signing Plain",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.signing",
+    entitlements = "signing/None.entitlements",
+    provisioning_profile = "profiles/team_wildcard.provisionprofile",
+    target_compatible_with = ["@platforms//os:macos"],
+    version = ":app_version",
+)
+
+flutter_macos_app(
+    name = "signing_sandbox_app",
+    app_name = "Signing Sandbox",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.signing.sandbox",
+    provisioning_profile = "profiles/team_wildcard.provisionprofile",
+    target_compatible_with = ["@platforms//os:macos"],
+    version = ":app_version",
+)
+
+flutter_macos_app(
+    name = "signing_store_app",
+    app_name = "Signing Store",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.signing.store",
+    provisioning_profile = "profiles/store.provisionprofile",
+    target_compatible_with = ["@platforms//os:macos"],
+    version = ":app_version",
+)
+
+apple_release_build(
+    name = "signing_entitlements",
+    compilation_mode = "opt",
+    entitlements = True,
+    sign = False,
+    targets = [
+        ":signing_plain_app",
+        ":signing_sandbox_app",
+        ":signing_store_app",
+    ],
+)
+
+dart_test(
+    name = "verify_macos_signing_entitlements_test",
+    args = ["$(rlocationpaths :signing_entitlements)"],
+    data = [":signing_entitlements"],
+    main = "test/verify_macos_signing_entitlements_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "@rules_dart//dart/runfiles",
+        "@rules_flutter//tools/e2e_testing",
+    ],
 )
 
 # =============================================================================
@@ -615,6 +684,9 @@ flutter_macos_app(
 [
     dart_test(
         name = "verify_macos_release_%s_%s_test" % (what, mode),
+        # The link keeps a library's debugging map, which its dSYM's line
+        # tables are read through, in `opt` (see the test).
+        args = ["--line-tables"] if what == "dsym" and mode == "opt" else [],
         data = [":release_%s" % mode] + ([":release_obfuscated_%s" % mode] if what == "obfuscated" else []),
         main = "test/verify_macos_release_%s_test.dart" % what,
         target_compatible_with = ["@platforms//os:macos"],
@@ -649,6 +721,22 @@ analyses_test(
 program_test(
     name = "macos_app_program_test",
     main = "lib/main.dart",
+    target = ":app",
+)
+
+# Property: the app reaches its application in the bundle's configuration
+# alone, so a build of it, and the dev tool's, compiles it once.
+one_application_configuration_test(
+    name = "macos_app_one_application_configuration_test",
+    target = ":app",
+)
+
+# Property: an obfuscated build's `.symbols`, which reads its stack traces
+# back, is the one of the snapshot the bundle ships, named as `flutter build
+# macos --split-debug-info` names it.
+split_debug_info_test(
+    name = "macos_app_split_debug_info_test",
+    symbols = "app.darwin-arm64.symbols",
     target = ":app",
 )
 

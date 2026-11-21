@@ -28,15 +28,12 @@ load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "PORTABLE_EX
 load("@rules_dart//dart/pub:pub_library.bzl", "DartPackageMemberInfo", "dart_package_member_info")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_info_forwarding.bzl", "flutter_info_forwarding_aspect")
 load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "bundled_without_import", "flutter_analyzable_info_of_packages")
 load("//flutter/private:flutter_plugin.bzl", "PLUGIN_PACKAGE_ATTRS", "plugin_contributions")
+load("//flutter/private:flutter_pub_member_info.bzl", "FlutterPubMemberInfo", "member_contributions")
 
-FlutterPubMemberInfo = provider(
-    doc = "What a Flutter pub package contributes to `FlutterInfo`, beyond its Dart package.",
-    fields = {
-        "contributions": "dict: The keyword arguments of `flutter_info()` for what this package itself contributes (plugin, native libraries, assets, fonts, shaders).",
-    },
-)
+visibility("//flutter/...")
 
 def _flutter_pub_member_impl(ctx):
     metadata = ctx.attr.package[DartPackageMetadataInfo]
@@ -81,8 +78,11 @@ flutter_pub_member = rule(
         mandatory = True,
         doc = "The package's `dart_package_metadata`, which states its facts.",
     ) | {
-        "bundle_paths": attr.string_dict(
-            doc = "For a file of `assets` or `shaders` bundled by a path other than its own in the package, its package-relative path and that path: the `lib/x` a pubspec names `packages/<the package>/x`, which flutter_tools bundles as `x`.",
+        "other_package_files": attr.string_list(
+            doc = "The package-relative paths of the files of `assets` and `shaders` that are another package's, linked here (under `_assets_of_other_packages/`) and bundled by the `packages/<other>/<path>` listed, as it is. Only the pub repository states it.",
+        ),
+        "bundle_paths": attr.string_list_dict(
+            doc = "For a file of `assets` or `shaders` bundled by paths other than (or besides) its own, its package-relative path and every path it is bundled by: the `lib/<path>` a pubspec lists as `packages/<the package>/<path>`, which flutter_tools bundles as `<path>`. Its `platforms` and `flavors` stay keyed by its own path. A file linked from another package (a path under `_assets_of_other_packages/`) is bundled by the `packages/<other>/<path>` listed, as it is.",
         ),
     },
     doc = "One Flutter pub package's files and facts, which a `flutter_pub_library` builds; not a library by itself. A plugin when it has `platforms`; otherwise it contributes only its assets, fonts and shaders.",
@@ -96,11 +96,7 @@ def _flutter_pub_library_impl(ctx):
 
     # What each member of Flutter's own kind adds. A member of rules_dart's has
     # nothing to add.
-    contributions = {}
-    for member in ctx.attr.members:
-        if FlutterPubMemberInfo in member:
-            for channel, values in member[FlutterPubMemberInfo].contributions.items():
-                contributions.setdefault(channel, []).extend(values)
+    contributions = member_contributions(ctx.attr.members)
 
     # The Android libraries of the members' `exports` are the ones this library
     # `exports` (see the attribute): the same labels, written once for each.
@@ -128,7 +124,9 @@ def _flutter_pub_library_impl(ctx):
             analysis_deps = [ctx.attr._sky_engine],
         ),
         flutter_analyzable_info_of_packages(ctx, packages, srcs, resources),
-        flutter_info(deps = ctx.attr.deps, **contributions),
+        # Each member's plugin depends on the plugins of its own pubspec's
+        # dependencies, inside the cycle or out, not on its cycle-mates'.
+        flutter_info(deps = ctx.attr.deps, package_dependencies = ctx.attr.member_dependencies, **contributions),
         # Depending on the library brings each member to the app, so it is
         # used without an import when one of them is: a plugin, or a package
         # that bundles fonts, assets or shaders.
@@ -148,6 +146,10 @@ flutter_pub_library = rule(
         "deps": attr.label_list(
             providers = [DartInfo],
             doc = "The libraries of the packages the members depend on outside the cycle.",
+            aspects = [flutter_info_forwarding_aspect],
+        ),
+        "member_dependencies": attr.string_list_dict(
+            doc = "For each member, by name, the packages its pubspec depends on directly, by name: the dependencies its plugin registers after, inside the cycle or out.",
         ),
         "exports": attr.label_list(
             providers = [JavaInfo],

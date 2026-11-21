@@ -6,6 +6,7 @@ import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
+import 'package:http_multi_server/http_multi_server.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -281,6 +282,67 @@ class Squatter {
       host: InternetAddress.loopbackIPv4.address,
       port: decoyPort,
     );
+  }
+}
+
+/// A port this test holds from the moment it is drawn, handed to the server
+/// under test when it binds that port.
+///
+/// A port found free and then released for the server to bind is free only
+/// until something else on the host takes it, and under parallel tests
+/// something does: the server's start then fails at its bind, with the advice a
+/// named port's bind failure gives, before the check a case is about ever runs.
+/// Holding the socket closes that gap. The handover is through [IOOverrides],
+/// the way [Squatter] reaches the server's client through [HttpOverrides], so
+/// the server's own code runs unchanged: `HttpServer.bind` gets its socket from
+/// `ServerSocket.bind`, which asks the override.
+///
+/// The held socket listens on IPv4 loopback whatever address the server asked
+/// for, so a case that needs the server to be *reached* where it asked is not
+/// one for this. A [Squatter] taking every connection, which decides where the
+/// check's requests go, is.
+final class HeldPort extends IOOverrides {
+  HeldPort._(this._socket);
+
+  static Future<HeldPort> bind() async {
+    final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(socket.close);
+    return HeldPort._(socket);
+  }
+
+  final ServerSocket _socket;
+
+  int get port => _socket.port;
+
+  /// Whether the server has bound the held port.
+  bool handedOver = false;
+
+  /// Run [body] with its binds of [port] given the held socket.
+  R run<R>(R Function() body) => IOOverrides.runWithIOOverrides(body, this);
+
+  @override
+  Future<ServerSocket> serverSocketBind(
+    address,
+    int port, {
+    int backlog = 0,
+    bool v6Only = false,
+    bool shared = false,
+  }) {
+    // Only the first bind of the port gets the held socket. A later one goes to
+    // the kernel, as it would without this: a server that wrongly tries the
+    // named port again, having given the socket back, binds it there and
+    // shows up as a second request on the squatter.
+    if (port != _socket.port || handedOver) {
+      return super.serverSocketBind(
+        address,
+        port,
+        backlog: backlog,
+        v6Only: v6Only,
+        shared: shared,
+      );
+    }
+    handedOver = true;
+    return Future.value(_socket);
   }
 }
 
@@ -1770,23 +1832,20 @@ void main() {
       'a wildcard bind that does not own its port is refused, not silent',
       () async {
         final dir = bundle();
-        // A port this server could really have served on — free on both loopback
-        // families, taken the way it takes its own. Letting the decoy pick it
-        // would only prove it was free on the decoy's family.
-        final probe = StaticWebServer(
-          rootPath: dir.path,
-          options: const WebServerOptions(crossOriginIsolation: false),
-        );
-        final port = (await probe.start()).port;
-        await probe.stop();
-
         // Answers, and answers wrongly — a well-behaved HTTP server on the port
         // this run wanted. adb, the squatter this exists for, closes the
         // connection without a byte, which any check would notice; a decoy
         // that returns a clean 200 is the case that only a check reading what
         // came back can tell from success.
-        final decoy = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+        //
+        // It draws the port itself and holds it to the end. A port found free
+        // and then released for the decoy is free only until something else on
+        // the host takes it, and under parallel tests something does. Held, the
+        // port is this test's: what the wildcard binds below meet is the decoy
+        // and nothing else.
+        final decoy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         addTearDown(() => decoy.close(force: true));
+        final port = decoy.port;
         decoy.listen((r) {
           r.response
             ..statusCode = HttpStatus.ok
@@ -1794,46 +1853,90 @@ void main() {
           r.response.close();
         });
 
+        // Which of the two paths this host takes, asked with the bind the
+        // server makes rather than read off the message it ends with. Asked
+        // before any server starts: afterwards, a start that kept its socket
+        // would make the bind fail here too, and hide exactly that.
+        bool wildcardBinds;
+        try {
+          await (await HttpMultiServer.bind(anyHostname, port)).close(
+            force: true,
+          );
+          wildcardBinds = true;
+        } on SocketException {
+          wildcardBinds = false;
+        }
+
         final options = WebServerOptions(
           crossOriginIsolation: false,
           hostname: anyHostname,
           port: port,
         );
+        Future<String> refusal(Future<Object?> start) async {
+          try {
+            await start;
+          } on DevToolException catch (e) {
+            return e.message;
+          }
+          fail('started on port $port, which the decoy holds');
+        }
+
         // Both platform paths end the same way — `Free port $port`, the advice a
         // single named draw ends with — and neither may end the way a *search*
         // does, because a named port is one draw and describing five would be
         // describing draws this run never made. Naming the port is not enough on
         // its own to say that: every branch of both messages carries the port
         // number, so a bare `contains('$port')` holds whichever one was taken.
-        final refusedNamingThePort = throwsDevToolException(
-          allOf(
-            contains('Free port $port'),
-            isNot(contains('All 5 ports')),
+        final namesThePort = allOf(
+          contains('Free port $port'),
+          isNot(contains('All 5 ports')),
+        );
+        final refusals = [
+          await refusal(
+            serverWith(buildOutputDir: dir.path, options: options).start(),
           ),
-        );
-        await expectLater(
-          serverWith(buildOutputDir: dir.path, options: options).start(),
-          refusedNamingThePort,
-        );
-        await expectLater(
-          StaticWebServer(rootPath: dir.path, options: options).start(),
-          refusedNamingThePort,
-        );
+          await refusal(
+            StaticWebServer(rootPath: dir.path, options: options).start(),
+          ),
+        ];
+        for (final message in refusals) {
+          expect(message, namesThePort);
+        }
 
-        // And the refused start gave the socket back. A wildcard bind succeeds
-        // on this kernel even against the decoy, so a start that gives up
-        // without closing it holds the port for the rest of the process — the
-        // one port the next attempt was told to use.
+        // And each refused start gave the socket back. Where the wildcard bind
+        // succeeds beside the decoy, a start that gives up without closing it
+        // holds the port for the rest of the process — the one port the next
+        // attempt was told to use — and that next attempt then fails at its
+        // bind instead of reaching the check.
         //
-        // Asked by *being* that next attempt: with the decoy gone, the same
-        // named port has to start. Binding ::1 beside the wildcard would ask
-        // nothing, twice over: a host with no IPv6 cannot run it at all, and
-        // where it can, BSD permits a specific address beside a wildcard, so it
-        // succeeds whether or not the socket was given back.
-        await decoy.close(force: true);
-        final next = StaticWebServer(rootPath: dir.path, options: options);
-        await next.start();
-        await next.stop();
+        // Asked by *being* that next attempt, with the decoy still in place: an
+        // attempt that reaches the check, as the first did, can only have bound
+        // the port, and it could only bind it if the one before gave it back.
+        // Binding ::1 beside the wildcard would ask nothing, twice over: a host
+        // with no IPv6 cannot run it at all, and where it can, BSD permits a
+        // specific address beside a wildcard, so it succeeds whether or not the
+        // socket was given back.
+        //
+        // Where the kernel refuses the wildcard bind outright, no attempt binds
+        // anything, so there is nothing to give back; the refusals above are
+        // the whole of that path.
+        const reachedTheCheck = 'does not reach it';
+        if (wildcardBinds) {
+          refusals.add(
+            await refusal(
+              StaticWebServer(rootPath: dir.path, options: options).start(),
+            ),
+          );
+          for (final message in refusals) {
+            expect(
+              message,
+              contains(reachedTheCheck),
+              reason:
+                  'every attempt after the first reaches the check only if '
+                  'the one before gave the port back: $message',
+            );
+          }
+        }
       },
     );
 
@@ -1899,26 +2002,26 @@ void main() {
       'a named port that is intercepted fails naming it, and is not redrawn',
       () async {
         final dir = bundle();
-        // A port that was free a moment ago, taken the way the servers take
-        // theirs so the address family cannot differ.
-        final free = StaticWebServer(
-          rootPath: dir.path,
-          options: const WebServerOptions(crossOriginIsolation: false),
-        );
-        final port = (await free.start()).port;
-        await free.stop();
+        // The named port is held by this test from the start and handed to the
+        // server's bind, never released to the kernel in between: something
+        // else on the host can take a port in that gap, and the start then
+        // fails at its bind, before any check. See [HeldPort].
+        final held = await HeldPort.bind();
+        final port = held.port;
 
         final squatter = await squatterTaking(everyPort: true);
         await expectLater(
-          squatter.run(
-            () => StaticWebServer(
-              rootPath: dir.path,
-              options: WebServerOptions(
-                crossOriginIsolation: false,
-                hostname: anyHostname,
-                port: port,
-              ),
-            ).start(),
+          held.run(
+            () => squatter.run(
+              () => StaticWebServer(
+                rootPath: dir.path,
+                options: WebServerOptions(
+                  crossOriginIsolation: false,
+                  hostname: anyHostname,
+                  port: port,
+                ),
+              ).start(),
+            ),
           ),
           throwsDevToolException(
             allOf(
@@ -1930,7 +2033,9 @@ void main() {
             ),
           ),
         );
-        // The whole of what it did: one attempt, on the port it was given.
+        // The whole of what it did: one bind and one attempt, on the port it
+        // was given.
+        expect(held.handedOver, isTrue);
         expect(squatter.probed, [port]);
       },
     );

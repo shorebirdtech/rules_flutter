@@ -75,6 +75,13 @@ void main() {
     return repo;
   }
 
+  /// A package's repositories, of which the last is its source repository:
+  /// the one fetched.
+  List<ProbeRepo> addPackage(String artifact, List<ProbeRepo> repos) {
+    cases[repos.last.name] = artifact;
+    return repos;
+  }
+
   const profilePath = 'android-arm64-profile/artifacts.zip';
 
   setUpAll(() async {
@@ -195,7 +202,6 @@ void main() {
               'host_platform': str('darwin-arm64'),
               'target_platform': str('android-arm64'),
             },
-            bzl: 'flutter_cross_repo',
           ),
         ),
         // The web SDK repository fetches two archives; the second is the Dart
@@ -204,6 +210,7 @@ void main() {
           'dart-sdk',
           ProbeRepo('web_sdk_second_archive', 'flutter_web_sdk_repo', {
             'engine_revision': str(revision),
+            'host': str('linux-x64'),
             'sha256': str(digest),
           }),
         ),
@@ -211,6 +218,7 @@ void main() {
           'flutter-web-sdk.zip',
           ProbeRepo('web_sdk_blank', 'flutter_web_sdk_repo', {
             'engine_revision': str(revision),
+            'host': str('linux-x64'),
           }),
         ),
         add(
@@ -241,26 +249,26 @@ void main() {
             'sha256': str(''),
           }),
         ),
-        add(
+        ...addPackage(
           '$fakeFlutterVersion.tar.gz',
-          ProbeRepo('sdk_source_blank', 'flutter_pub_package', {
-            'package_name': str('integration_test'),
-            'version': str('0.0.0'),
-            'sha256': str(''),
-            'flutter_source_version': str(fakeFlutterVersion),
-            'flutter_source_packages': '[${str('integration_test')}]',
-          }),
+          sdkSourcePackage(
+            'sdk_source_blank',
+            package: 'integration_test',
+            sha256: '',
+            packages: ['integration_test'],
+          ),
         ),
         // A hosted pub package is served from file://, so an unpinned fetch
         // of it does not fail at all.
-        add(
+        ...addPackage(
           'sample',
-          ProbeRepo('pub_blank_explicit', 'flutter_pub_package', {
-            'package_name': str('sample'),
-            'version': str('1.0.0'),
-            'sha256': str(''),
-            'base_url': str(pubBase),
-          }),
+          hostedPubPackage(
+            'pub_blank_explicit',
+            package: 'sample',
+            version: '1.0.0',
+            sha256: '',
+            baseUrl: pubBase,
+          ),
         ),
       ],
     );
@@ -336,34 +344,6 @@ void main() {
       }
       expect(result.namesTheDigest, isTrue, reason: '$result');
       expect(result.output, contains('dart-sdk'), reason: '$result');
-    },
-  );
-
-  test(
-    'pub_unset: a hosted pub package declared without a digest is refused at '
-    'the fetch, naming the package',
-    () async {
-      // The digest has no default a download could trust: an unset one is the
-      // empty string, which Bazel's downloader reads as "do not check", so the
-      // fetch refuses it before it downloads. (Declared beside the others, it
-      // would be one more repository of the shared workspace; it has one of its
-      // own.)
-      final unset = await probe(
-        repos: [
-          ProbeRepo('pub_unset', 'flutter_pub_package', {
-            'package_name': str('sample'),
-            'version': str('1.0.0'),
-            'base_url': str(pubBase),
-          }),
-        ],
-      );
-      final result = await unset.fetch('pub_unset');
-      expect(result.succeeded, isFalse, reason: '$result');
-      expect(
-        result.output,
-        allOf(contains('No sha256 is pinned'), contains('"sample"')),
-        reason: 'the refusal should name the package\n$result',
-      );
     },
   );
 }

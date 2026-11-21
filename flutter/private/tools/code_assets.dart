@@ -16,9 +16,17 @@
 ///
 /// Usage:
 ///   dart code_assets.dart place --program-assets=<file> --os <os>
-///       [--abi <abi>] --output <dir> [--library <file>]...
+///       [--abi <abi>] --output <dir> [--library <file>]... [--copy <file>]...
+///       [--copy-as <file name> <file>]...
+///       [--framework <file name> <framework name>]...
 ///     Copies each shipped library, and each `--library` (which always ships),
-///     into `<dir>`, at its path in the platform's code-asset directory.
+///     into `<dir>`, at its path in the platform's code-asset directory. A
+///     shipped library with a `--copy` of the same file name, or a
+///     `--copy-as` naming its file name (one stripped for the bundle), is
+///     placed from the copy. On macOS, a library with a `--framework` is
+///     placed in that framework, with its `Resources/Info.plist`.
+///     On Linux, each library's runpath entries relative to `$ORIGIN` become
+///     one `$ORIGIN`, the bundle's `lib/`.
 ///   dart code_assets.dart android-libs --program-assets=<file> --abi <abi>
 ///       --output <zip> [--library <file>]... [--library-as <name> <file>]...
 ///     Writes the APK's native libraries, `lib/<abi>/<name>` entries stored
@@ -26,6 +34,7 @@
 ///     always ships) and each `--library-as` under the name given.
 ///   dart code_assets.dart ios-dropped-frameworks --program-assets=<file>
 ///       --output <file> [--conflict <label>]
+///       (--framework <file name> <framework name>)...
 ///     Writes the frameworks of the code assets a link hook dropped, one
 ///     `<name>.framework` a line, which an iOS app carries for
 ///     `ios_code_asset_post_processor.dart` to remove. With `--conflict` (the
@@ -33,7 +42,12 @@
 ///     that is not empty fails.
 ///   dart code_assets.dart manifest --program-assets=<file> --os <os>
 ///       [--target <os>_<arch>] --output <file>
+///       [--framework <file name> <framework name>]...
 ///     Writes the app's native-assets manifest (`nativeAssetsManifest`).
+///   dart code_assets.dart merge-manifests --output <file>
+///       (--manifest <abi> <file>)...
+///     Writes the one native-assets manifest of an APK of several ABIs, each
+///     ABI's build's under its own target (`mergeNativeAssetsManifests`).
 ///   dart code_assets.dart xcframeworks --output <dir>
 ///       (--slice <id> --program-assets=<file>)...
 ///       (--candidate <file name> <xcframework>)... [--always <xcframework>]...
@@ -52,6 +66,9 @@ import 'dart:io';
 
 import 'apple_frameworks.dart' show copyBundle;
 import 'assemble_directory.dart' show copyFile;
+import 'elf_runpath.dart' show ElfDynamic, bundledRunpath;
+import 'native_assets_manifests.dart'
+    show ManifestMergeException, mergeNativeAssetsManifests;
 import 'zip_archive.dart' show ZipEntry, writeZip;
 
 /// The name and version of the program-assets line format this reads.
@@ -250,46 +267,117 @@ final class ProgramCodeAssets {
   }
 }
 
-/// The framework name of a bundled library on iOS, as flutter_tools'
-/// `frameworkUri` derives it: a trailing `.dylib` and then a leading `lib`
-/// dropped, and only `[A-Za-z0-9_-]` kept. `native_asset_framework_name` in
-/// `flutter_native_assets.bzl` is the same function, for the frameworks
-/// analysis wraps.
-String frameworkName(String fileName) {
-  var name = fileName;
-  if (name.endsWith('.dylib')) {
-    name = name.substring(0, name.length - '.dylib'.length);
-    if (name.startsWith('lib')) name = name.substring('lib'.length);
-  }
-  return name.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+/// The framework each bundled library of an Apple app ships in, by the
+/// library's file name: `<name>` of `<name>.framework/<name>`. On iOS every
+/// library has one; on macOS each code asset's does, and a `native_deps`
+/// library ships as itself.
+///
+/// Analysis names them (`apple_framework_names` in `flutter_native_assets.bzl`,
+/// flutter_tools' `frameworkUri` over the app's libraries in file-name order,
+/// a name already taken gaining `1`, `2`, ...) and hands the names to every
+/// action that needs one as `--framework <file name> <name>` pairs.
+final class AppleFrameworks {
+  AppleFrameworks(this.byFileName);
+
+  /// The pairs of `--framework <file name> <name>` in [args].
+  factory AppleFrameworks.fromArgs(List<String> args) => AppleFrameworks({
+    for (var i = 0; i < args.length - 2; i++)
+      if (args[i] == '--framework') args[i + 1]: args[i + 2],
+  });
+
+  /// The framework name of each library, by its file name.
+  final Map<String, String> byFileName;
+
+  /// The framework [fileName] ships in.
+  String of(String fileName) =>
+      byFileName[fileName] ??
+      (throw StateError(
+        'no framework is named for $fileName, a library the iOS app '
+        'bundles; its build passes one `--framework` for every library',
+      ));
+
+  /// The framework [fileName] ships in, or null when it ships as itself.
+  String? maybeOf(String fileName) => byFileName[fileName];
 }
 
 /// The path of the library [fileName] in [os]'s code-asset directory
-/// ([CodeAssetPlacement.directory]): its file name, or on iOS a framework of
-/// its own.
-String codeAssetPathInDirectory(String os, String fileName) {
-  if (os != 'ios') return fileName;
-  final name = frameworkName(fileName);
-  return '$name.framework/$name';
+/// ([CodeAssetPlacement.directory]): its file name, or a framework of its
+/// own, named by [frameworks]: on iOS each library's, on macOS those
+/// [frameworks] names.
+String codeAssetPathInDirectory(
+  String os,
+  String fileName, {
+  AppleFrameworks? frameworks,
+}) {
+  final name = switch (os) {
+    'ios' when frameworks == null => throw ArgumentError(
+      'an iOS code-asset path needs the framework names',
+    ),
+    'ios' => frameworks!.of(fileName),
+    'macos' => frameworks?.maybeOf(fileName),
+    _ => null,
+  };
+  return name == null ? fileName : '$name.framework/$name';
 }
+
+/// The `Info.plist` of the framework [name] that wraps a code asset of a
+/// macOS app, as flutter_tools' `createInfoPlist` writes it.
+String macosCodeAssetInfoPlist(String name) =>
+    '''
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>$name</string>
+	<key>CFBundleIdentifier</key>
+	<string>${'io.flutter.flutter.native_assets.$name'.replaceAll('_', '-')}</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$name</string>
+	<key>CFBundlePackageType</key>
+	<string>FMWK</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+</dict>
+</plist>''';
 
 /// The native-assets manifest of an app for [os] (Dart's `<os>_<arch>`
 /// [target]): each code asset that ships, by id, to how the engine loads it.
 /// A bundled library is named by its path in the platform's code-asset
-/// directory, which the engine resolves it against. The app ships it as
+/// directory, which the engine resolves it against; one in a framework of its
+/// own, on iOS and macOS, by the framework's install name,
+/// `@rpath/<name>.framework/<name>`, as flutter_tools 3.50 names it. The name the VM hands `dlopen` must be the install name: under
+/// any other, dyld knows the library only as the file on disk, and a rebuild
+/// that replaces the file while the app runs maps a second copy of it. The app ships it as
 /// `flutter_assets/NativeAssetsManifest.json`, which the engine reads at
 /// startup, as upstream's `InstallCodeAssets` ships it.
 String nativeAssetsManifest(
   ProgramCodeAssets program,
   String os,
-  String target,
-) {
+  String target, {
+  AppleFrameworks? frameworks,
+}) {
   final section = <String, List<String>>{
     for (final asset in program.shipped)
       asset.id: switch (asset.linkMode) {
         'dynamic_loading_bundle' when asset.fileName != null => [
           'absolute',
-          codeAssetPathInDirectory(os, asset.fileName!),
+          switch (codeAssetPathInDirectory(
+            os,
+            asset.fileName!,
+            frameworks: frameworks,
+          )) {
+            final path when path.contains('.framework/') => '@rpath/$path',
+            final path => path,
+          },
         ],
         'dynamic_loading_system' when asset.uri != null => [
           'system',
@@ -319,14 +407,20 @@ String nativeAssetsManifest(
 ///
 /// Each library lives in one directory of the bundle, the one the platform's
 /// loader resolves a native-assets manifest entry against, at
-/// [pathInDirectory]: its file name, or on iOS, which embeds no loose
-/// library, a framework of its own. The manifest names that same path.
+/// [pathInDirectory]: its file name, or a framework of its own: on iOS, which
+/// embeds no loose library, each one's, and on macOS each code asset's, as
+/// flutter_tools 3.50 wraps them. The manifest names that same path.
 final class CodeAssetPlacement {
-  CodeAssetPlacement._(this.os, this.directory);
+  CodeAssetPlacement._(this.os, this.directory, [this.frameworks]);
 
   /// The placement for [os] (`linux`, `windows`, `android`, `macos` or
-  /// `ios`); [abi] is the Android ABI.
-  factory CodeAssetPlacement(String os, {String? abi}) => switch (os) {
+  /// `ios`); [abi] is the Android ABI, and [frameworks] the frameworks of an
+  /// Apple app.
+  factory CodeAssetPlacement(
+    String os, {
+    String? abi,
+    AppleFrameworks? frameworks,
+  }) => switch (os) {
     'linux' => CodeAssetPlacement._(os, 'lib'),
     'windows' => CodeAssetPlacement._(os, ''),
     'android' when abi != null && abi.isNotEmpty => CodeAssetPlacement._(
@@ -334,13 +428,16 @@ final class CodeAssetPlacement {
       'lib/$abi',
     ),
     'android' => throw ArgumentError('an Android placement needs an ABI'),
-    'macos' => CodeAssetPlacement._(os, 'Contents/Frameworks'),
-    'ios' => CodeAssetPlacement._(os, 'Frameworks'),
+    'macos' => CodeAssetPlacement._(os, 'Contents/Frameworks', frameworks),
+    'ios' => CodeAssetPlacement._(os, 'Frameworks', frameworks),
     _ => throw ArgumentError('no code-asset placement for `$os`'),
   };
 
   /// The OS.
   final String os;
+
+  /// The framework of each library that has one, on iOS and macOS.
+  final AppleFrameworks? frameworks;
 
   /// The bundle directory the libraries are in: next to the runner on
   /// Windows (`''`), `lib/` beside `libapp.so` on Linux, `lib/<abi>/` in an
@@ -350,7 +447,7 @@ final class CodeAssetPlacement {
 
   /// The path of the library [fileName] in [directory].
   String pathInDirectory(String fileName) =>
-      codeAssetPathInDirectory(os, fileName);
+      codeAssetPathInDirectory(os, fileName, frameworks: frameworks);
 
   /// The path of the library [fileName] in the bundle.
   String bundlePath(String fileName) => directory.isEmpty
@@ -386,26 +483,61 @@ String _programAssets(List<String> args) {
 
 /// Copies each library that ships, and [always], into [output] as
 /// [placement] has them in its directory. Two ids served by one library copy
-/// it once.
+/// it once. On Linux each library's runpath is the bundle's (`bundledRunpath`),
+/// and one that links another the bundle carries must find it by `$ORIGIN`.
 void place(
   ProgramCodeAssets program,
   CodeAssetPlacement placement,
   String output,
-  List<String> always,
-) {
+  List<String> always, {
+  List<String> copies = const [],
+  Map<String, String> copiesAs = const {},
+}) {
+  final copyOf = {
+    for (final copy in copies) copy.substring(copy.lastIndexOf('/') + 1): copy,
+    ...copiesAs,
+  };
   Directory(output).createSync(recursive: true);
-  final placed = <String, String>{};
+  // Each path placed, by the path with case ignored: the bundle is written on
+  // a build machine, and read on a target, either of which may ignore case
+  // (macOS, Windows), so two paths that differ only in case are one file.
+  final placed = <String, ({String target, String source})>{};
+  // On Linux, what each library placed links and where it looks.
+  final linked = <String, ElfDynamic>{};
   void copy(String source, String fileName) {
     final target = placement.pathInDirectory(fileName);
-    final other = placed[target];
+    final other = placed[target.toLowerCase()];
     if (other != null) {
-      if (other == source) return;
+      if (other.source == source) return;
+      final where = other.target == target
+          ? target
+          : '${other.target} and $target, which differ only in case';
       throw StateError(
-        'two libraries would both be bundled as $target: $other and $source',
+        'two libraries would both be bundled as $where: '
+        '${other.source} and $source',
       );
     }
-    placed[target] = source;
-    copyFile(File(source), '$output/$target');
+    placed[target.toLowerCase()] = (target: target, source: source);
+    if (placement.os == 'macos' && target.contains('.framework/')) {
+      final name = target.substring(0, target.indexOf('.framework/'));
+      copyFile(File(source), '$output/$target');
+      File('$output/$name.framework/Resources/Info.plist')
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync(macosCodeAssetInfoPlist(name));
+      return;
+    }
+    if (placement.os != 'linux') {
+      copyFile(File(source), '$output/$target');
+      return;
+    }
+    // Upstream's build hooks link a Linux library with a runpath of
+    // `$ORIGIN`, by which it finds the code assets it links beside it.
+    final bytes = bundledRunpath(File(source).readAsBytesSync(), source);
+    final placedFile = File('$output/$target');
+    placedFile.parent.createSync(recursive: true);
+    if (placedFile.existsSync()) placedFile.deleteSync();
+    placedFile.writeAsBytesSync(bytes);
+    linked[target] = ElfDynamic.read(bytes, source);
   }
 
   for (final asset in program.shipped) {
@@ -416,10 +548,56 @@ void place(
         '`libraries` view',
       );
     }
-    copy(asset.file!, asset.fileName!);
+    copy(copyOf[asset.fileName!] ?? asset.file!, asset.fileName!);
   }
   for (final library in always) {
     copy(library, library.substring(library.lastIndexOf('/') + 1));
+  }
+  for (final MapEntry(key: target, value: elf) in linked.entries) {
+    final siblings = [
+      for (final name in elf.needed)
+        if (name != target && linked.containsKey(name)) name,
+    ];
+    // The loader reads DT_RPATH only when there is no DT_RUNPATH.
+    final searched = (elf.runpath ?? elf.rpath ?? '').split(':');
+    if (siblings.isNotEmpty &&
+        !searched.contains(r'$ORIGIN') &&
+        !searched.contains(r'${ORIGIN}')) {
+      throw StateError(
+        '${placed[target.toLowerCase()]!.source} links '
+        '${siblings.join(', ')}, which the bundle carries beside it, but '
+        'has no runpath of `\$ORIGIN` to find '
+        '${siblings.length == 1 ? 'it' : 'them'} there. Link it with '
+        '`-Wl,-rpath,\$ORIGIN`, as Flutter\'s build hooks do',
+      );
+    }
+  }
+}
+
+/// Copies into [output] the dSYM bundles of the libraries that ship: each of
+/// [always], and each of [candidates] (a library's file name to its
+/// bundle) whose library [program] ships. Each bundle is named by its
+/// `Contents/Info.plist`, two directories under it, and keeps its name.
+///
+/// As `flutter build` makes a dSYM only for a code asset it bundles, the
+/// dSYM of one a link hook dropped is left out.
+void shippedDsyms(
+  ProgramCodeAssets program,
+  String output,
+  List<String> always,
+  Map<String, String> candidates,
+) {
+  Directory(output).createSync(recursive: true);
+  final shipped = program.shippedFileNames;
+  final bundles = {
+    ...always,
+    for (final MapEntry(key: fileName, value: plist) in candidates.entries)
+      if (shipped.contains(fileName)) plist,
+  };
+  for (final plist in bundles) {
+    final bundle = File(plist).parent.parent;
+    final name = bundle.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+    copyBundle(bundle, Directory('$output/$name'));
   }
 }
 
@@ -435,10 +613,14 @@ const iosDroppedFrameworksFile = 'rules_flutter_dropped_frameworks.txt';
 /// [conflict] names the app's own `ipa_post_processor`, when it has one:
 /// rules_apple runs one, so the app cannot have rules_flutter's too, and a
 /// list that is not empty fails, naming it.
-String iosDroppedFrameworks(ProgramCodeAssets program, {String conflict = ''}) {
+String iosDroppedFrameworks(
+  ProgramCodeAssets program,
+  AppleFrameworks frameworks, {
+  String conflict = '',
+}) {
   final list = [
     for (final name in [
-      for (final fileName in program.droppedFileNames) frameworkName(fileName),
+      for (final fileName in program.droppedFileNames) frameworks.of(fileName),
     ]..sort())
       '$name.framework\n',
   ].join();
@@ -568,9 +750,15 @@ int _run(List<String> args) {
         CodeAssetPlacement(
           _flag(rest, '--os'),
           abi: _flag(rest, '--abi', optional: true),
+          frameworks: AppleFrameworks.fromArgs(rest),
         ),
         _flag(rest, '--output'),
         _all(rest, '--library'),
+        copies: _all(rest, '--copy'),
+        copiesAs: {
+          for (var i = 0; i < rest.length - 2; i++)
+            if (rest[i] == '--copy-as') rest[i + 1]: rest[i + 2],
+        },
       );
     case 'xcframeworks':
       final slices = <String, ProgramCodeAssets>{};
@@ -612,6 +800,21 @@ int _run(List<String> args) {
         final base = xcframework.substring(xcframework.lastIndexOf('/') + 1);
         copyBundle(Directory(xcframework), Directory('$output/$base'));
       }
+    case 'dsyms':
+      // `--candidate-dsym <file name> <plist>`, one for each code asset that
+      // could ship; `--always <plist>`, one for each library that does.
+      final candidates = <String, String>{};
+      for (var i = 0; i < rest.length - 2; i++) {
+        if (rest[i] == '--candidate-dsym') {
+          candidates[rest[i + 1]] = rest[i + 2];
+        }
+      }
+      shippedDsyms(
+        ProgramCodeAssets.read(_programAssets(rest)),
+        _flag(rest, '--output'),
+        _all(rest, '--always'),
+        candidates,
+      );
     case 'android-libs':
       final always = <String, String>{
         for (final library in _all(rest, '--library'))
@@ -631,6 +834,7 @@ int _run(List<String> args) {
       File(_flag(rest, '--output')).writeAsStringSync(
         iosDroppedFrameworks(
           ProgramCodeAssets.read(_programAssets(rest)),
+          AppleFrameworks.fromArgs(rest),
           conflict: _flag(rest, '--conflict', optional: true),
         ),
       );
@@ -640,8 +844,20 @@ int _run(List<String> args) {
           ProgramCodeAssets.read(_programAssets(rest)),
           _flag(rest, '--os'),
           _flag(rest, '--target', optional: true),
+          frameworks: AppleFrameworks.fromArgs(rest),
         ),
       );
+    case 'merge-manifests':
+      // `--manifest <abi> <file>`, one for each ABI's build.
+      final manifests = <(String, String)>[];
+      for (var i = 0; i < rest.length - 2; i++) {
+        if (rest[i] == '--manifest') {
+          manifests.add((rest[i + 1], File(rest[i + 2]).readAsStringSync()));
+        }
+      }
+      File(
+        _flag(rest, '--output'),
+      ).writeAsStringSync(mergeNativeAssetsManifests(manifests));
     case 'package-swift':
       const suffix = '.xcframework';
       File(_flag(rest, '--output')).writeAsStringSync(
@@ -669,6 +885,9 @@ void main(List<String> args) {
     stderr.writeln('code_assets.dart: ${e.message}');
     exitCode = 1;
   } on StateError catch (e) {
+    stderr.writeln('code_assets.dart: ${e.message}');
+    exitCode = 1;
+  } on ManifestMergeException catch (e) {
     stderr.writeln('code_assets.dart: ${e.message}');
     exitCode = 1;
   } on ArgumentError catch (e) {

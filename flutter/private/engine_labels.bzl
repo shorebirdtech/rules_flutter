@@ -8,6 +8,8 @@ the same way.
 
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_ENGINE_PLATFORMS", "HOST_PLATFORMS")
 
+visibility("//flutter/...")
+
 ENGINE_MODES = ["debug", "profile", "release"]
 
 # The slice directory of a desktop engine, by the platform string of its target.
@@ -38,7 +40,7 @@ WEB_SLICE_FILES = {
     "dart2js_platform.dill": "`kernel/dart2js_platform.dill`.",
     "ddc_outline.dill": "`kernel/ddc_outline.dill`.",
     "libraries.json": "The web SDK's `libraries.json`.",
-    "ddc_dart_sdk.js": "The DDC SDK in the library-bundle format: `kernel/ddcLibraryBundle-canvaskit/dart_sdk.js`, or `kernel/ddc/canary/dart_sdk.js` from Flutter 3.50.",
+    "ddc_dart_sdk.js": "`kernel/ddc/canary/dart_sdk.js`.",
     "ddc_module_loader.js": "The Dart SDK's `lib/dev_compiler/ddc/ddc_module_loader.js`.",
     "dart_stack_trace_mapper.js": "The Dart SDK's `lib/dev_compiler/web/dart_stack_trace_mapper.js`.",
 }

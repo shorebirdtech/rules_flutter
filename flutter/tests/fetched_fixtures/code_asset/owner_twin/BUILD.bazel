@@ -1,0 +1,27 @@
+"""The package `code_asset_owner` a second time, rooted apart from `owner/`, as
+two pub hubs can each supply one package: the same id and library as `owner/`'s,
+bare where `owner/`'s is wrapped."""
+
+load("@rules_dart//dart:defs.bzl", "dart_library")
+
+# A fetcher's declaration, as a pub hub's generated BUILD file loads it.
+# buildifier: disable=bzl-visibility
+load("@rules_dart//dart/private:fetched_package_metadata.bzl", "fetched_package_metadata")
+
+package(default_visibility = ["@rules_flutter//flutter/tests/code_asset_fixture:__pkg__"])
+
+fetched_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "code_asset_owner",
+    code_assets = ["@rules_flutter//flutter/tests/code_asset_fixture:code_asset"],
+    # Fetched alike, as two pub hubs each fetch one package, so this and
+    # `owner/` are one package.
+    purl = "pkg:pub/code_asset_owner@1.0.0",
+    version = "1.0.0",
+)
+
+dart_library(
+    name = "bare_twin_owner",
+    srcs = ["lib/owner.dart"],
+    package = ":pubspec-metadata",
+)

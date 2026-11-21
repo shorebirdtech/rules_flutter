@@ -346,7 +346,7 @@ class RunPlan {
     // redundant `bazel info` spawns and gives every consumer the same answer.
     // Under `bazel run` it spawns nothing.
     final workspace = await bazel.findWorkspaceRoot();
-    final userBuildArgs = userBazelFlags(
+    final bazelFlags = devToolBazelFlags(
       configs: results['config'] as List<String>,
       buildArgs: results['build-arg'] as List<String>,
     );
@@ -354,7 +354,7 @@ class RunPlan {
     // Every option the build takes but the device's own, which only the
     // device can say.
     final runFlags = [
-      ...userBuildArgs,
+      ...bazelFlags,
       ...defineFlags,
       ...modeBuildFlags(profileMode: profileMode),
     ];
@@ -550,6 +550,7 @@ class RunPlan {
       String appFile,
       List<String> outputFiles,
       Map<String, String>? partsNativeLibs,
+      List<String> moduleGraphFlags,
     })
   >
   buildApp() async {
@@ -575,6 +576,10 @@ class RunPlan {
       // Built with the launch and read as it returns, so a restart's baseline
       // is what the launched artifact was made from.
       parts: parts,
+      // The DDC loop's reload pipeline is assembled from this build, and asks
+      // `bazel mod` about the module graph it resolved. A native one has a
+      // build of its own for that.
+      recordModuleGraph: isDdcWeb,
     );
     if (!result.success) {
       throw DevToolException(
@@ -613,6 +618,7 @@ class RunPlan {
           : await nativeLibsFingerprintOfBuiltFiles(
               result.partsFiles[parts.nativeLibsGroup]!,
             ),
+      moduleGraphFlags: result.moduleGraphFlags,
     );
   }
 }

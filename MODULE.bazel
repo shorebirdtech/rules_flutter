@@ -15,7 +15,7 @@
 
 module(
     name = "rules_flutter",
-    bazel_compatibility = [">=9.2.0"],
+    bazel_compatibility = [">=9.3.0"],
 )
 
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
@@ -23,26 +23,26 @@ bazel_dep(name = "package_metadata", version = "0.0.15")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_cc", version = "0.2.28")
 bazel_dep(name = "apple_support", version = "2.12.0")
-
-# Named as rules_swift_package_manager's generated BUILD files load them: the
-# Swift packages of Apple plugins' dependencies are repositories of the pub
-# extension, which see rules_flutter's names for its dependencies.
-bazel_dep(name = "rules_apple", version = "5.4.0", repo_name = "build_bazel_rules_apple")
-bazel_dep(name = "rules_swift", version = "4.2.2", repo_name = "build_bazel_rules_swift")
+bazel_dep(name = "rules_apple", version = "5.4.0")
+bazel_dep(name = "rules_swift", version = "4.2.2")
 bazel_dep(name = "rules_android", version = "0.8.1")
 bazel_dep(name = "rules_kotlin", version = "2.4.21")
 bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "rules_jvm_external", version = "7.2")
-bazel_dep(name = "rules_dart", version = "0.9.1")
+bazel_dep(name = "rules_dart", version = "0.10.0")
 
-# The Go SDK that builds rules_android's Go tools (`ak`, a tool of the Android
-# toolchain, so every Android build analyses it) and the Gazelle tools that
-# fetch their Go modules.
-# rules_dart brings Gazelle 0.54.0, whose `go.work` needs Go 1.24.12 or newer;
-# rules_android declares Go 1.22.4. rules_go builds with the first SDK the
-# module graph declares, the root's and then each module's in breadth-first
-# order, so this one, declared here, is the one an app gets whenever its
-# MODULE.bazel names rules_flutter before rules_android, as the README's does.
+# The rules_go and Go SDK that build rules_android's Go tools (`ak`, a tool of
+# the Android toolchain, so every Android build analyses it) and the Gazelle
+# tools that fetch their Go modules. rules_go 0.63.0 is the first whose Go standard library builds under the
+# README's `--experimental_output_paths=strip`: older ones path-map the cgo
+# action and it fails with `cc: no such file or directory`. rules_go 0.63.0 and
+# newer bring Gazelle 0.51.3, whose `go.work` needs Go 1.24.12 or newer, and
+# rules_android 0.8.1 declares Go 1.22.4. rules_go builds with the first SDK
+# the module graph declares, the root's and then each module's in
+# breadth-first order, so an app that declares no SDK of its own gets this one
+# only when its MODULE.bazel names rules_flutter before rules_android. Only
+# the root module can make that order irrelevant, by declaring the SDK itself,
+# as the README says, until rules_android declares a newer Go.
 bazel_dep(name = "rules_go", version = "0.64.2")
 
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
@@ -90,20 +90,13 @@ register_toolchains(
     dev_dependency = True,
 )
 
-# Builds the Swift packages Apple plugins depend on (`.package(url:)`).
-bazel_dep(name = "rules_swift_package_manager", version = "1.25.0")
-
-# What the BUILD files rules_swift_package_manager generates load, besides
-# rules_cc, apple_support, bazel_skylib and the Apple rules above.
-bazel_dep(name = "rules_license", version = "1.0.0")
-
 # The development tooling rules_flutter shares with the repositories built on
 # rules_dart (the commit policy, release notes, tool pins, lock checks): the
 # `overhead/` module of rules_dart. `bazel run @overhead//changelog:check`, say.
 bazel_dep(name = "overhead", version = "0.0.0", dev_dependency = True)
 git_override(
     module_name = "overhead",
-    commit = "6868a95fd5b341345c506eef8a19a2564ace65bc",
+    commit = "f56f8565a29cbabb9f91cda2e5abb5eba347bb26",
     remote = "https://github.com/aran/rules_dart.git",
     strip_prefix = "overhead",
 )
@@ -135,30 +128,22 @@ e2e_copies(
     dev_dependency = True,
 )
 
+# Packages declared as a fetcher's repository declares them, for the tests of
+# package identity: `fetched_package_metadata` refuses the main repository.
+local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
+
+local_repository(
+    name = "fetched_fixtures",
+    dev_dependency = True,
+    path = "flutter/tests/fetched_fixtures",
+)
+
 flutter = use_extension("//flutter:extensions.bzl", "flutter")
-flutter.toolchain(flutter_version = "3.47.9")
-use_repo(flutter, "flutter_android_emulator_darwin_aarch64", "flutter_android_emulator_linux_x64", "flutter_android_engine_arm", "flutter_android_engine_arm64", "flutter_android_engine_x64", "flutter_android_system_image_arm64_v8a", "flutter_android_system_image_x86_64", "flutter_chrome_for_testing_linux64", "flutter_chrome_for_testing_linux_arm64", "flutter_chrome_for_testing_mac_arm64", "flutter_chrome_for_testing_mac_x64", "flutter_chrome_for_testing_win64", "flutter_dev_root", "flutter_ios_engine", "flutter_ios_engine_profile", "flutter_linux_runtime_amd64", "flutter_linux_runtime_arm64", "flutter_macos_engine", "flutter_outline_tool", "flutter_sdks", "flutter_sky_engine", "flutter_toolchains", "flutter_version_pin", "flutter_web_sdk")
+flutter.toolchain(flutter_version = "3.50.0")
+use_repo(flutter, "flutter_android_emulator_darwin_aarch64", "flutter_android_emulator_linux_x64", "flutter_android_engine_arm", "flutter_android_engine_arm64", "flutter_android_engine_x64", "flutter_android_system_image_arm64_v8a", "flutter_android_system_image_x86_64", "flutter_chrome_for_testing_linux64", "flutter_chrome_for_testing_linux_arm64", "flutter_chrome_for_testing_mac_arm64", "flutter_chrome_for_testing_mac_x64", "flutter_chrome_for_testing_win64", "flutter_dev_root", "flutter_ios_engine", "flutter_ios_engine_profile", "flutter_ios_usb", "flutter_linux_runtime_amd64", "flutter_linux_runtime_arm64", "flutter_macos_engine", "flutter_outline_tool", "flutter_sdks", "flutter_sky_engine", "flutter_toolchains", "flutter_version_pin", "flutter_web_sdk")
 
 flutter_pub = use_extension("//flutter/pub:extensions.bzl", "pub")
 use_repo(flutter_pub, "flutter_gen_l10n", "flutter_pub_android_maven", "flutter_pub_apple_app_settings")
-
-# One more SDK for each Dart release a supported Flutter version bundles, besides
-# the default's, for //flutter/tests/outline_fixture: it builds the fixture
-# under each, so every Dart's outline stripper is tested on that Dart's kernels.
-# Repositories are fetched lazily, so only those tests download them.
-flutter_outline = use_extension("//flutter:extensions.bzl", "flutter", dev_dependency = True)
-flutter_outline.toolchain(
-    name = "outline_dart_3_13_2",
-    flutter_version = "3.47.2",
-)
-flutter_outline.toolchain(
-    name = "outline_dart_3_13_4",
-    flutter_version = "3.47.5",
-)
-flutter_outline.toolchain(
-    name = "outline_dart_3_13_5",
-    flutter_version = "3.47.7",
-)
 
 register_toolchains("@flutter_toolchains//:all")
 
@@ -347,3 +332,32 @@ dart_pub.from_lock(
     lock = "//flutter/ext/go_router:pubspec.lock",
 )
 use_repo(dart_pub, "rules_flutter_go_router_builder")
+
+# One lock with a `path` package, read by both fetchers, for
+# `//flutter/tests:package_identity_test`: each builds the package from the
+# same directory, and a program reaching both copies takes them for one.
+two_fetchers_flutter_pub = use_extension("//flutter/pub:extensions.bzl", "pub", dev_dependency = True)
+two_fetchers_flutter_pub.from_lock(
+    name = "two_fetchers_flutter",
+    build_from_pubspec = ["two_fetchers_local"],
+    lock = "//flutter/tests/two_fetchers_fixture/lock:pubspec.lock",
+)
+use_repo(two_fetchers_flutter_pub, "two_fetchers_flutter")
+
+two_fetchers_dart_pub = use_extension("@rules_dart//dart/pub:extensions.bzl", "pub", dev_dependency = True)
+two_fetchers_dart_pub.from_lock(
+    name = "rules_flutter_two_fetchers",
+    build_from_pubspec = ["two_fetchers_local"],
+    lock = "//flutter/tests/two_fetchers_fixture/lock:pubspec.lock",
+)
+use_repo(two_fetchers_dart_pub, "rules_flutter_two_fetchers")
+
+# A `path` plugin built from a podspec that depends on a pod, for
+# `//flutter/tests:unbuilt_native_code_test`.
+podspec_fixture_pub = use_extension("//flutter/pub:extensions.bzl", "pub", dev_dependency = True)
+podspec_fixture_pub.from_lock(
+    name = "rules_flutter_podspec_fixture",
+    build_from_pubspec = ["podspec_plugin"],
+    lock = "//flutter/tests/podspec_fixture/lock:pubspec.lock",
+)
+use_repo(podspec_fixture_pub, "rules_flutter_podspec_fixture")

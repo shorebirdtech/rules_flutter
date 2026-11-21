@@ -33,6 +33,13 @@
         }
       ]
     },
+    "lib/shaders/ink.frag": {
+      "variants": [
+        {
+          "asset": "lib/shaders/ink.frag"
+        }
+      ]
+    },
     "shaders/ink.frag": {
       "variants": [
         {

@@ -1,4 +1,5 @@
-/// Reading the headers of the ELF shared objects an Android APK ships.
+/// Reading the headers of ELF shared objects: those an Android APK ships, and
+/// those a Linux bundle carries.
 library;
 
 import 'dart:io';
@@ -115,6 +116,18 @@ class ElfImage {
   /// section headers.
   List<String> sectionNames() => [for (final s in _sections()) s.name];
 
+  /// What a library stripped as a Gradle build strips it
+  /// (`llvm-strip --strip-unneeded`) would not have, or null if it has none
+  /// of it: a symbol table (`.symtab`) or debug info (`.debug_*`). Its
+  /// dynamic symbol table, which the loader reads, it keeps.
+  String? unstrippedSections() {
+    final kept = [
+      for (final name in sectionNames())
+        if (name == '.symtab' || name.startsWith('.debug_')) name,
+    ];
+    return kept.isEmpty ? null : 'it has ${kept.join(', ')}';
+  }
+
   /// The API level the file was built against, from its `.note.android.ident`
   /// section (what clang writes for a target such as
   /// `aarch64-linux-android24`), or null if the file has no such note.
@@ -135,6 +148,44 @@ class ElfImage {
       return _data.getUint32(descOffset, Endian.little);
     }
     return null;
+  }
+
+  /// The libraries a little-endian ELF file links (its `DT_NEEDED`, in
+  /// order) and its `DT_RUNPATH`, from its `.dynamic` and `.dynstr`
+  /// sections; null when it has neither.
+  ({List<String> needed, String? runpath})? dynamicNames() {
+    final sections = {for (final s in _sections()) s.name: s};
+    final dynamic = sections['.dynamic'];
+    final strings = sections['.dynstr'];
+    if (dynamic == null || strings == null) return null;
+    final is64 = bytes[4] == 2;
+    final entrySize = is64 ? 16 : 8;
+    int word(int offset) => is64
+        ? _data.getUint64(offset, Endian.little)
+        : _data.getUint32(offset, Endian.little);
+    String string(int offset) {
+      final start = strings.offset + offset;
+      var end = start;
+      while (bytes[end] != 0) {
+        end++;
+      }
+      return String.fromCharCodes(bytes, start, end);
+    }
+
+    final needed = <String>[];
+    String? runpath;
+    for (
+      var at = dynamic.offset;
+      at + entrySize <= dynamic.offset + dynamic.size;
+      at += entrySize
+    ) {
+      final tag = word(at);
+      final value = word(at + entrySize ~/ 2);
+      if (tag == 0) break; // DT_NULL
+      if (tag == 1) needed.add(string(value)); // DT_NEEDED
+      if (tag == 29) runpath = string(value); // DT_RUNPATH
+    }
+    return (needed: needed, runpath: runpath);
   }
 
   List<({String name, int offset, int size})> _sections() {

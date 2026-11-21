@@ -8,8 +8,9 @@ own static state. Over `//flutter/tests/shared_code_asset_fixture`.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartPackageInfo")
-load("@rules_dart//dart:utils.bzl", "PROGRAM_ASSETS_TOOLCHAINS", "program_assets_attrs")
+load("@rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
+load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo", "DartPackageInfo", "DartPackageMetadataInfo")
+load("@rules_dart//dart:utils.bzl", "PROGRAM_ASSETS_TOOLCHAINS", "package_info_from_metadata", "program_assets_attrs")
 load("//flutter:native_hot_patch.bzl", "HOT_PATCH_OUTPUT_GROUP", "flutter_native_hot_patch_aspect")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:exec_groups.bzl", "PORTABLE_EXEC_GROUPS")
@@ -196,12 +197,12 @@ _test_layout_test = analysistest.make(_test_layout_impl)
 # -- Resolution itself ---------------------------------------------------------
 
 def _fake_package_impl(ctx):
-    pkg = DartPackageInfo(
-        label = ctx.label,
-        package_name = ctx.attr.package_name,
-        package_root = "%s/%s" % (ctx.label.package, ctx.label.name),
-        language_version = "",
-        code_assets = ctx.attr.code_assets,
+    # Rooted apart from the declaration, as each pub hub roots its copy of a
+    # package in a repository of its own.
+    pkg = package_info_from_metadata(
+        ctx.label,
+        ctx.attr.package[DartPackageMetadataInfo],
+        "%s/%s" % (ctx.label.package, ctx.label.name),
     )
     return [DartInfo(
         packages = (pkg,),
@@ -213,10 +214,9 @@ def _fake_package_impl(ctx):
 fake_package = rule(
     implementation = _fake_package_impl,
     attrs = {
-        "code_assets": attr.label_list(providers = [DartCodeAssetInfo]),
-        "package_name": attr.string(mandatory = True),
+        "package": attr.label(providers = [DartPackageMetadataInfo], mandatory = True),
     },
-    doc = "A Dart package record carrying code assets, each the package's own.",
+    doc = "A pub package record, rooted at the target, stating what its `package` declares.",
 )
 
 def _fake_cycle_impl(ctx):
@@ -314,13 +314,68 @@ _builds_test = analysistest.make(_builds_impl)
 _builds_debug_test = analysistest.make(_builds_impl, config_settings = _DBG)
 
 _REFUSES_ATTRS = {"message": attr.string()}
-_refuses_ios_arm64_test = analysistest.make(_refuses_impl, attrs = _REFUSES_ATTRS, expect_failure = True, config_settings = _platform("ios_arm64"))
+
+def _renamed_framework_impl(ctx):
+    # `combined.dylib` and `libcombined.dylib` would both be `combined`;
+    # flutter_tools' `frameworkUri` gives the second, in file-name order,
+    # `combined1`, and the manifest names each by its framework.
+    env = analysistest.begin(ctx)
+    writes = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterNativeAssetsManifest"]
+    asserts.equals(env, 1, len(writes), "one manifest action")
+    if len(writes) != 1:
+        return analysistest.end(env)
+    argv = writes[0].argv
+    frameworks = {argv[i + 1]: argv[i + 2] for i in range(len(argv)) if argv[i] == "--framework"}
+    asserts.equals(env, {"combined.dylib": "combined", "libcombined.dylib": "combined1"}, frameworks)
+    return analysistest.end(env)
+
+_renamed_framework_ios_arm64_test = analysistest.make(_renamed_framework_impl, config_settings = _platform("ios_arm64"))
+
+def _renamed_framework_bundle_impl(ctx):
+    # The frameworks the iOS app embeds, and the names it records for the dev
+    # tool, are the manifest's.
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    binaries = sorted([
+        "/".join(f.path.split("/")[-2:])
+        for f in target[DefaultInfo].files.to_list()
+        if f.basename != "Info.plist"
+    ])
+    asserts.equals(env, ["combined.framework/combined", "combined1.framework/combined1"], binaries)
+    names = written_json(env, "rules_flutter_apple_frameworks.json")
+    asserts.equals(env, {"combined.dylib": "combined", "libcombined.dylib": "combined1"}, names)
+    return analysistest.end(env)
+
+_renamed_framework_bundle_ios_arm64_test = analysistest.make(_renamed_framework_bundle_impl, config_settings = _platform("ios_arm64"))
+
+def _renamed_framework_dsym_impl(ctx):
+    # Each framework's dSYM is named for the framework, as `flutter build ios`
+    # names it, so a crash in `combined1` finds `combined1.framework.dSYM`.
+    # They reach rules_apple through the action that collects those that
+    # ship, whose inputs they are.
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    dsyms = target[AppleFrameworkImportInfo].dsym_imports.to_list()
+    collect = [a for a in analysistest.target_actions(env) if a.outputs.to_list() == dsyms]
+    asserts.equals(env, 1, len(collect), "one action makes the dSYMs rules_apple hands on")
+    dwarf = sorted([
+        "/".join([f.path.split("/")[-5], f.basename])
+        for a in collect
+        for f in a.inputs.to_list()
+        if "/Resources/DWARF/" in f.path
+    ])
+    asserts.equals(env, ["combined.framework.dSYM/combined", "combined1.framework.dSYM/combined1"], dwarf)
+    return analysistest.end(env)
+
+_renamed_framework_dsym_ios_arm64_test = analysistest.make(
+    _renamed_framework_dsym_impl,
+    config_settings = _platform("ios_arm64") | {"//command_line_option:apple_generate_dsym": True},
+)
 _refuses_linux_x64_test = analysistest.make(_refuses_impl, attrs = _REFUSES_ATTRS, expect_failure = True, config_settings = _platform("linux_x64") | _DBG)
 _refuses_macos_arm64_test = analysistest.make(_refuses_impl, attrs = _REFUSES_ATTRS, expect_failure = True, config_settings = _platform("macos_arm64"))
 _builds_macos_arm64_test = analysistest.make(_builds_impl, config_settings = _platform("macos_arm64"))
 
 _REFUSES_ON = {
-    "ios_arm64": _refuses_ios_arm64_test,
     "linux_x64": _refuses_linux_x64_test,
     "macos_arm64": _refuses_macos_arm64_test,
 }
@@ -427,18 +482,13 @@ def shared_code_asset_test_suite(name):
 
     # Two packages claiming one id with different libraries is refused, as in
     # rules_dart, unless the target names the one to use.
-    fake_package(
-        name = name + "_claims_a_own",
-        package_name = "shared_a",
-        code_assets = [_FIXTURE + "a_own"],
-        tags = ["manual"],
-    )
-    fake_package(
-        name = name + "_claims_a_combined",
-        package_name = "shared_a",
-        code_assets = [_FIXTURE + "a_combined_asset"],
-        tags = ["manual"],
-    )
+    # Two pub hubs' copies of one package, fetched alike.
+    for claim in ["own", "combined"]:
+        fake_package(
+            name = "%s_claims_a_%s" % (name, claim),
+            package = "@fetched_fixtures//shared_code_asset/claims:" + claim,
+            tags = ["manual"],
+        )
     claims = [name + "_claims_a_own", name + "_claims_a_combined"]
     resolve_probe(
         name = name + "_conflict",
@@ -510,12 +560,15 @@ def shared_code_asset_test_suite(name):
     tests.append(name + "_two_configurations_refused")
 
     # The one check that no two libraries an application could bundle land on
-    # one path, over every candidate whichever ships: by file name on every
-    # platform, and by framework name on iOS.
+    # one path, over every candidate whichever ships: by file name, on every
+    # platform, as flutter_tools refuses two code assets of one file name,
+    # and with case ignored, as a macOS or Windows machine that writes or
+    # reads the bundle ignores it.
     for app, platform, message in [
         ("app_same_file_name", "macos_arm64", "two native libraries would both be bundled as `libcombined.dylib`"),
         ("app_same_file_name", "linux_x64", "two native libraries would both be bundled as `libcombined.so`"),
-        ("app_same_framework_name", "ios_arm64", "would both be bundled as the framework `combined.framework`"),
+        ("app_other_case_file_name", "macos_arm64", "`libcombined.dylib` and `libCombined.dylib`, which differ only in case"),
+        ("app_other_case_file_name", "linux_x64", "`libcombined.so` and `libCombined.so`, which differ only in case"),
     ]:
         _REFUSES_ON[platform](
             name = "%s_%s_%s_refused" % (name, app, platform),
@@ -524,6 +577,27 @@ def shared_code_asset_test_suite(name):
             target_compatible_with = ["@platforms//os:macos"],
         )
         tests.append("%s_%s_%s_refused" % (name, app, platform))
+
+    # On iOS, two file names whose framework names collide ship, the second
+    # renamed, as flutter_tools renames it.
+    _renamed_framework_ios_arm64_test(
+        name = name + "_framework_renamed_on_ios",
+        target_under_test = _FIXTURE + "app_same_framework_name",
+        target_compatible_with = ["@platforms//os:macos"],
+    )
+    tests.append(name + "_framework_renamed_on_ios")
+    _renamed_framework_bundle_ios_arm64_test(
+        name = name + "_framework_renamed_in_the_ios_bundle",
+        target_under_test = _FIXTURE + "app_same_framework_name_ios_frameworks",
+        target_compatible_with = ["@platforms//os:macos"],
+    )
+    tests.append(name + "_framework_renamed_in_the_ios_bundle")
+    _renamed_framework_dsym_ios_arm64_test(
+        name = name + "_framework_renamed_in_its_dsym",
+        target_under_test = _FIXTURE + "app_same_framework_name_ios_frameworks",
+        target_compatible_with = ["@platforms//os:macos"],
+    )
+    tests.append(name + "_framework_renamed_in_its_dsym")
     _BUILDS_ON["macos_arm64"](
         name = name + "_framework_names_matter_on_ios_only",
         target_under_test = _FIXTURE + "app_same_framework_name",

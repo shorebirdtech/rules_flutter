@@ -33,13 +33,16 @@ behaviour exactly.
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo")
 load("@rules_dart//dart:utils.bzl", "non_dart_transition")
 load("//flutter:providers.bzl", "FlutterNativeLibraryInfo")
+load("//flutter/private:constants.bzl", "SHARED_LIBRARY_EXTENSIONS")
+
+visibility("//flutter/...")
 
 # A wasm module belongs here for the same reason a dylib does: the page
 # instantiates it once and a hot reload cannot replace the instance, so the
 # bindings about to be injected have to be ones that instance can serve. What
 # differs is only how it reaches the app — served by URL rather than bundled and
 # `dlopen`ed — and that difference is the web rule's, not this one's.
-_NATIVE_LIBRARY_EXTENSIONS = ("so", "dylib", "dll", "wasm")
+_NATIVE_LIBRARY_EXTENSIONS = SHARED_LIBRARY_EXTENSIONS + ("wasm",)
 
 # The one file in a `hot_patch` target the dev tool looks for by name. Everything
 # else that target builds rides along for the command the manifest names.

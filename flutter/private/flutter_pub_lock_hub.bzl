@@ -25,14 +25,36 @@ never run for the same hub. `flutter_pub.from_lock()` always invokes this one.
 `pub.pub()` (in non-Flutter modules) keeps using `pub_lock_hub`.
 """
 
+load("//flutter/private:apple_plugin_repo.bzl", "apple_repo")
 load("//flutter/private:flutter_pub_index.bzl", "ANDROID_MAVEN_REPO", "GOLDENS_REPO", "library_repo", "source_repo")
+
+visibility("//flutter/...")
+
+def _swift_requirements(ctx, sdk_packages, multi):
+    """The `swift_requirements.json` labels of the hub's Apple packages: a Flutter SDK package's those of the selected SDK."""
+    fixed = []
+    by_sdk = {sdk: [] for sdk in ctx.attr.sdk_prefixes}
+    for pkg in ctx.attr.apple_packages:
+        if multi and pkg in sdk_packages:
+            for sdk, prefix in ctx.attr.sdk_prefixes.items():
+                by_sdk[sdk].append("@{}//:swift_requirements.json".format(apple_repo(pkg, prefix)))
+        else:
+            fixed.append("@{}//:swift_requirements.json".format(apple_repo(pkg)))
+    if not [labels for labels in by_sdk.values() if labels]:
+        return repr(fixed)
+    branches = "".join([
+        '        "@flutter_toolchains//:sdk_{}": {},\n'.format(sdk, repr(labels))
+        for sdk, labels in sorted(by_sdk.items())
+    ])
+    return "{} + select({{\n{}    }})".format(repr(fixed), branches)
 
 def _flutter_pub_lock_hub_impl(ctx):
     built = {pkg: True for pkg in ctx.attr.built_packages}
     sdk_packages = {pkg: True for pkg in ctx.attr.sdk_packages}
+    multi = len({p: True for p in ctx.attr.sdk_prefixes.values()}) > 1
     aliases = []
     for pkg in ctx.attr.packages:
-        if pkg in sdk_packages and len({p: True for p in ctx.attr.sdk_prefixes.values()}) > 1:
+        if pkg in sdk_packages and multi:
             # A Flutter SDK package is the package of the selected SDK's
             # framework: `--@rules_flutter//flutter:sdk` chooses among them.
             branches = "".join([
@@ -100,33 +122,33 @@ alias(
 """.format(maven = ANDROID_MAVEN_REPO),
     )
 
-    # `bazel run @<hub>//swift:resolve`: the lock's Apple plugins' Swift
-    # package dependencies, resolved into the hub's `Package.resolved`.
+    # `bazel run @<hub>//swift:packages`: what the root module declares for
+    # the lock's Apple plugins' Swift package dependencies.
     resolved = ctx.attr.swift_package_resolved
     ctx.file(
         "swift/BUILD.bazel",
         """\
-load("@rules_flutter//flutter/private:flutter_swift_resolve.bzl", "flutter_swift_resolve")
+load("@rules_flutter//flutter/private:generated_repos.bzl", "flutter_swift_packages_report")
 
-flutter_swift_resolve(
-    name = "resolve",
+flutter_swift_packages_report(
+    name = "packages",
     hub = {hub},
-    manifests = {manifests},
-    output = {output},
+    requirements = {requirements},
+    resolved = {resolved},
     visibility = ["//visibility:public"],
 )
 """.format(
             hub = repr(ctx.attr.hub_name),
-            manifests = repr(["@{}//:swift_manifests".format(r) for r in ctx.attr.apple_repos]),
-            output = repr(_workspace_path(resolved) if resolved else ""),
+            requirements = _swift_requirements(ctx, sdk_packages, multi),
+            resolved = repr(_workspace_path(resolved) if resolved else ""),
         ),
     )
     return ctx.repo_metadata(reproducible = True)
 
 def _workspace_path(label):
-    """`label`'s path in the main repository, or "" for a label of another."""
+    """`label`'s path in the main repository, or its label when it is another repository's."""
     if label.repo_name:
-        return ""
+        return str(label)
     return (label.package + "/" + label.name) if label.package else label.name
 
 flutter_pub_lock_hub = repository_rule(
@@ -148,12 +170,13 @@ flutter_pub_lock_hub = repository_rule(
             doc = "For each declared SDK, the prefix of the repositories that hold its framework's SDK packages.",
             default = {},
         ),
-        "apple_repos": attr.string_list(
-            doc = "The Apple repositories of the built packages, whose Swift package manifests `swift:resolve` resolves.",
+        "apple_packages": attr.string_list(
+            doc = "The packages of `packages` that have an Apple repository, whose Swift package requirements " +
+                  "`swift:packages` reports: a Flutter SDK package's those of the selected SDK's framework.",
             default = [],
         ),
         "swift_package_resolved": attr.label(
-            doc = "The `Package.resolved` `swift:resolve` writes: the tag's, or the one beside its lock.",
+            doc = "The tag's `swift_package_resolved`, whose pins `swift:packages` checks.",
         ),
         "built_packages": attr.string_list(
             doc = "The built ones among `packages` (hosted, git, and Flutter SDK packages built from the Flutter source): their alias is their library repository's, the others' their one repository's.",

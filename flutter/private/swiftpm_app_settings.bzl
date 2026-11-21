@@ -32,22 +32,40 @@ An Apple app's `flutter_apple_plugins_aggregator` depends on that list through
 Info.plist and its `swift_package_environment`, and links the library of each
 marker in the app's graph from there. Apps with the same Info.plist target and
 environment share one build of each such plugin; another app gets its own.
+
+The app's runner is built in that configuration too (`flutter_apple_app_runner`),
+and with it every plugin the app links: a Swift compile that imports the
+engine's module, or under explicit Clang modules an SDK module, from two
+configurations fails. The app macros build the whole bundle there
+(`flutter_apple_app`), so that the bundle and the runner reach the app's
+`flutter_application` in one configuration; the runner's own transition is
+then the configuration it is already in. In a build with no such plugin the
+transition changes nothing, and apps share their plugins' builds.
+
+Add-to-app's plugin xcframeworks (`flutter_apple_plugin_xcframeworks.bzl`)
+depend on the list in each slice's configuration, the one the module is built
+in, and package the library of each marker from there. Each slice's
+transition sets the two build settings from the module's `info_plist` and
+`swift_package_environment` (`apple_add_to_app.bzl`), as an app's does.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@build_bazel_rules_apple//apple:providers.bzl", "AppleResourceInfo")
+load("@rules_apple//apple:providers.bzl", "AppleResourceInfo")
 
 # rules_apple has no public aspect that collects a library's resources, so
 # this is its internal one, as in flutter_plugin.bzl.
 # buildifier: disable=bzl-visibility
-load("@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl", "apple_resource_aspect")
-load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftInfo", "swift_clang_module_aspect")
+load("@rules_apple//apple/internal/aspects:resource_aspect.bzl", "apple_resource_aspect")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING")
+load("@rules_swift//swift:swift.bzl", "SwiftInfo", "swift_clang_module_aspect")
 load(":apple_xcode.bzl", "XCODE_TOOL_ATTRS", "XCODE_TOOL_FRAGMENTS", "XCODE_TOOL_TOOLCHAINS", "run_xcode_tool")
 load(":exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
+load(":flutter_apple_plugin_library.bzl", "FlutterAppleModuleHeadersInfo", "module_headers_aspect")
 load(":unbuilt_native_code.bzl", "FlutterUnbuiltNativeCodeInfo")
+
+visibility("//flutter/...")
 
 # The build settings an app sets for the plugins it builds this way.
 _INFO_PLIST = Label("//flutter/private:swiftpm_app_info_plist")
@@ -77,16 +95,100 @@ def swift_package_environment_problems(environment):
             problems.append("`{}` is not an environment variable's name".format(name))
     return problems
 
-def _swiftpm_app_transition_impl(_settings, attr):
+# Whether the build has any such library (`flutter_apple_app_settings_repo`).
+SWIFTPM_APP_LIBRARIES_ANY = Label("@flutter_pub_apple_app_settings//:any")
+
+# What a transition into an app's configuration reads and sets
+# (`swiftpm_app_settings`).
+SWIFTPM_APP_SETTINGS_INPUTS = [str(SWIFTPM_APP_LIBRARIES_ANY), str(_INFO_PLIST), str(_ENVIRONMENT)]
+SWIFTPM_APP_SETTINGS_OUTPUTS = [str(_INFO_PLIST), str(_ENVIRONMENT)]
+
+def swiftpm_app_settings(settings, attr):
+    """The build settings of the app's configuration, for a transition.
+
+    Args:
+        settings: The transition's input settings, `SWIFTPM_APP_SETTINGS_INPUTS` among them.
+        attr: The rule's attributes: `info_plist` (a label, or its string)
+            and `swift_package_environment`.
+
+    Returns:
+        A dict of `SWIFTPM_APP_SETTINGS_OUTPUTS`.
+    """
+
+    # With no plugin that reads them, the settings change nothing: the app's
+    # native code stays in the configuration it is in, shared with other apps.
+    if not settings[str(SWIFTPM_APP_LIBRARIES_ANY)]:
+        return {
+            str(_INFO_PLIST): settings[str(_INFO_PLIST)],
+            str(_ENVIRONMENT): settings[str(_ENVIRONMENT)],
+        }
     return {
         str(_INFO_PLIST): str(attr.info_plist or _NO_APP_INFO_PLIST),
         str(_ENVIRONMENT): sorted(["%s=%s" % (k, v) for k, v in attr.swift_package_environment.items()]),
     }
 
 swiftpm_app_transition = transition(
-    implementation = _swiftpm_app_transition_impl,
-    inputs = [],
-    outputs = [str(_INFO_PLIST), str(_ENVIRONMENT)],
+    implementation = swiftpm_app_settings,
+    inputs = SWIFTPM_APP_SETTINGS_INPUTS,
+    outputs = SWIFTPM_APP_SETTINGS_OUTPUTS,
+)
+
+def check_swift_package_environment(ctx):
+    """Fails the build of `ctx`'s target when its `swift_package_environment` is wrong.
+
+    Args:
+        ctx: The rule context, with a `swift_package_environment` attribute.
+    """
+    problems = swift_package_environment_problems(ctx.attr.swift_package_environment)
+    if problems:
+        fail("{}: `swift_package_environment` is the environment of the plugins' Package.swift:\n    {}".format(
+            ctx.label,
+            "\n    ".join(problems),
+        ))
+
+def _flutter_apple_app_runner_impl(ctx):
+    check_swift_package_environment(ctx)
+    runner = ctx.attr.deps[0]
+    providers = [DefaultInfo(
+        files = runner[DefaultInfo].files,
+        runfiles = runner[DefaultInfo].default_runfiles,
+    )]
+    for provider in (CcInfo, SwiftInfo, OutputGroupInfo, InstrumentedFilesInfo):
+        if provider in runner:
+            providers.append(runner[provider])
+    return providers
+
+flutter_apple_app_runner = rule(
+    implementation = _flutter_apple_app_runner_impl,
+    attrs = {
+        "deps": attr.label_list(
+            # Named `deps`, as the app's own attribute is, so that rules_apple's
+            # aspects (resources, Swift usage) walk through to the runner.
+            cfg = swiftpm_app_transition,
+            mandatory = True,
+            providers = [CcInfo],
+            doc = "The runner: one `swift_library`, built in the app's configuration.",
+        ),
+        "info_plist": attr.label(
+            allow_single_file = [".plist"],
+            doc = "As the app's `flutter_apple_plugins_aggregator`'s.",
+        ),
+        "swift_package_environment": attr.string_dict(
+            doc = "As the app's `flutter_apple_plugins_aggregator`'s.",
+        ),
+    },
+    doc = """The app's runner, built in the configuration that `swiftpm_app_transition` gives the app.
+
+The plugins whose defines come from the app are built in that
+configuration, and so is everything they import: the engine's module and,
+under explicit Clang modules, the SDK's. The runner imports the same modules,
+and a compile that sees one module from two configurations fails ("signature
+mismatch"). So the runner, and with it the aggregator and every plugin the
+app links, is built there too, and the app's `deps` name this target in its
+place. The aggregator's own transition, with the same settings, is then the
+configuration it is already in, and so is this one's under an app macro,
+which builds the whole bundle there (`flutter_apple_app`).
+""",
 )
 
 FlutterSwiftPMAppLibraryInfo = provider(
@@ -113,7 +215,7 @@ flutter_swiftpm_app_library = rule(
 FlutterSwiftPMAppLibrariesInfo = provider(
     doc = "The build's plugin libraries whose defines come from the app, built for one app.",
     fields = {
-        "libraries": "dict of `str(Label)` to a struct with `cc_info`, `swift_info`, `resource_info` and `unbuilt_native_code` (each None when absent).",
+        "libraries": "dict of `str(Label)` to a struct with `cc_info`, `swift_info`, `module_headers`, `resource_info` and `unbuilt_native_code` (each None when absent).",
     },
 )
 
@@ -124,6 +226,7 @@ def _flutter_swiftpm_app_libraries_impl(ctx):
         libraries[str(dep.label)] = struct(
             cc_info = dep[CcInfo] if CcInfo in dep else None,
             swift_info = dep[SwiftInfo] if SwiftInfo in dep else None,
+            module_headers = dep[FlutterAppleModuleHeadersInfo].headers if FlutterAppleModuleHeadersInfo in dep else None,
             resource_info = dep[AppleResourceInfo] if AppleResourceInfo in dep else None,
             unbuilt_native_code = unbuilt.message if unbuilt else None,
         )
@@ -134,12 +237,42 @@ flutter_swiftpm_app_libraries = rule(
     attrs = {
         "deps": attr.label_list(
             doc = "The libraries, each `flutter_apple_plugin_library` or the stand-in that fails its build.",
-            # And the module of an Objective-C library as Swift sees it.
-            aspects = [apple_resource_aspect, swift_clang_module_aspect],
+            # And the module of an Objective-C library as Swift sees it, and its
+            # public headers, which an add-to-app framework holds.
+            aspects = [apple_resource_aspect, module_headers_aspect, swift_clang_module_aspect],
         ),
     },
     doc = "The build's plugin libraries whose defines come from the app: `@flutter_pub_apple_app_settings//:libraries`.",
 )
+
+def app_library_entry(entry, libraries):
+    """An `apple_plugin_libraries` entry, with its library built for the app if a marker names it.
+
+    Args:
+        entry: The entry, from `FlutterApplicationInfo.apple_plugin_libraries`.
+        libraries: A `FlutterSwiftPMAppLibrariesInfo`, built in the app's
+            configuration.
+
+    Returns:
+        `entry`, or the entry of the library built for the app.
+    """
+    library = getattr(entry, "app_library", None)
+    if not library:
+        return entry
+    found = libraries.libraries.get(str(library))
+    if not found:
+        fail("{} is not in @flutter_pub_apple_app_settings//:libraries, the build's plugin libraries whose Package.swift decides its defines from the app".format(library))
+    return struct(
+        platform = entry.platform,
+        label = library,
+        cc_info = found.cc_info,
+        swift_info = found.swift_info,
+        module_headers = found.module_headers,
+        resource_info = found.resource_info,
+        unbuilt_native_code = found.unbuilt_native_code,
+        package = entry.package,
+        privacy_manifests = getattr(entry, "privacy_manifests", ()),
+    )
 
 def defines_header_name(name):
     """The header a `flutter_swiftpm_app_settings` named `name` writes, for `-include`."""

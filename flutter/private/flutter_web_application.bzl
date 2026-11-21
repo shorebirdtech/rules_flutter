@@ -33,7 +33,7 @@ staging target each compiler's inputs come from, over the application.
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:utils.bzl", "PATH_MAPPING", "PROGRAM_ASSETS_TOOLCHAINS", "generate_dev_package_config", "import_check_output_groups", "program_assets_attrs")
-load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
+load("//flutter:providers.bzl", "FlutterNativeLibraryInfo", "FlutterSdkRecordInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
     "APP_SCHEME",
@@ -57,11 +57,10 @@ load(
     "merge_dart_defines",
     "resolve_dev_generated_sources",
     "shader_sources",
-    "shakes_icons_from_recorded_uses",
+    "shakes_icons",
 )
 load("//flutter/private:dev_config.bzl", "dev_config_file", "dev_search_roots", "dev_source_dir", "write_dev_config")
 load("//flutter/private:exec_groups.bzl", "PORTABLE", "PORTABLE_EXEC_GROUPS", "portable_tools")
-load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
     "//flutter/private:flutter_web_branch.bzl",
     "BRANCH_COMPILER",
@@ -74,12 +73,12 @@ load(
     "//flutter/private:flutter_web_compile.bzl",
     "flutter_dart2js_action",
     "flutter_dart2wasm_action",
-    "flutter_web_icon_kernel_action",
     "web_build_mode",
 )
 load("//flutter/private:link_hooks.bzl", "link_hooks_plan", "program_assets")
 load("//flutter/private:path_mapping.bzl", "file_ref", "json_config_args")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
+load("//flutter/private:plugin_resolution.bzl", "application_plugins", "plugin_warnings_validation")
 load("//flutter/private:program_analysis.bzl", "program_analyzable_info")
 load("//flutter/private:sdk_defines.bzl", "program_version_dart_defines")
 load(
@@ -102,6 +101,8 @@ load(
     "SERVICE_WORKER_VERSION",
     "service_worker_load_args",
 )
+
+visibility("//flutter/...")
 
 # The glyph the engine measures an icon font's height with.
 _SPACE_CODE_POINT = 32
@@ -261,6 +262,8 @@ _RESERVED_DST_REMEDY = {
                             "substitution pass and picks up this target's build config.",
     "flutter.js": "this is the engine loader, taken from the Flutter web SDK so that it " +
                   "matches the engine the app was compiled against. It cannot be replaced.",
+    "flutter.js.map": "this is the engine loader's source map, taken from the Flutter web SDK " +
+                      "beside flutter.js. It cannot be replaced.",
     "flutter_service_worker.js": "set `pwa = False` to stop the rule shipping its own worker, " +
                                  "and yours will be the only one at this name.",
 }
@@ -515,19 +518,18 @@ def _flutter_web_bundle_impl(ctx):
     # the primary compile records, as `flutter build web` does: its link step
     # reads dart2wasm's uses, and dart2js's when there is no WebAssembly
     # build. The hooks' assets are the bundle's, shared by both builds. A
-    # debug build links nothing and ships every declared data asset.
+    # debug build links nothing and ships every declared data asset. Icon
+    # tree shaking reads the `IconData` uses of every compile, as `flutter
+    # build web` has it, so with it the fallback dart2js records its uses too.
     link_hooks = link_hooks_plan(program, primary.deps, links = not is_debug)
+    shakes = shakes_icons(program, tools, is_debug)
+    recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if link_hooks.runs or shakes else None
+    icon_uses = [recorded_uses] if shakes else []
 
-    # Icon tree shaking reads the same file from Flutter 3.50 on, where there
-    # is no const_finder to scan a kernel with; flutter_tools reads the primary
-    # compile's uses for it too.
-    shake_from_uses = shakes_icons_from_recorded_uses(tools, program.tree_shake_icons, is_debug)
-    recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if link_hooks.runs or shake_from_uses else None
-
-    # Merged once for all compile actions below (dart2wasm, dart2js, icon
-    # tree-shake kernel) and the dev-config emission: the application's
-    # defines and the flavor's, the app's version and the SDK's. There is no
-    # `build_info` on web to keep the flavor out of.
+    # Merged once for all compile actions below (dart2wasm, dart2js) and the
+    # dev-config emission: the application's defines and the flavor's, the
+    # app's version and the SDK's. There is no `build_info` on web to keep the
+    # flavor out of.
     user_defines = merge_dart_defines(ctx, program.defines) + flavor_dart_defines(program.flavor) + program_version_dart_defines(
         tools.sdk_defines,
         program.build_name,
@@ -574,19 +576,19 @@ def _flutter_web_bundle_impl(ctx):
     # Flutter web ALWAYS needs this wrapper to properly initialize the engine
     # (create the implicit view, set up the platform dispatcher, etc.)
     # before calling the user's main(). This matches `flutter build web`.
-    all_dep_plugins = []
-    for dep in primary.deps:
-        if FlutterInfo in dep:
-            all_dep_plugins.extend(dep[FlutterInfo].plugins)
-    plugins = dedup_plugins(all_dep_plugins)
+    # One implementation of each federated plugin, the web's among them.
+    resolution = application_plugins(ctx.label, primary.deps)
+    plugins = resolution.native
     registrant = generate_dart_plugin_registrant(ctx, plugins, target_platform = "web")
 
     wrapper = ctx.actions.declare_file(ctx.label.name + "_wrapper_main.dart")
     wrapper_depth = len(wrapper.dirname.split("/"))
 
-    # AI-agent service extensions. In debug they are compiled into the bundle,
-    # as the native rules compile them into their kernel, and served by the
-    # bridge: dart2wasm and dart2js leave `registerExtension` with no VM
+    # The dev-tool support's service extensions. In debug they are compiled
+    # into the bundle, as the native rules compile them into their kernel,
+    # whatever `--@rules_flutter//flutter:dev_tool_support` says: the dev loop
+    # a web debug bundle is for serves them through the page. They are served
+    # by the bridge: dart2wasm and dart2js leave `registerExtension` with no VM
     # service behind it, so the bridge publishes the handlers on the page for
     # the dev tool to call over the browser's DevTools protocol. The DDC dev
     # loop imports the same staged file from its own synthetic entrypoint (see
@@ -595,7 +597,7 @@ def _flutter_web_bundle_impl(ctx):
     staged_agent_bridge = None
     if is_debug:
         staged_agent = ctx.actions.declare_file(ctx.label.name + ".agent_extensions.dart")
-        ctx.actions.symlink(output = staged_agent, target_file = ctx.file._agent_extensions_src)
+        ctx.actions.symlink(output = staged_agent, target_file = ctx.file._dev_tool_support_src)
         staged_agent_bridge = ctx.actions.declare_file(ctx.label.name + ".agent_web_bridge.dart")
         ctx.actions.symlink(output = staged_agent_bridge, target_file = ctx.file._agent_web_bridge_src)
 
@@ -645,7 +647,12 @@ def _flutter_web_bundle_impl(ctx):
         [f for f in [main] + program.srcs if f not in unchecked],
         primary.packages[-1],
         primary.deps,
-        generated = [f for f in unchecked if f.extension == "dart"] + [f for f in extra_wrapper_srcs if f != main],
+        # The user's `main`, not the wrapper: the wrapper, among `generated`,
+        # starts the program too, and `main` is the file `srcs` must hang from.
+        main = main,
+        # A variant's application's sources start the program for the reach
+        # check too, as `flutter_compile_kernel` passes them.
+        generated = [f for f in unchecked + program.entry_srcs if f.extension == "dart"] + [f for f in extra_wrapper_srcs if f != main],
     )
 
     # What a compile of each branch reads: the branch's co-located sources and
@@ -659,6 +666,7 @@ def _flutter_web_bundle_impl(ctx):
     # dart2js outputs to a tree artifact (directory) to support deferred loading:
     # dart2js may produce main.dart.js + *.part.js files for deferred imports.
     compile_outputs = []  # Files (wasm, mjs, wasm.map)
+    output_support_js = None  # dart2wasm's check of the browser
     compile_copies = []  # Bundle copy entries for compile_outputs
     dart2js_dirs = []  # Tree artifacts from dart2js
 
@@ -676,6 +684,7 @@ def _flutter_web_bundle_impl(ctx):
         # shipped name must be the same for the browser to find the map.
         output_wasm = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.wasm")
         output_mjs = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.mjs")
+        output_support_js = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.support.js")
         output_wasm_map = None
         if ctx.attr.source_maps:
             output_wasm_map = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.wasm.map")
@@ -699,6 +708,7 @@ def _flutter_web_bundle_impl(ctx):
             renderer = renderer,
             optimizing_cpus = ctx.attr._wasm_opt_cpus[BuildSettingInfo].value,
             recorded_uses = recorded_uses,
+            output_support_js = output_support_js,
         )
 
         builds = [_wasm_build(renderer)]
@@ -724,7 +734,18 @@ def _flutter_web_bundle_impl(ctx):
                 source_maps = ctx.attr.source_maps,
                 defines = user_defines,
                 renderer = "canvaskit",
+                write_resources = shakes,
             )
+            if shakes:
+                fallback_uses = ctx.actions.declare_file(ctx.label.name + "_dart2js_fallback.recorded_uses.json")
+                _extract_from_tree(
+                    ctx,
+                    tools,
+                    output_js_fallback_dir,
+                    "main.dart.js.resources.json",
+                    fallback_uses,
+                )
+                icon_uses.append(fallback_uses)
             dart2js_dirs = [output_js_fallback_dir]
             builds.append(_JS_BUILD)
         compile_outputs = [output_wasm, output_mjs]
@@ -773,42 +794,6 @@ def _flutter_web_bundle_impl(ctx):
     # Step 3: Shader compilation + asset bundle.
     compiled_shaders = flutter_compile_shaders(ctx, tools, "web", primary.deps, program)
 
-    # Icon tree shaking before Flutter 3.50: compile a kernel .dill for
-    # const_finder analysis (from 3.50 on the primary compile's recorded uses
-    # serve, see above).
-    # Web targets don't otherwise need a kernel (they use dart2wasm/dart2js),
-    # so we compile one specifically for const_finder to analyze IconData constants.
-    kernel_dill = None
-    if (program.tree_shake_icons and not is_debug and
-        tools.const_finder != None and tools.font_subset != None):
-        kernel_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.dill")
-
-        # The wrapper is the entrypoint the compilers get, so the scan reads
-        # the program that ships: the app, its plugin registrant, and the
-        # engine bootstrap. It reads the primary branch's program through that
-        # branch's own front end, so a program that differs by compiler is
-        # scanned as the build the bundle describes, and a front end is never
-        # handed code written for the other (a WebAssembly-only integer
-        # literal, say, which dart2js's front end refuses). An icon only the
-        # other compiler's variant uses is shaken out of the font;
-        # `tree_shake_icons = False` keeps every glyph.
-        front_end = branches[0]
-        flutter_web_icon_kernel_action(
-            ctx = ctx,
-            dart = tools.dart,
-            sdk_files = tools.sdk_files,
-            front_end = front_end,
-            platform_dill = ctx.file._dart2js_platform_dill if front_end == "dart2js" else ctx.file._dart2wasm_platform_dill,
-            main_dart = entrypoint,
-            srcs = compile_srcs[front_end],
-            package_config = primary.config_file,
-            output = kernel_dill,
-            mode = mode,
-            enable_experiments = ctx.attr.enable_experiments,
-            defines = user_defines,
-            renderer = renderer,
-        )
-
     linked = program_assets(
         ctx,
         program,
@@ -825,8 +810,7 @@ def _flutter_web_bundle_impl(ctx):
         primary.deps,
         "web",
         compiled_shaders,
-        kernel_dill = kernel_dill,
-        recorded_uses = recorded_uses,
+        recorded_uses = icon_uses,
         is_debug = is_debug,
         # The engine measures an icon font's height with the space glyph, so
         # every subset keeps it, as flutter_tools' web icon shaking does.
@@ -909,11 +893,15 @@ def _flutter_web_bundle_impl(ctx):
     # Renderer WASM/JS files are under web-sdk/canvaskit/.
     web_sdk_files = ctx.attr._web_sdk[DefaultInfo].files.to_list() if ctx.attr._web_sdk else []
     flutter_js_file = None
+    flutter_js_map = None
     renderer_files = []
     for f in web_sdk_files:
-        # flutter.js is at web-sdk/flutter_js/flutter.js
+        # flutter.js is at web-sdk/flutter_js/flutter.js, and the source map
+        # its last line names beside it.
         if f.path.endswith("/flutter_js/flutter.js"):
             flutter_js_file = f
+        if f.path.endswith("/flutter_js/flutter.js.map"):
+            flutter_js_map = f
 
         # Renderer files are under web-sdk/canvaskit/.
         # Both canvaskit and skwasm WASM/JS files live in the canvaskit/ directory.
@@ -965,6 +953,19 @@ def _flutter_web_bundle_impl(ctx):
     # when it writes the config, path-mapped where the action is.
     template_refs = []
     template_inputs = [index_template, bootstrap_template]
+
+    # A WebAssembly build's config also carries dart2wasm's own check of the
+    # browser, as `_flutter.supportsDart2Wasm`, which flutter.js prefers to
+    # its built-in one, as `flutter build web --wasm` writes it.
+    if output_support_js:
+        shared_builtins["flutter_build_config"] = {
+            "value": build_config,
+            "assign": {
+                "target": "_flutter.supportsDart2Wasm",
+                "file": file_ref(template_refs, output_support_js),
+            },
+        }
+        template_inputs.append(output_support_js)
     if flutter_js_file:
         shared_builtins["flutter_js"] = {"file": file_ref(template_refs, flutter_js_file)}
         template_inputs.append(flutter_js_file)
@@ -1105,6 +1106,13 @@ def _flutter_web_bundle_impl(ctx):
     if flutter_js_file:
         _reserve(reserved, copies, refs, flutter_js_file, "flutter.js")
         engine_inputs.append(flutter_js_file)
+
+        # A browser's developer tools and error reporters ask for the source
+        # map flutter.js names, which `flutter build web` ships beside it.
+        if not flutter_js_map:
+            fail("%s: the web SDK has flutter_js/flutter.js but not the flutter_js/flutter.js.map it names." % ctx.label)
+        _reserve(reserved, copies, refs, flutter_js_map, "flutter.js.map")
+        engine_inputs.append(flutter_js_map)
 
     # Copy the renderer engine files (canvaskit/*.wasm, *.js, etc.) something
     # loads. Two things can: the default loader fetches the renderer from
@@ -1259,7 +1267,10 @@ def _flutter_web_bundle_impl(ctx):
         dump_info = depset([dump_info_file] if dump_info_file else []),
         # The renderers' symbol maps, for the engine this bundle runs.
         symbols = depset(symbol_files),
-        _validation = depset(linked.validation_outputs + version_checks, transitive = [import_checks["_validation"]]),
+        _validation = depset(
+            linked.validation_outputs + version_checks + plugin_warnings_validation(ctx, resolution),
+            transitive = [import_checks["_validation"]],
+        ),
     )))
 
     # What lets rules_dart's analysis check a web app: its `main` and `srcs`,
@@ -1826,7 +1837,7 @@ build knows which served file is a native module.
             allow_single_file = True,
         ),
         "_ddc_dart_sdk_js": attr.label(
-            default = Label("@flutter_web_sdk//:web-sdk/kernel/ddcLibraryBundle-canvaskit/dart_sdk.js"),
+            default = Label("@flutter_web_sdk//:web-sdk/kernel/ddc/canary/dart_sdk.js"),
             allow_single_file = True,
         ),
         "_ddc_module_loader_js": attr.label(
@@ -1851,6 +1862,10 @@ build knows which served file is a native module.
         "_bundle_tool_imports": attr.label(
             default = Label("//flutter/private/tools:bundle_app_imports"),
         ),
+        "_dart2js_tool": attr.label(
+            default = Label("//flutter/private/tools:dart2js.dart"),
+            allow_single_file = [".dart"],
+        ),
         "_web_template_tool": attr.label(
             default = Label("//flutter/private/tools:web_template.dart"),
             allow_single_file = [".dart"],
@@ -1861,7 +1876,7 @@ build knows which served file is a native module.
         ),
         "_agent_web_bridge_src": attr.label(
             doc = "Serves the agent extensions from a debug bundle, which has no VM service: the wrapper main publishes them for the dev tool to call over the browser's DevTools protocol.",
-            default = Label("//flutter/private/agent_extensions:web_bridge.dart"),
+            default = Label("//flutter/private/dev_tool_support:web_bridge.dart"),
             allow_single_file = [".dart"],
         ),
     }),

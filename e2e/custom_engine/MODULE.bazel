@@ -10,7 +10,7 @@ engine build. `//tools/dev_tool/test/e2e:custom_engine_e2e_test.dart` drives it.
 module(name = "rules_flutter_custom_engine")
 
 bazel_dep(name = "rules_flutter", version = "0.0.0")
-bazel_dep(name = "rules_dart", version = "0.9.1")
+bazel_dep(name = "rules_dart", version = "0.10.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "apple_support", version = "2.12.0")
 bazel_dep(name = "rules_apple", version = "5.4.0")
@@ -26,32 +26,59 @@ local_path_override(
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 
-# The release: what a build gets when it names no SDK.
-flutter.toolchain(flutter_version = "3.47.9")
+# The release, which a build gets with --@rules_flutter//flutter:sdk=flutter.
+flutter.toolchain(flutter_version = "3.50.0")
 
-# SDKs whose checkout is the stand-in below. Chosen per build with
-# --@rules_flutter//flutter:sdk=<name>.
-flutter.toolchain(
+# The checkout's framework and the engine built in it, as README.md declares a
+# local checkout; the checkout is the stand-in below. What a build gets when it
+# names no SDK.
+flutter.checkout(
     name = "local",
-    engine = "@local_engine",
-    framework = "@local_framework",
+    checkout = "@fake_checkout//:checkout/CHECKOUT",
 )
+flutter.use_sdk(name = "local")
 
-# The same checkout, but with a gen_snapshot of another Dart: the build must
-# refuse it, naming both.
-flutter.toolchain(
+# The SDKs below are chosen per build with --@rules_flutter//flutter:sdk=<name>.
+# A checkout given the way a developer gives it, with
+# --repo_env=FLUTTER_CHECKOUT. Not set, the repositories still load.
+flutter.checkout(name = "env_checkout")
+
+# A checkout's halves, declared apart: the same checkout, but with a
+# gen_snapshot of another Dart. The build must refuse it, naming both.
+flutter.custom_sdk(
     name = "mismatched",
     engine = "@mismatched_engine",
     framework = "@mismatched_framework",
+    hosts = ["host"],
 )
 
-# A checkout whose path is given the way a developer gives it: with
-# --repo_env=FLUTTER_CHECKOUT and --repo_env=FLUTTER_ENGINE. Not set, the
+# A checkout's framework over the release engine: its Material fonts are the
+# ones the framework names. The second stand-in's, so that no other SDK shares
+# its packages.
+flutter.custom_framework(
+    name = "framework_only",
+    flutter_version = "3.50.0",
+    framework = "@mismatched_framework",
+)
+
+# A release's framework over the stand-in checkout's engine: the framework's
+# packages and dev root are the release's, the engine and its gen_snapshot the
+# checkout's.
+flutter.custom_engine(
+    name = "engine_only",
+    engine = "@stand_in_engine",
+    flutter_version = "3.50.0",
+    hosts = ["host"],
+)
+
+# A checkout's halves whose paths are given the way a developer gives them:
+# with --repo_env=FLUTTER_CHECKOUT and --repo_env=FLUTTER_ENGINE. Not set, the
 # repositories still load.
-flutter.toolchain(
+flutter.custom_sdk(
     name = "env",
     engine = "@env_engine",
     framework = "@env_framework",
+    hosts = ["host"],
 )
 use_repo(
     flutter,
@@ -93,6 +120,7 @@ use_repo(
     "flutter_stock_engine",
     "flutter_stock_ios_engine",
     "flutter_stock_ios_engine_debug",
+    "flutter_stock_sky_engine",
     "flutter_stock_web_sdk",
     "flutter_web_sdk",
     "flutter_windows-x64",
@@ -148,10 +176,12 @@ bazel_dep(name = "hermetic_android_toolchains", version = "0.5.0", dev_dependenc
 
 android = use_extension("@hermetic_android_toolchains//:extensions.bzl", "android", dev_dependency = True)
 
-# The Android platform the app compiles against, and the build tools.
+# The Android platform the app compiles against, and the build tools: those
+# of a `flutter create` app (Flutter's `compileSdkVersion`), which the Android
+# Gradle plugin of the Gradle-built host app (add_to_app_host/android) needs.
 android.sdk(
-    build_tools_version = "35.0.0",
-    version = "35",
+    build_tools_version = "36.0.0",
+    version = "36",
 )
 
 # The NDK CC toolchain, used for native and FFI deps built for Android and
@@ -188,29 +218,55 @@ register_toolchains(
     dev_dependency = True,
 )
 
+# The Gradle-built host app of add_to_app_host/android builds offline, from
+# what these pin: the Gradle distribution its Android Gradle plugin needs (the
+# version and plugin `flutter create` writes), and a Maven repository of every
+# artifact the build resolves but the engine's, which the module's repository
+# carries, from the lock
+# `bazel run --config=deep //:record_gradle_host_repository` writes. Its JDK is
+# the Java runtime .bazelrc names, and its Android SDK and NDK the ones above.
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "gradle",
+    build_file_content = """
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "lib/agents/gradle-instrumentation-agent-9.3.1.jar",
+    "lib/gradle-gradle-cli-main-9.3.1.jar",
+])
+
+filegroup(
+    name = "distribution",
+    srcs = glob(["**"], exclude = ["BUILD.bazel", "REPO.bazel"]),
+)
+""",
+    sha256 = "b266d5ff6b90eada6dc3b20cb090e3731302e553a27c5d3e4df1f0d76beaff06",
+    strip_prefix = "gradle-9.3.1",
+    url = "https://services.gradle.org/distributions/gradle-9.3.1-bin.zip",
+)
+
+gradle_offline_repository = use_repo_rule("@rules_flutter//tools/e2e_testing:gradle_offline_repository.bzl", "gradle_offline_repository")
+
+gradle_offline_repository(
+    name = "gradle_host_maven",
+    lock = "//:add_to_app_host/android/gradle_repository.json",
+)
+
 fake_checkout = use_repo_rule("//:fake_checkout.bzl", "fake_checkout")
 
 fake_checkout(name = "fake_checkout")
 
 fake_checkout(
     name = "fake_checkout_mismatched",
-    gen_snapshot_flutter_version = "3.47.5",
+    gen_snapshot_mismatch = True,
     web_kernel_format_mismatch = True,
 )
 
 local_framework = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_framework")
 
 local_engine = use_repo_rule("@rules_flutter//flutter:local_sdk.bzl", "flutter_local_engine")
-
-local_framework(
-    name = "local_framework",
-    checkout = "@fake_checkout//:checkout/CHECKOUT",
-)
-
-local_engine(
-    name = "local_engine",
-    src = "@fake_checkout//:checkout/engine/src/ENGINE_SRC",
-)
 
 local_framework(
     name = "mismatched_framework",
@@ -222,6 +278,23 @@ local_engine(
     src = "@fake_checkout_mismatched//:checkout/engine/src/ENGINE_SRC",
 )
 
+local_engine(
+    name = "stand_in_engine",
+    src = "@fake_checkout//:checkout/engine/src/ENGINE_SRC",
+)
+
 local_framework(name = "env_framework")
 
 local_engine(name = "env_engine")
+
+# Explicit Clang modules (.bazelrc) precompile the SDK's system modules. Xcode
+# 27.2's SDKs ship private modules whose Swift interfaces do not compile.
+system_sdk = use_extension("@rules_swift//swift:extensions.bzl", "system_sdk", dev_dependency = True)
+system_sdk.configure_sdks(exclude_modules = {
+    "MacOSX": ["MobileGestaltPrivate"],
+    "iPhoneOS": ["MobileGestaltPrivate"],
+    "iPhoneSimulator": [
+        "CoreAudio_Private",
+        "MobileGestaltPrivate",
+    ],
+})

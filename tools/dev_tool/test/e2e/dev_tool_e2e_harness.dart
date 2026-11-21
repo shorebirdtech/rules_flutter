@@ -67,22 +67,61 @@ String get devToolBin {
   return p.join(Directory.current.path, 'bin', 'flutter_bazel.dart');
 }
 
-/// Resolves the absolute path to an e2e workspace.
-String e2eWorkspace(String name) {
-  return p.normalize(p.join(Directory.current.path, '..', '..', 'e2e', name));
+/// An app under test: the Bazel package [package] of the e2e module [module].
+///
+/// A test names its app once, as a constant, and derives from it every path,
+/// working directory and label that belongs to that app. Nothing else in a
+/// test spells out where the app lives, so moving an app (into a package of a
+/// module that holds several) changes the constant and no other line.
+///
+/// Two directories are involved and they differ once [package] is not empty:
+///
+///  * [moduleRoot] is where Bazel runs and where the dev tool is started. It
+///    holds the `MODULE.bazel` and is the unit [editableWorkspace] copies.
+///  * [root] is the app's own directory inside it, the base of the app's
+///    source paths (`lib/main.dart`) and of its targets.
+class E2eApp {
+  /// The app in the package [package] of the module `e2e/<module>`.
+  const E2eApp(this.module, [this.package = '']);
+
+  /// The module's directory name under `e2e/`.
+  final String module;
+
+  /// The app's package within [module], without `//`. Empty for the module's
+  /// root package.
+  final String package;
+
+  /// Absolute path of the module, the directory Bazel and the dev tool run in.
+  ///
+  /// Assumes tests are run from the `tools/dev_tool/` directory.
+  String get moduleRoot =>
+      p.normalize(p.join(Directory.current.path, '..', '..', 'e2e', module));
+
+  /// Absolute path of the app's directory: [moduleRoot] joined with [package].
+  String get root => p.normalize(p.join(moduleRoot, package));
+
+  /// The label of [target] (`:app`, or a bare `app`) in the app's package:
+  /// `//:app` when [package] is empty, `//<package>:app` otherwise.
+  String label(String target) =>
+      '//$package:${target.startsWith(':') ? target.substring(1) : target}';
+
+  @override
+  String toString() => '//$package of e2e/$module';
 }
 
-/// The repo root, from a test process whose cwd is `tools/dev_tool/`.
-String get _repoRoot => p.normalize(p.join(Directory.current.path, '..', '..'));
+/// The absolute path of the repository root, from a test process whose cwd is
+/// `tools/dev_tool/`.
+String get repositoryRoot =>
+    p.normalize(p.join(Directory.current.path, '..', '..'));
 
 /// Resolves the absolute path to the bazel-built dev_tool binary.
 ///
 /// This is the binary users get: the AOT `dart_binary`
 /// `//tools/dev_tool:flutter_bazel` (`compile_mode = "exe"`). Everything the
 /// shipped tool does that `dart run` cannot — resolving bundled helpers out of
-/// its runfiles tree (the screenshot tools), running with `RUNFILES_SOURCE_REPO`
-/// compiled in — only exists on this path, so it is what the e2e suite drives
-/// by default.
+/// its runfiles tree (the screenshot tools), running with
+/// `RUNFILES_SOURCE_REPO` compiled in — only exists on this path, so it is what
+/// the e2e suite drives by default.
 ///
 /// Throws a [StateError] when the binary isn't present. Callers should reach
 /// it through [ensureBuiltDevTool], which builds it first.
@@ -92,7 +131,7 @@ String get bazelBuiltDevTool {
   // "not found ... Run: bazel build" on Windows immediately *after* a
   // successful build, which reads as a build failure and is not one.
   final name = Platform.isWindows ? 'flutter_bazel.exe' : 'flutter_bazel';
-  final path = p.join(_repoRoot, 'bazel-bin', 'tools', 'dev_tool', name);
+  final path = p.join(repositoryRoot, 'bazel-bin', 'tools', 'dev_tool', name);
   if (!File(path).existsSync()) {
     throw StateError(
       'Bazel-built dev_tool not found at $path. '
@@ -127,12 +166,12 @@ Future<String> _buildDevTool() async {
   final result = await Process.run(
     'bazel',
     ['build', label],
-    workingDirectory: _repoRoot,
+    workingDirectory: repositoryRoot,
   );
   if (result.exitCode != 0) {
     throw StateError(
       'Failed to build the shipped dev tool.\n'
-      '  cd $_repoRoot && bazel build $label\n'
+      '  cd $repositoryRoot && bazel build $label\n'
       '  exit code: ${result.exitCode}\n'
       '${result.stdout}${result.stderr}',
     );
@@ -156,8 +195,9 @@ class DevToolProcess {
   late final StreamSubscription _stdoutSub;
   late final StreamSubscription _stderrSub;
 
-  /// Id [dispose]'s `daemon.shutdown` carries. Deliberately far from the small ids
-  /// tests hand-pick, so its response can never be mistaken for one of theirs.
+  /// Id [dispose]'s `daemon.shutdown` carries. Deliberately far from the small
+  /// ids tests hand-pick, so its response can never be mistaken for one of
+  /// theirs.
   static const _stopCommandId = 999000;
 
   /// Whether the process has exited. Read by [dispose] so it neither writes to
@@ -177,10 +217,10 @@ class DevToolProcess {
           //
           // A prefix is tolerated but still recorded. When the tool is launched
           // via `dart run` (rather than the compiled binary), the Dart SDK can
-          // print "Running build hooks..." with no trailing newline, so the first
-          // envelope arrives glued to it. Discarding the whole line loses
-          // `daemon.connected` — the event every machine-protocol test waits for
-          // first — which reads as an unexplained timeout.
+          // print "Running build hooks..." with no trailing newline, so the
+          // first envelope arrives glued to it. Discarding the whole line loses
+          // `daemon.connected` — the event every machine-protocol test waits
+          // for first — which reads as an unexplained timeout.
           final start = line.indexOf('[{');
           if (start >= 0 && line.endsWith('}]')) {
             if (start > 0) nonProtocolStdoutLines.add(line.substring(0, start));
@@ -513,8 +553,8 @@ class DevToolProcess {
   /// express a bound on their own: `HttpClient`'s `idleTimeout` governs pooled
   /// *idle* connections and `connectionTimeout` only the connect, so an
   /// accepted request whose handler never returns waits forever. That is
-  /// precisely the shape that strands a dev tool and the app it launched, since a
-  /// `package:test` timeout leaves the abandoned body parked on the wait and
+  /// precisely the shape that strands a dev tool and the app it launched, since
+  /// a `package:test` timeout leaves the abandoned body parked on the wait and
   /// never runs the teardown that would have stopped them.
   ///
   /// [what] names the thing being asked for, the way the protocol waits name
@@ -1042,25 +1082,29 @@ class DevToolProcess {
   /// to call twice or after the run already ended.
   Future<void> dispose() async {
     final endedOnItsOwn = await _requestStop();
-    // Before the kill, because the kill is what removes the evidence. This guard
-    // has gone red four times; the three that were diagnosed were diagnosed by
-    // sampling the live process, and the fourth — intermittent, browser runs
-    // only — is still open precisely because every occurrence so far was killed
-    // before anyone could look at it.
+    // Before the kill, because the kill is what removes the evidence. This
+    // guard has gone red four times; the three that were diagnosed were
+    // diagnosed by sampling the live process, and the fourth — intermittent,
+    // browser runs only — is still open precisely because every occurrence so
+    // far was killed before anyone could look at it.
     final wedgeEvidence = endedOnItsOwn ? null : await _captureWedgeEvidence();
     await _stdoutSub.cancel();
     await _stderrSub.cancel();
     await _eventController.close();
     await _stderrController.close();
     if (!_exited) {
-      process.kill();
-      await process.exitCode.timeout(
-        const Duration(seconds: 5),
-        onTimeout: () {
-          process.kill(ProcessSignal.sigkill);
-          return -9;
-        },
-      );
+      // A second signal before SIGKILL: the first waits for a teardown that
+      // is already stuck, the second exits at once and kills the children the
+      // tool started on its way out. SIGKILL runs no code, so a tool killed
+      // that way leaves its DTD, its `adb logcat` and its app running.
+      for (final signal in [ProcessSignal.sigterm, ProcessSignal.sigterm]) {
+        process.kill(signal);
+        if (await _exitsWithin(const Duration(seconds: 5))) break;
+      }
+      if (!_exited) {
+        process.kill(ProcessSignal.sigkill);
+        await process.exitCode;
+      }
     }
     // Every e2e test is a lifetime guard, not just the two that say so:
     // swallowing the timeout and killing would leave a tool that can no longer
@@ -1084,13 +1128,13 @@ class DevToolProcess {
 
   /// What is keeping the tool alive, written down while it still is.
   ///
-  /// `sample` is the tool that answers this: it attaches to the live process for
-  /// a few seconds and reports every thread's stacks, which is how each of the
-  /// three diagnosed instances of this failure was found — a signal watch, a
-  /// DWDS socket, a VM-service re-dial. `lsof` answers the other half, naming a
-  /// socket or file the process still holds. Neither can be run after the kill,
-  /// and a failure message without them leaves the next occurrence exactly as
-  /// undiagnosable as the last.
+  /// `sample` is the tool that answers this: it attaches to the live process
+  /// for a few seconds and reports every thread's stacks, which is how each of
+  /// the three diagnosed instances of this failure was found — a signal watch,
+  /// a DWDS socket, a VM-service re-dial. `lsof` answers the other half, naming
+  /// a socket or file the process still holds. Neither can be run after the
+  /// kill, and a failure message without them leaves the next occurrence
+  /// exactly as undiagnosable as the last.
   ///
   /// Never throws and never replaces the failure it decorates: a capture that
   /// could not run says so and the timeout is still reported. Paths rather than
@@ -1168,6 +1212,10 @@ class DevToolProcess {
   /// The two tests that assert the exit *deliberately* keep their own tighter
   /// bounds; this is the backstop under every other test.
   static const _stopBound = Duration(seconds: 60);
+
+  /// Whether the tool exits within [bound].
+  Future<bool> _exitsWithin(Duration bound) =>
+      process.exitCode.then((_) => true).timeout(bound, onTimeout: () => false);
 
   /// Send `daemon.shutdown` and wait for the process to exit.
   ///
@@ -1305,8 +1353,8 @@ Future<DevToolProcess> attachDevTool({
 );
 
 /// Cache of resolved toolchain Darts, keyed by workspace. Resolution costs a
-/// `bazel info` (and on a cold repo a `bazel fetch`) subprocess, and one e2e
-/// file starts many runs against the same workspace.
+/// `bazel info` (and on a cold repo a `bazel build --nobuild`) subprocess, and
+/// one e2e file starts many runs against the same workspace.
 final Map<String, String> _hermeticDartByWorkspace = {};
 
 /// The `dart` the dev tool itself runs on: the Flutter toolchain's, resolved
@@ -1665,10 +1713,10 @@ final class AndroidProbeFailed extends AndroidDeviceProbe {
 ///
 /// Only the envelope every capture path here emits is supported — 8-bit,
 /// non-interlaced, colour type 2 (RGB) or 6 (RGBA), which covers `adb
-/// screencap`, the emulator console, `devicectl device capture screenshot`, CDP and the
-/// desktop helpers. Anything else throws naming what it found rather than being
-/// waved through: a decoder that quietly handles half of what it is given is
-/// the byte threshold again in a new costume.
+/// screencap`, the emulator console, `devicectl device capture screenshot`, CDP
+/// and the desktop helpers. Anything else throws naming what it found rather
+/// than being waved through: a decoder that quietly handles half of what it is
+/// given is the byte threshold again in a new costume.
 class DecodedPng {
   final int width;
   final int height;

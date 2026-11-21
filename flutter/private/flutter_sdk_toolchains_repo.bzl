@@ -10,9 +10,11 @@ downloads: the slices an analysed toolchain names are the files fetched.
 
 load("//flutter/private:engine_helpers.bzl", "platform_to_arch", "platform_to_os")
 load("//flutter/private:engine_labels.bzl", "engine_label", "gen_snapshot_label", "host_tools_label", "kernel_label", "mode_select", "native_target")
-load("//flutter/private:sdk_defines.bzl", "custom_sdk_dart_defines", "sdk_dart_defines")
+load("//flutter/private:sdk_defines.bzl", "RELEASE_CHANNEL", "RELEASE_GIT_URL", "custom_sdk_dart_defines", "sdk_dart_defines", "sdk_engine_revision")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS")
+
+visibility("//flutter/...")
 
 def _release_kernel(engine):
     return """select({{
@@ -158,31 +160,42 @@ def _sdk_defines(repository_ctx):
 
     The release's pieces are versions.bzl's; a framework or engine of the
     root module's choosing says what it is in `flutter_framework.json` and
-    `flutter_engine.json`. Where its path is not set there is nothing to say,
-    and the toolchain fails when used.
+    `flutter_engine.json`. Where the framework cannot be used there is
+    nothing to say, and the toolchain fails when used.
     """
     version = repository_ctx.attr.version
     meta = FLUTTER_VERSIONS.get(version) if version else None
     framework = _read_json(repository_ctx, repository_ctx.attr.framework_json_file)
     engine = _read_json(repository_ctx, repository_ctx.attr.engine_json_file)
-    if framework.get("unset") or engine.get("unset"):
+    if framework.get("unusable"):
         return []
     if not framework and not engine:
         return sdk_dart_defines(version)
     return custom_sdk_dart_defines(
         framework.get("version") or version,
-        framework["commit"] if framework else (meta.framework_revision if meta else ""),
-        engine["engine_revision"] if "engine_revision" in engine else (meta.engine_revision if meta else ""),
+        framework.get("commit", "") if framework else (meta.framework_revision if meta else ""),
+        _engine_revision(repository_ctx),
         engine["dart_version"] if "dart_version" in engine else (meta.dart_version if meta else ""),
+        framework.get("channel", RELEASE_CHANNEL),
+        framework.get("repository_url", RELEASE_GIT_URL),
     )
 
+def _engine_revision(repository_ctx):
+    """The engine's commit: what its `flutter_engine.json` says, or the release's."""
+    engine = _read_json(repository_ctx, repository_ctx.attr.engine_json_file)
+    return sdk_engine_revision(engine, repository_ctx.attr.version)
+
 def _flutter_sdk_toolchains_repo_impl(repository_ctx):
+    # The version is the framework's, as `flutter --version` reports it and
+    # as `FLUTTER_VERSION` tells the program: a framework source says it in
+    # `flutter_framework.json`, and the release's is `version`.
+    framework = _read_json(repository_ctx, repository_ctx.attr.framework_json_file)
     repository_ctx.file("BUILD.bazel", sdk_toolchains_build_content(
         sdk_defines = _sdk_defines(repository_ctx),
         engine = repository_ctx.attr.engine,
         sdk = repository_ctx.attr.sdk,
-        version = repository_ctx.attr.version,
-        engine_revision = repository_ctx.attr.engine_revision,
+        version = framework.get("version") or repository_ctx.attr.version,
+        engine_revision = _engine_revision(repository_ctx),
         material_fonts = repository_ctx.attr.material_fonts,
         sysroot_prefix = repository_ctx.attr.sysroot_prefix,
         framework_json = repository_ctx.attr.framework_json,
@@ -194,8 +207,7 @@ flutter_sdk_toolchains_repo = repository_rule(
     attrs = {
         "engine": attr.string(doc = "The SDK's engine repository, as a label prefix: `@repo`.", mandatory = True),
         "sdk": attr.string(mandatory = True),
-        "version": attr.string(doc = "The Flutter version the SDK reports."),
-        "engine_revision": attr.string(doc = "The engine revision the SDK reports."),
+        "version": attr.string(doc = "The release the SDK takes what its sources do not give from. Its version is the framework source's, when it has one."),
         "material_fonts": attr.string(doc = "Label of the Material icons font; `{host}` stands for the host platform.", mandatory = True),
         "sysroot_prefix": attr.string(doc = "Prefix of the Linux sysroot repositories.", mandatory = True),
         "framework_json_file": attr.label(doc = "The `flutter_framework.json` itself, which says what the framework is.", allow_single_file = True),

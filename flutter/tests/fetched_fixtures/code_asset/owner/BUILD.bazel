@@ -1,0 +1,61 @@
+"""The packages that own the fixture's code assets: one package built by a
+Flutter package rule and by a Dart package rule that knows nothing of Flutter,
+a rule that forwards a package under an attribute of its own name, and one that
+makes its asset with no target of its own. Each reaches its own application
+only, so sharing a root is not a conflict.
+`//flutter/tests/code_asset_fixture/bare_owner` is the bare control, and
+`owner_twin/` the first package again, its asset bare."""
+
+load("@rules_dart//dart:defs.bzl", "dart_library")
+
+# A fetcher's declaration, as a pub hub's generated BUILD file loads it.
+# buildifier: disable=bzl-visibility
+load("@rules_dart//dart/private:fetched_package_metadata.bzl", "fetched_package_metadata")
+load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+load("@rules_flutter//flutter/tests/code_asset_fixture:forwarding_package.bzl", "forwarding_package")
+load("@rules_flutter//flutter/tests/code_asset_fixture:inline_asset_package.bzl", "inline_asset_package")
+load("@rules_flutter//flutter/tests/code_asset_fixture:stand_in_code_asset.bzl", "stand_in_code_asset")
+
+package(default_visibility = [
+    "@rules_flutter//flutter/tests/code_asset_fixture:__pkg__",
+    "@rules_flutter//flutter/tests/code_asset_fixture/test:__pkg__",
+])
+
+fetched_package_metadata(
+    name = "pubspec-metadata",
+    package_name = "code_asset_owner",
+    code_assets = ["@rules_flutter//flutter/tests/code_asset_fixture:wrapped"],
+    # Fetched alike, as two pub hubs each fetch one package, so `owner_twin/`
+    # is this package too.
+    purl = "pkg:pub/code_asset_owner@1.0.0",
+    version = "1.0.0",
+)
+
+dart_library(
+    name = "dart_owner",
+    srcs = ["lib/owner.dart"],
+    package = ":pubspec-metadata",
+)
+
+flutter_plugin(
+    name = "plugin_owner",
+    srcs = ["lib/owner.dart"],
+    package = ":pubspec-metadata",
+)
+
+forwarding_package(
+    name = "forwarded_owner",
+    exports = [":dart_owner"],
+)
+
+stand_in_code_asset(
+    name = "inline_asset",
+    asset_id = "package:inline_owner/bridge",
+    library = "@rules_flutter//flutter/tests/code_asset_fixture:library",
+)
+
+inline_asset_package(
+    name = "inline_owner",
+    package_name = "inline_owner",
+    code_asset = ":inline_asset",
+)

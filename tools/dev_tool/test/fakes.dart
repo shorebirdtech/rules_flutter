@@ -156,6 +156,34 @@ Map<String, dynamic> decodeSingleEvent(BufferSink sink) {
 }
 
 /// A controllable fake [Process] for testing.
+/// A process start whose every process exits 0 at once, having said nothing:
+/// a helper a test needs to succeed and has nothing to ask of.
+Future<Process> exitsAtOnce(String executable, List<String> arguments) async =>
+    FakeProcess()..complete(0);
+
+/// A process start whose processes answer as [run] does: what a test written
+/// against `Process.run` hands a device that starts the same command instead.
+///
+/// Each process says what [run]'s result says and exits with its code once
+/// something reads it, and never exits while [run] has not answered.
+Future<Process> Function(String executable, List<String> arguments) answeringAs(
+  Future<ProcessResult> Function(String executable, List<String> arguments) run,
+) => (executable, arguments) async {
+  final process = FakeProcess();
+  unawaited(
+    Future.wait([run(executable, arguments), process.outputAttached]).then((
+      answered,
+    ) {
+      final result = answered.first as ProcessResult;
+      if ('${result.stdout}'.isNotEmpty)
+        process.emitStdoutRaw('${result.stdout}');
+      if ('${result.stderr}'.isNotEmpty) process.emitStderr('${result.stderr}');
+      process.complete(result.exitCode);
+    }),
+  );
+  return process;
+};
+
 class FakeProcess implements Process {
   final Completer<void> _stdoutAttached = Completer<void>();
   final Completer<void> _stderrAttached = Completer<void>();
@@ -842,7 +870,7 @@ class FakeVmService implements VmService {
   ///
   /// This is what an app *refusing* looks like from the client side. A handler
   /// that returns `ServiceExtensionResponse.error` — every `_err` in
-  /// `agent_extensions/agent.dart`, so every "no widget matched" and every
+  /// `dev_tool_support/agent.dart`, so every "no widget matched" and every
   /// `waitFor` timeout — crosses the VM service as a JSON-RPC error, and
   /// `package:vm_service` completes the call with a throw rather than a
   /// response. A fake that can only answer cannot stand in for that.

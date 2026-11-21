@@ -120,7 +120,7 @@ class AttachCommand {
   Future<void> execute() async {
     final debugUrls = _results['debug-url'] as List<String>;
     final target = _results['target'] as String;
-    final userBuildArgs = userBazelFlags(
+    final sessionBuildArgs = devToolBazelFlags(
       configs: _results['config'] as List<String>,
       buildArgs: _results['build-arg'] as List<String>,
     );
@@ -169,6 +169,9 @@ class AttachCommand {
     // the build-info record and hard-fails the run when the app lacks it.
     host.registerAgentCommands();
     host.registerBuildInfo();
+    // Held until the pipeline below has settled its gate: see
+    // [ReloadPipeline.holdForStartup].
+    final endStartup = pipeline.holdForStartup();
 
     SourceWatcher? sourceWatcher;
     // Everything from resolving the workspace to the end of the session is
@@ -201,6 +204,7 @@ class AttachCommand {
           accepts: (path) => isDartSource(path) || pipeline.watchesAsset(path),
         );
         await sourceWatcher.start();
+        pipeline.watcher = sourceWatcher;
         // A dead watcher does not end the run — an explicit `app.hotReload`
         // still works — but it silently ends `--watch`, so it has to be said.
         // package:watcher closes itself permanently on a post-ready end or any
@@ -348,7 +352,7 @@ class AttachCommand {
           // DevTools process, and the first-frame wait, whose timer would
           // otherwise hold the tool up after `daemon.shutdown` was answered.
           session.stopWaitingForFirstFrame();
-          session.devToolsProcess?.kill();
+          await session.stopDevTools();
         });
       }
 
@@ -359,7 +363,7 @@ class AttachCommand {
         workspace: workspace,
         runBazel: host.bazel.run,
         // The configuration the pipeline below builds in.
-        buildFlags: ['-c', 'dbg', ...userBuildArgs],
+        buildFlags: ['-c', 'dbg', ...sessionBuildArgs],
       );
 
       // Registered once the toolchain's `dart` is known, which is after the
@@ -402,7 +406,7 @@ class AttachCommand {
         workspace: workspace,
         target: target,
         configDevice: sessions.first.device,
-        sessionBuildArgs: userBuildArgs,
+        sessionBuildArgs: sessionBuildArgs,
         host: host,
         pipeline: pipeline,
         logger: logger,
@@ -421,6 +425,7 @@ class AttachCommand {
           'Hot reload is not available for this session.',
         );
       }
+      endStartup();
 
       // After assembly, for the reason `run` starts it there: a driver reads
       // this channel appearing as "the run is ready", and an edit that lands
@@ -456,10 +461,11 @@ class AttachCommand {
       }
       await runInteractiveSession(
         sessions: sessions,
-        frontendServer: pipeline.frontendServer,
+        endRun: host.performCleanup,
         protocol: protocol,
         watcher: sourceWatcher,
         commandRunner: commandRunner,
+        onFailure: host.fail,
         devToolsEnabled: devToolsEnabled,
         dartExecutable: toolchain.dart,
         // Attach exists to connect a VM service and stand a compiler up.
@@ -478,6 +484,7 @@ class AttachCommand {
       // send its answer before the transports close under it.
       await host.shutdownRequested.future;
     } finally {
+      endStartup();
       // The VM services outlive this command — the apps were started
       // externally and keep running — so their stream subscriptions are ours
       // to cancel. Done here rather than in performCleanup because an

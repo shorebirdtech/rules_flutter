@@ -13,15 +13,17 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
-
-import '../lib/attach_command.dart';
-import '../lib/build_command.dart';
-import '../lib/chrome_profile.dart';
-import '../lib/cli_args.dart';
-import '../lib/devices_command.dart';
-import '../lib/logging.dart';
-import '../lib/run_command.dart' show RunCommand, DevToolException;
-import '../lib/runfiles_helper.dart' show pinProcessLocation;
+import 'package:flutter_bazel_dev_tool/attach_command.dart';
+import 'package:flutter_bazel_dev_tool/build_command.dart';
+import 'package:flutter_bazel_dev_tool/child_processes.dart';
+import 'package:flutter_bazel_dev_tool/chrome_profile.dart';
+import 'package:flutter_bazel_dev_tool/cli_args.dart';
+import 'package:flutter_bazel_dev_tool/devices_command.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/run_command.dart'
+    show RunCommand, DevToolException;
+import 'package:flutter_bazel_dev_tool/runfiles_helper.dart'
+    show pinProcessLocation;
 
 void main(List<String> args) {
   // The VM ends the process on an error nothing caught, and nothing between
@@ -29,6 +31,7 @@ void main(List<String> args) {
   // their profiles. The exit is the same one the VM would have made.
   runZonedGuarded(() => _run(args), (error, stack) {
     ChromeProfile.releaseAllNow();
+    ChildProcesses.killAllNow();
     stderr.writeln('Unhandled exception:\n$error\n$stack');
     exit(255);
   });
@@ -61,19 +64,26 @@ Future<void> _run(List<String> args) async {
     }
     requireNoPositionalArgs(command.name!, command.rest);
 
-    switch (command.name) {
-      case 'build':
-        await BuildCommand(command).execute();
-      case 'run':
-        await RunCommand(command).execute();
-      case 'attach':
-        await AttachCommand(command).execute();
-      case 'devices':
-        await DevicesCommand(command).execute();
-      default:
-        stderr.writeln('Unknown command: ${command.name}');
-        _printUsage(parser);
-        exit(1);
+    try {
+      switch (command.name) {
+        case 'build':
+          await BuildCommand(command).execute();
+        case 'run':
+          await RunCommand(command).execute();
+        case 'attach':
+          await AttachCommand(command).execute();
+        case 'devices':
+          await DevicesCommand(command).execute();
+        default:
+          stderr.writeln('Unknown command: ${command.name}');
+          _printUsage(parser);
+          exit(1);
+      }
+    } finally {
+      // The command has released what it owns, however it ended; a child
+      // still running now is one its teardown never reached, such as a spawn
+      // that was still starting when the teardown ran.
+      ChildProcesses.killAllNow(report: true);
     }
   } on DevToolException catch (e) {
     // Through the logger rather than straight to stderr: under

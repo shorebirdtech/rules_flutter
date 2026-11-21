@@ -114,6 +114,42 @@ void main() {
         expect(result.stdout, contains('@pubhub//:$name'));
       }
     });
+
+    /// What an SDK package needs of the locked packages depends on the SDK
+    /// the build uses, which `flutter.use_sdk` or the flag chooses and the
+    /// lock's reader cannot know. So a lock that holds `test_api` at another
+    /// version than the release's `flutter_test` pins (right for another SDK)
+    /// loads. Fetching that release's `flutter_test` is what refuses it
+    /// (`sdk_source_e2e_test.dart`).
+    ///
+    /// `test_api` is pub.dev's, as in rules_flutter's own lock, which the
+    /// build reads too: one package comes from one registry. Loading the hub
+    /// fetches no archive, so the digest only has to be well formed.
+    test('is not held to the release\'s pins when the lock is read', () async {
+      final ws = await PubInputsFixture(
+        hosted: [HostedPackage('good')],
+        extraLockEntries:
+            '''
+  test_api:
+    dependency: "direct dev"
+    description:
+      name: test_api
+      sha256: "${'0' * 64}"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.99"
+  flutter_test:
+    dependency: "direct dev"
+    description: flutter
+    source: sdk
+    version: "0.0.0"
+''',
+      ).materialize();
+      final result = await ws.query('@pubhub//:all');
+      expect(result.succeeded, isTrue, reason: '$result');
+      expect(result.stdout, contains('@pubhub//:test_api'));
+      expect(result.stdout, contains('@pubhub//:flutter_test'));
+    });
   });
 
   group('a plugin overlay', () {
@@ -224,17 +260,17 @@ void main() {
       ws = await PubInputsFixture(
         hosted: [
           // Its only dependency is in a form the Gradle reader does not read.
-          androidPlugin('bom_plugin', {
+          androidPlugin('catalog_plugin', {
             'android/build.gradle':
-                'android {\n    namespace = "dev.example.bom_plugin"\n}\n'
+                'android {\n    namespace = "dev.example.catalog_plugin"\n}\n'
                 'dependencies {\n'
-                '    implementation platform("androidx.compose:compose-bom:2024.01.00")\n'
+                '    implementation(libs.androidx.browser)\n'
                 '}\n',
           }),
           HostedPackage('dart_only'),
         ],
         annotations: {
-          'bom_plugin': ['androidx_browser_browser'],
+          'catalog_plugin': ['androidx_browser_browser'],
           'dart_only': ['androidx_browser_browser'],
         },
       ).materialize();
@@ -243,8 +279,8 @@ void main() {
     test(
       'adds the artifact to the plugin Android library and its record',
       () async {
-        expect((await ws.loadSpoke('bom_plugin')).succeeded, isTrue);
-        final dir = await ws.spokeDirectory('bom_plugin');
+        expect((await ws.loadSpoke('catalog_plugin')).succeeded, isTrue);
+        final dir = await ws.spokeDirectory('catalog_plugin');
         final build = File(p.join(dir.path, 'android', 'BUILD.bazel'))
             .readAsStringSync();
         expect(
@@ -260,7 +296,7 @@ void main() {
           ['androidx_browser_browser'],
         );
         expect(
-          (await recordedMavenDeps(ws, 'bom_plugin')).unread,
+          (await recordedMavenDeps(ws, 'catalog_plugin')).unread,
           hasLength(1),
         );
       },

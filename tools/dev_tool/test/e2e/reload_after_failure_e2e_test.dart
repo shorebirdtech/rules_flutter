@@ -1,10 +1,15 @@
 @Tags(['e2e', 'macos'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
 import 'editable_workspace.dart';
+
+/// The app under test.
+const _app = E2eApp('codegen');
 
 /// End-to-end: a session survives a failed hot reload.
 ///
@@ -38,7 +43,7 @@ void main() {
     test(
       'a failed reload does not wedge the commands after it',
       () async {
-        final ws = await editableWorkspace('codegen');
+        final ws = await editableWorkspace(_app);
         final user = ws.file('lib/user.dart');
         final settings = ws.file('dep_part/lib/settings.dart');
         final userOrig = user.readAsStringSync();
@@ -191,6 +196,7 @@ void main() {
         );
       },
       timeout: const Timeout(Duration(minutes: 12)),
+      skip: !Platform.isMacOS ? 'macOS only' : null,
     );
   });
 }

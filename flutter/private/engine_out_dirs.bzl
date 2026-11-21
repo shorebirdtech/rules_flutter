@@ -7,6 +7,8 @@ name is only how the scan finds candidates: `args.gn` is the authority on what
 a directory holds.
 """
 
+visibility("//flutter/...")
+
 _MODES = ["debug", "profile", "release"]
 _CPUS = ["arm", "arm64", "x64", "x86", "riscv64", "loong64"]
 _OSES = ["host", "wasm", "mac", "ios", "android", "linux", "win", "fuchsia"]
@@ -112,15 +114,20 @@ def select_out_dir(candidates, os_names, mode, cpu, pins, sim = False):
         os_names: The target OS prefixes that can hold the slot.
         mode: The runtime mode.
         cpu: The CPU wanted.
-        pins: Out dir names the user chose (`FLUTTER_LOCAL_ENGINES`); empty for none.
+        pins: Out dir names the user chose (`FLUTTER_LOCAL_ENGINES`); empty for none. Only
+            those that fit the slot count.
         sim: Whether the slot is the iOS simulator's, which only `--simulator` out dirs serve.
 
     Returns:
         `struct(name, error)`: the chosen directory's name, or None and why not.
     """
     matches = [c.name for c in candidates if c.os in os_names and c.mode == mode and c.cpu == cpu and c.sim == sim]
-    if pins:
-        matches = [n for n in matches if n in pins]
+
+    # A pin chooses among the out dirs of the slots it fits; a slot it does
+    # not fit is chosen as without it.
+    pinned = [n for n in matches if n in pins]
+    if pinned:
+        matches = pinned
     if len(matches) == 1:
         return struct(name = matches[0], error = None)
     if not matches:
@@ -216,6 +223,10 @@ def link_files_into(repository_ctx, source, destination):
                 repository_ctx.symlink(entry, target + "/" + entry.basename)
     repository_ctx.watch_tree(source)
 
+# What `repository_os.arch` calls each CPU the out dirs are built for; any
+# other CPU is no machine, not an x64 one.
+_HOST_CPUS = {"aarch64": "arm64", "arm64": "arm64", "amd64": "x64", "x64": "x64", "x86_64": "x64"}
+
 # The machines whose out dirs can be read. `prebuilt` is the directory name
 # `flutter/prebuilts` uses for the machine's Dart SDK; `os_prefix` is the
 # machine's OS in an out dir name (`mac_release_arm64`).
@@ -226,6 +237,17 @@ _MACHINES = {
     ("linux", "x64"): struct(key = "linux-x64", os = "linux", arch = "x64", exe = "", prebuilt = "linux-x64", os_prefix = "linux"),
     ("windows", "x64"): struct(key = "windows-x64", os = "windows", arch = "x64", exe = ".exe", prebuilt = "windows-x64", os_prefix = "win"),
 }
+
+def unread_machine_message(os):
+    """Why no out dirs are read on the machine Bazel runs on, which `machine_of` does not know.
+
+    Args:
+        os: The machine's `repository_os`.
+
+    Returns:
+        The message.
+    """
+    return "The engine out dirs are read on macOS, Linux and Windows machines; this one is {} on {}.".format(os.name, os.arch)
 
 def machine_of(repository_ctx):
     """The machine that reads the out dirs, which is the host their `host_*` directories were built for.
@@ -242,5 +264,5 @@ def machine_of(repository_ctx):
     """
     name = repository_ctx.os.name.lower()
     os = "mac" if name.startswith("mac") else ("windows" if name.startswith("windows") else ("linux" if name.startswith("linux") else ""))
-    arch = "arm64" if repository_ctx.os.arch in ["aarch64", "arm64"] else "x64"
+    arch = _HOST_CPUS.get(repository_ctx.os.arch.lower(), "")
     return _MACHINES.get((os, arch))

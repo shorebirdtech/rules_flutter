@@ -156,6 +156,10 @@ def _golden_service(name, deps, srcs, test_config, application = None, package =
             srcs = srcs + [str(Label("//flutter/private/goldens:comparator.dart"))],
             test_config = test_config,
             deps = deps,
+            # Its `srcs` and `deps` are what the config may import, not what
+            # the service loads, so only the strict half of the import check
+            # applies.
+            features = ["-dart_unused_deps"],
             tags = ["manual"],
             testonly = True,
             visibility = ["//visibility:private"],
@@ -550,6 +554,7 @@ def flutter_web_integration_test(
         flaky = None,
         visibility = None,
         target_compatible_with = [],
+        use_local_canvaskit = True,
         **web_app_kwargs):
     """Runs a `package:integration_test` file in headless Chrome: the web app with the test as its program.
 
@@ -607,6 +612,10 @@ def flutter_web_integration_test(
         visibility: The test's visibility.
         target_compatible_with: The test's `target_compatible_with`. A host the pinned
             browser has no build for is incompatible whatever this says.
+        use_local_canvaskit: Whether the app loads its renderer from its own
+            bundle, as `flutter test --platform chrome` does, so the test needs
+            no network. False loads it from Google's CDN, as `flutter drive`
+            does by default.
         **web_app_kwargs: Passed to `flutter_web_app`: `web_dir`, `base_href`,
             and the rest. Not `testonly`.
     """
@@ -625,6 +634,7 @@ def flutter_web_integration_test(
     flutter_web_app(
         name = app,
         application = program,
+        use_local_canvaskit = use_local_canvaskit,
         **(private | web_app_kwargs)
     )
 
